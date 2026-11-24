@@ -271,6 +271,10 @@ struct OfflineMapView: View {
                                 Button("Start drive here") { findDestination(from: selectedPlace, mode: .driving) }
                             }
                         }
+                        if let attribution = map?.attribution, let license = map?.licenseURL {
+                            Link(attribution, destination: license)
+                                .font(.caption)
+                        }
                         Link("© OpenStreetMap contributors", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
                             .font(.caption)
                     }

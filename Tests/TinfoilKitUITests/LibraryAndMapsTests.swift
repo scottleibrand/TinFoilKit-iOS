@@ -177,6 +177,15 @@ final class LibraryAndMapsTests: XCTestCase {
     }
 
     func testImportsAndRemovesRegionalBundleFromFiles() throws {
+        try verifyRegionalBundleFromFiles(folderName: "Synthetic Regional Fixture", region: "Routing test fixture")
+    }
+
+    func testImportsAndRemovesRegionalBasemapFromFiles() throws {
+        try verifyRegionalBundleFromFiles(folderName: "Synthetic Regional Map Fixture", region: "Synthetic region",
+                                          attribution: "Tinfoil Kit synthetic basemap fixture")
+    }
+
+    private func verifyRegionalBundleFromFiles(folderName: String, region: String, attribution: String? = nil) throws {
         let app = XCUIApplication()
         app.launchArguments = ["-mapDownloadPolicy", "off"]
         app.launch()
@@ -193,7 +202,7 @@ final class LibraryAndMapsTests: XCTestCase {
 
         let remotePicker = XCUIApplication(bundleIdentifier: "com.apple.DocumentsApp")
         let picker = app.buttons["Open"].waitForExistence(timeout: 3) ? app : remotePicker
-        let fixture = picker.staticTexts["Synthetic Regional Fixture"].firstMatch
+        let fixture = picker.staticTexts[folderName].firstMatch
         if !fixture.waitForExistence(timeout: 3) {
             if picker.buttons["Browse"].exists { picker.buttons["Browse"].tap() }
             let local = picker.staticTexts["On My iPhone"].firstMatch
@@ -202,7 +211,7 @@ final class LibraryAndMapsTests: XCTestCase {
             if folder.waitForExistence(timeout: 4) { folder.tap() }
         }
         guard fixture.waitForExistence(timeout: 5) else {
-            throw XCTSkip("Copy a synthetic bundle directory named Synthetic Regional Fixture into Documents.")
+            throw XCTSkip("Copy a synthetic bundle directory named \(folderName) into Documents.")
         }
         fixture.tap()
         let manifest = picker.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'manifest'")).firstMatch
@@ -220,16 +229,24 @@ final class LibraryAndMapsTests: XCTestCase {
             XCTFail(error.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " · "))
             return
         }
+        if let attribution {
+            XCTAssertTrue(app.staticTexts[region].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.descendants(matching: .any)[attribution].firstMatch.exists)
+        }
 
         mapMenu.tap()
         app.buttons["Installed regional bundles"].tap()
         XCTAssertTrue(app.navigationBars["Installed regional bundles"].waitForExistence(timeout: 5))
-        let installed = app.staticTexts["Routing test fixture"]
+        let installed = app.staticTexts[region]
         XCTAssertTrue(installed.waitForExistence(timeout: 5))
         app.buttons["Remove regional bundle"].tap()
-        app.buttons["Remove Routing test fixture"].tap()
+        app.buttons["Remove \(region)"].tap()
         let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: installed)
         wait(for: [removed], timeout: 5)
+        if let attribution {
+            app.buttons["Done"].tap()
+            XCTAssertFalse(app.descendants(matching: .any)[attribution].firstMatch.exists)
+        }
     }
 
     func testImportsAndFindsArticleAfterRelaunch() {

@@ -19,6 +19,10 @@ struct InstalledRegionalBundlesView: View {
                     ForEach(bundles) { installed in
                         let manifest = installed.manifest
                         Section(manifest.region) {
+                            if !installed.isUsable {
+                                Text("Some files are missing or damaged. Remove this edition and import it again.")
+                                    .foregroundStyle(.secondary)
+                            }
                             LabeledContent("Edition", value: manifest.dataVersion)
                             LabeledContent("Place data", value: manifest.assets.places.byteCount.formatted(.byteCount(style: .file)))
                             LabeledContent("Routing", value: manifest.assets.routing.byteCount.formatted(.byteCount(style: .file)))

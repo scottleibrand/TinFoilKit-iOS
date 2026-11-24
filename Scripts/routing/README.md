@@ -51,7 +51,7 @@ python Scripts/build-regional-bundle.py verify .build/region-bundle
 
 The output directory contains `places.sqlite`, `routing.tfkroute` and `manifest.json`. The catalog manifest records the source hash, edition, bounds, attribution, license and the URL, SHA-256 and byte count of each installable artifact. Verification checks the local files against that manifest, including the embedded graph digest and matching place and route metadata. Publish the files and reviewed manifest through a trusted catalog channel. The manifest itself carries no signature.
 
-To include a separately sourced basemap, add these arguments to the build command. Use a PMTiles v3 archive with Mapbox Vector Tiles and a tile schema compatible with the app's Protomaps style. Use the exact byte count and SHA-256 of the local PMTiles file.
+To include a separately sourced basemap, add these arguments to the build command. Use a PMTiles v3 archive with Mapbox Vector Tiles and a tile schema compatible with the app's Protomaps style. The app supports uncompressed or gzip-compressed PMTiles sections. Use the exact byte count and SHA-256 of the local PMTiles file. [PMTiles specification](https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md)
 
 ```sh
   --basemap region.pmtiles --basemap-edition BASEMAP_REVISION \

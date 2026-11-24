@@ -13,6 +13,7 @@ struct OfflineMap: Equatable, Identifiable, Sendable {
     let isBundled: Bool
     let regionalBundleID: UUID?
     let attribution: String?
+    let licenseURL: URL?
 
     var canRemove: Bool { !isBundled && regionalBundleID == nil }
     var bounds: RoutingPack.Bounds {
@@ -29,7 +30,7 @@ struct OfflineMap: Equatable, Identifiable, Sendable {
     }
 
     init(archive: URL, title: String, isBundled: Bool = false, regionalBundleID: UUID? = nil,
-         attribution: String? = nil) throws {
+         attribution: String? = nil, licenseURL: URL? = nil) throws {
         let file = try FileHandle(forReadingFrom: archive)
         defer { try? file.close() }
         guard let header = try file.read(upToCount: 127), header.count == 127,
@@ -58,9 +59,13 @@ struct OfflineMap: Equatable, Identifiable, Sendable {
         self.isBundled = isBundled
         self.regionalBundleID = regionalBundleID
         self.attribution = attribution
+        self.licenseURL = licenseURL
     }
 
     private static func validateLayout(_ header: Data, fileSize: UInt64) throws {
+        guard header[97...98].allSatisfy({ $0 == 1 || $0 == 2 }) else {
+            throw MapError.invalidArchive
+        }
         func integer(_ offset: Int) -> UInt64 {
             header.withUnsafeBytes { UInt64(littleEndian: $0.loadUnaligned(fromByteOffset: offset, as: UInt64.self)) }
         }

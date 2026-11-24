@@ -5,6 +5,7 @@ actor RegionalBundleStorage {
     struct Installed: Identifiable, Sendable {
         let id: UUID
         let manifest: RegionalBundleManifest
+        let isUsable: Bool
     }
 
     struct Edition: Sendable {
@@ -25,7 +26,7 @@ actor RegionalBundleStorage {
     }
 
     func installedBundles() throws -> [Installed] {
-        try Self.editions(in: directory).map(\.installed)
+        try Self.storedEditions(in: directory).map(\.installed)
     }
 
     func install(_ source: URL) throws -> Installed {
@@ -55,6 +56,10 @@ actor RegionalBundleStorage {
     }
 
     static func editions(in directory: URL?) throws -> [Edition] {
+        try storedEditions(in: directory).filter(\.installed.isUsable)
+    }
+
+    private static func storedEditions(in directory: URL?) throws -> [Edition] {
         let files = FileManager.default
         guard let directory, files.fileExists(atPath: directory.path) else { return [] }
         let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey]
@@ -63,15 +68,14 @@ actor RegionalBundleStorage {
                 guard let id = UUID(uuidString: folder.lastPathComponent), Self.isDirectory(folder),
                       let manifest = try? RegionalBundleManifest.read(from: folder.appendingPathComponent("manifest.json"))
                 else { return nil }
-                let installed = Installed(id: id, manifest: manifest)
-                let basemap = try? Self.validatedBasemap(in: folder, installed: installed)
-                guard manifest.assets.basemap == nil || basemap != nil else { return nil }
-                let edition = Edition(folder: folder, installed: installed, basemap: basemap)
-                guard Self.isDirectory(edition.routing),
-                      (try? Self.regularFileSize(edition.places)) == manifest.assets.places.byteCount,
-                      (try? Self.regularFileSize(edition.routing.appendingPathComponent("manifest.json"))) != nil,
-                      (try? Self.regularFileSize(edition.routing.appendingPathComponent("tiles.tar"))) != nil else { return nil }
-                return edition
+                let basemap = try? Self.validatedBasemap(in: folder, id: id, manifest: manifest)
+                let routing = folder.appendingPathComponent("routing", isDirectory: true)
+                let isUsable = (manifest.assets.basemap == nil || basemap != nil) && Self.isDirectory(routing)
+                    && (try? Self.regularFileSize(folder.appendingPathComponent("places.sqlite"))) == manifest.assets.places.byteCount
+                    && (try? Self.regularFileSize(routing.appendingPathComponent("manifest.json"))) != nil
+                    && (try? Self.regularFileSize(routing.appendingPathComponent("tiles.tar"))) != nil
+                let installed = Installed(id: id, manifest: manifest, isUsable: isUsable)
+                return Edition(folder: folder, installed: installed, basemap: basemap)
             }.sorted { lhs, rhs in
                 let order = lhs.installed.manifest.region.localizedStandardCompare(rhs.installed.manifest.region)
                 return order == .orderedSame
@@ -112,14 +116,14 @@ actor RegionalBundleStorage {
                 .volumeAvailableCapacityForImportantUsage, available < needed { throw RouteError.storage }
 
             let id = UUID()
-            let installed = Installed(id: id, manifest: manifest)
+            let installed = Installed(id: id, manifest: manifest, isUsable: true)
             let ready = root.appendingPathComponent(id.uuidString, isDirectory: true)
             let staging = ready.appendingPathExtension("partial")
             try files.createDirectory(at: staging, withIntermediateDirectories: false)
             defer { try? files.removeItem(at: staging) }
             if let basemap = assets.basemap {
                 _ = try Self.copyVerified(basemap.asset, from: sourceFile(basemap.filename), to: staging)
-                _ = try Self.validatedBasemap(in: staging, installed: installed)
+                _ = try Self.validatedBasemap(in: staging, id: id, manifest: manifest)
             }
             let placeFile = try Self.copyVerified(assets.places, from: sourceFile(assets.places.filename), to: staging)
             let placeMetadata = try RegionalPlaceStorage.validateIndex(at: placeFile)
@@ -131,21 +135,22 @@ actor RegionalBundleStorage {
             try files.removeItem(at: routeFile)
             try JSONEncoder().encode(manifest).write(to: staging.appendingPathComponent("manifest.json"), options: .atomic)
             try Task.checkCancellation()
-            if let existing = try installedBundles().first(where: { $0.manifest == manifest }) { return existing }
+            if let existing = try installedBundles().first(where: { $0.isUsable && $0.manifest == manifest }) { return existing }
             try files.moveItem(at: staging, to: ready)
             return installed
         }
     }
 
-    private static func validatedBasemap(in folder: URL, installed: Installed) throws -> OfflineMap? {
-        guard let basemap = installed.manifest.assets.basemap else { return nil }
+    private static func validatedBasemap(in folder: URL, id: UUID, manifest: RegionalBundleManifest) throws -> OfflineMap? {
+        guard let basemap = manifest.assets.basemap else { return nil }
         let file = folder.appendingPathComponent(basemap.filename)
         try basemap.asset.validateFile(at: file)
-        guard let map = try? OfflineMap(archive: file, title: installed.manifest.region,
-                                         regionalBundleID: installed.id, attribution: basemap.attribution) else {
+        guard let map = try? OfflineMap(archive: file, title: manifest.region,
+                                         regionalBundleID: id, attribution: basemap.attribution,
+                                         licenseURL: basemap.licenseURL) else {
             throw RegionalBundleManifest.Error.invalidArtifact(basemap.filename)
         }
-        try installed.manifest.validate(basemapBounds: map.bounds)
+        try manifest.validate(basemapBounds: map.bounds)
         return map
     }
 

@@ -131,6 +131,8 @@ def pmtiles_bounds(path, byte_count):
     if (len(header) != 127 or header[:8] != b"PMTiles\x03" or header[99] != 1
             or not header[100] <= header[101] <= 30):
         raise ValueError("Expected a PMTiles v3 Mapbox Vector Tile basemap.")
+    if any(compression not in (1, 2) for compression in header[97:99]):
+        raise ValueError("The app supports uncompressed or gzip-compressed PMTiles sections.")
     root, metadata, leaves, tiles = struct.iter_unpack("<QQ", header[8:72])
     if not root[1] or sum(root) > 16_384 or not tiles[1]:
         raise ValueError("The PMTiles basemap needs a root directory and tile data.")

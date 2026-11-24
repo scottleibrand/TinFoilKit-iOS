@@ -1,8 +1,10 @@
 """Build regional bundles from synthetic inputs and test local verification."""
 
+import argparse
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import sqlite3
 import struct
 import subprocess
@@ -26,10 +28,14 @@ def expect_failure(args, message):
 
 def write_basemap(path):
     """Write a PMTiles v3 archive with one uncompressed z0 vector tile."""
-    tile = b"\x1a\x17\x0a\x07fixture\x12\x07\x18\x01\x22\x03\x09\x00\x00\x28\x80\x20\x78\x02"
+    # A water polygon around the synthetic region in a z0 tile with extent 4096.
+    geometry = bytes.fromhex("09 a2 0a aa 16 1a 0c 00 00 0c 0b 00 0f")
+    feature = bytes([0x18, 3, 0x22, len(geometry)]) + geometry
+    layer = b"\x0a\x05water" + bytes([0x12, len(feature)]) + feature + b"\x28\x80\x20\x78\x02"
+    tile = bytes([0x1a, len(layer)]) + layer
     # One directory entry for tile ID 0, run length 1, and encoded offset 1 (byte offset 0).
     root = bytes([1, 0, 1, len(tile), 1])
-    metadata = b"{}"
+    metadata = b'{"vector_layers":[{"id":"water","fields":{},"minzoom":0,"maxzoom":0}]}'
     metadata_offset = 127 + len(root)
     tile_offset = metadata_offset + len(metadata)
     header = bytearray(127)
@@ -87,14 +93,26 @@ def check_basemap(work, pbf, options, metadata):
     path.write_text(json.dumps(manifest), encoding="utf-8")
     expect_failure(verify, "section overlaps or exceeds the archive")
 
+    unsupported = bytearray(payload)
+    unsupported[97] = 3
+    basemap.write_bytes(unsupported)
+    manifest["assets"]["basemap"]["sha256"] = hashlib.sha256(unsupported).hexdigest()
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    expect_failure(verify, "supports uncompressed or gzip")
+
     basemap.write_bytes(payload)
     manifest = json.loads(original)
     manifest["assets"]["basemap"]["bounds"]["west"] = -123.0
     path.write_text(json.dumps(manifest), encoding="utf-8")
     expect_failure(verify, "catalog manifest does not match")
+    path.write_text(original, encoding="utf-8")
+    return output
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ui-bundle", type=Path, help="Copy the verified version 2 fixture to a new directory.")
+    args = parser.parse_args()
     assert hashlib.sha256(NETWORK.read_bytes()).hexdigest() == NETWORK_SHA256
     build_path = ROOT / ".build"
     build_path.mkdir(exist_ok=True)
@@ -175,11 +193,13 @@ def main():
             db.execute("DROP TABLE place_search")
         expect_failure([*TOOL, "verify", output], "no such table: place_search")
 
-        check_basemap(work, pbf, options, {
+        ui_bundle = check_basemap(work, pbf, options, {
             "dataVersion": "map-fixture-v2", "source": "https://example.invalid/synthetic-basemap.pmtiles",
             "license": "MIT", "licenseURL": "https://opensource.org/license/mit",
             "attribution": "Tinfoil Kit synthetic basemap fixture",
         })
+        if args.ui_bundle is not None:
+            shutil.copytree(ui_bundle, args.ui_bundle)
     print("Regional bundle fixture passed.")
 
 

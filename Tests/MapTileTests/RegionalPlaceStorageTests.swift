@@ -178,8 +178,12 @@ final class RegionalPlaceStorageTests: XCTestCase {
         XCTAssertEqual(available.count, 1)
         XCTAssertEqual(map.regionalBundleID, bundle.id)
         XCTAssertEqual(map.bounds, bundle.manifest.assets.basemap?.bounds)
+        XCTAssertEqual(map.licenseURL, bundle.manifest.assets.basemap?.licenseURL)
         XCTAssertFalse(map.canRemove)
         XCTAssertEqual(try Data(contentsOf: map.archive), tile)
+        let reader = PMTileArchive(url: map.archive)
+        let vectorTile = try await reader.vectorTile(MapTile(zoom: 0, x: 0, y: 0))
+        XCTAssertNotNil(vectorTile)
         let place = try await places.current()
         let route = try await routes.current()
         XCTAssertEqual(place?.bundleID, bundle.id)
@@ -195,6 +199,12 @@ final class RegionalPlaceStorageTests: XCTestCase {
         XCTAssertEqual(selected, map)
         try await reopened.removeMap(map.id)
         XCTAssertTrue(FileManager.default.fileExists(atPath: map.archive.path))
+        try FileManager.default.removeItem(at: map.archive)
+        let damaged = try await bundles.installedBundles()
+        XCTAssertEqual(damaged.map(\.id), [bundle.id])
+        XCTAssertFalse(try XCTUnwrap(damaged.first).isUsable)
+        let visibleMaps = try await reopened.installedMaps()
+        XCTAssertEqual(visibleMaps, [standalone])
         try await bundles.remove(bundle.id)
         XCTAssertFalse(FileManager.default.fileExists(atPath: map.archive.path))
         let fallback = try await reopened.current()
@@ -222,6 +232,11 @@ final class RegionalPlaceStorageTests: XCTestCase {
         wrongLayout[56] = 255
         try makeRegionalBundle(at: malformed, basemap: wrongLayout)
 
+        let compressed = root.appendingPathComponent("Unsupported compression", isDirectory: true)
+        var wrongCompression = validBytes
+        wrongCompression[97] = 3
+        try makeRegionalBundle(at: compressed, basemap: wrongCompression)
+
         let mismatched = root.appendingPathComponent("Wrong bounds", isDirectory: true)
         var wrongBounds = validBytes
         wrongBounds[102] ^= 1
@@ -230,6 +245,7 @@ final class RegionalPlaceStorageTests: XCTestCase {
         for (folder, expected) in [
             (corrupt, RegionalBundleManifest.Error.invalidArtifact("basemap.pmtiles")),
             (malformed, .invalidArtifact("basemap.pmtiles")),
+            (compressed, .invalidArtifact("basemap.pmtiles")),
             (mismatched, .metadataMismatch("basemap.pmtiles"))
         ] {
             do {
