@@ -7,6 +7,7 @@ struct AskLibraryView: View {
     @ObservedObject var household: HouseholdStore
     let openMap: (MapPlace?) -> Void
     @AppStorage("askUsesOnDeviceModel") private var useModel = true
+    @State private var includeHouseholdNotes = false
     @FocusState private var questionFocused: Bool
     @FocusState private var serviceAreaFocused: Bool
     @State private var question = ""
@@ -31,6 +32,9 @@ struct AskLibraryView: View {
 
     private var currentQuestion: String { question.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var modelEnabled: Bool { useModel && LibraryAnswer.isAvailable }
+    private var householdNotes: String {
+        household.snapshot.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
     private var waterContext: WaterOutageContext? {
         WaterOutageContext(question: currentQuestion, serviceArea: waterServiceArea)
     }
@@ -58,6 +62,10 @@ struct AskLibraryView: View {
                             .buttonStyle(.bordered)
                     }
                     .disabled(request != nil || currentQuestion.isEmpty)
+                    if modelEnabled, waterContext == nil, !householdNotes.isEmpty {
+                        Toggle("Include household notes in the on-device answer", isOn: $includeHouseholdNotes)
+                            .disabled(request != nil)
+                    }
                     if let progress {
                         ProgressView(progress)
                         Button("Stop", role: .cancel) { stop() }
@@ -267,8 +275,17 @@ struct AskLibraryView: View {
         case (_, .some): progress = "Searching installed place data"
         default: progress = "Searching the library"
         }
-        request = Request(question: question, mode: mode, useModel: modelEnabled, waterContext: waterContext,
-                          nearbyCategory: nearbyCategory)
+        let context = waterContext
+        let onDevice = modelEnabled
+        let notes: String? = if mode != .search, nearbyCategory == nil, context == nil,
+                               onDevice, includeHouseholdNotes, !householdNotes.isEmpty {
+            String(householdNotes.prefix(LibraryAnswerPrompt.maximumHouseholdNotesLength))
+        } else {
+            nil
+        }
+        if mode != .search { includeHouseholdNotes = false }
+        request = Request(question: question, mode: mode, useModel: onDevice, waterContext: context,
+                          nearbyCategory: nearbyCategory, householdNotes: notes)
     }
 
     private func stop() {
@@ -349,7 +366,8 @@ struct AskLibraryView: View {
                 progress = "Reading the matching passages"
                 let answer = try await LibraryAnswer.stream(
                     question: request.question,
-                    passages: evidence.prefix(6).map { ($0.title, $0.excerpt) }
+                    passages: evidence.prefix(6).map { ($0.title, $0.excerpt) },
+                    householdNotes: request.householdNotes
                 ) { partial in
                     if self.request?.id == request.id { self.answer = partial }
                 }
@@ -461,6 +479,7 @@ struct AskLibraryView: View {
         let useModel: Bool
         let waterContext: WaterOutageContext?
         let nearbyCategory: RegionalPlaceIndex.Category?
+        let householdNotes: String?
     }
 
     private struct OnlineSheet: Identifiable {
