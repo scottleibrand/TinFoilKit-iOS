@@ -19,11 +19,21 @@ struct InstalledRegionalBundlesView: View {
                     ForEach(bundles) { installed in
                         let manifest = installed.manifest
                         Section(manifest.region) {
+                            if !installed.isUsable {
+                                Text("Some files are missing or damaged. Remove this edition and import it again.")
+                                    .foregroundStyle(.secondary)
+                            }
                             LabeledContent("Edition", value: manifest.dataVersion)
                             LabeledContent("Place data", value: manifest.assets.places.byteCount.formatted(.byteCount(style: .file)))
                             LabeledContent("Routing", value: manifest.assets.routing.byteCount.formatted(.byteCount(style: .file)))
                             Link("Data source", destination: manifest.source)
                             Link("\(manifest.attribution) · \(manifest.license)", destination: manifest.licenseURL)
+                            if let basemap = manifest.assets.basemap {
+                                LabeledContent("Basemap", value: basemap.byteCount.formatted(.byteCount(style: .file)))
+                                LabeledContent("Basemap edition", value: basemap.dataVersion)
+                                Link("Basemap source", destination: basemap.source)
+                                Link("\(basemap.attribution) · \(basemap.license)", destination: basemap.licenseURL)
+                            }
                             Button("Remove regional bundle", role: .destructive) { pendingRemoval = installed }
                         }
                     }
@@ -48,8 +58,12 @@ struct InstalledRegionalBundlesView: View {
                 Button("Remove \(installed.manifest.region)", role: .destructive) {
                     Task { await remove(installed) }
                 }
-            } message: { _ in
-                Text("This removes the bundle's offline place data and routing graph.")
+            } message: { installed in
+                if installed.manifest.assets.basemap != nil {
+                    Text("This removes the bundle's basemap, offline place data, and routing graph.")
+                } else {
+                    Text("This removes the bundle's offline place data and routing graph.")
+                }
             }
             .alert("Regional bundle error", isPresented: Binding(
                 get: { error != nil }, set: { if !$0 { error = nil } }

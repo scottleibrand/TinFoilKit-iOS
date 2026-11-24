@@ -159,7 +159,130 @@ final class RegionalPlaceStorageTests: XCTestCase {
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
     }
 
-    private func makeRegionalBundle(at folder: URL) throws {
+    func testBasemapPublishesAndRemovesWithItsEdition() async throws {
+        let root = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("Source", isDirectory: true)
+        let tile = basemapFixture()
+        try makeRegionalBundle(at: source, basemap: tile)
+        let directory = root.appendingPathComponent("Bundles", isDirectory: true)
+        let maps = root.appendingPathComponent("Maps")
+        let store = MapStorage(directory: maps, bundledMap: nil, bundleDirectory: directory)
+        let places = RegionalPlaceStorage(directory: root.appendingPathComponent("Places"), bundleDirectory: directory)
+        let routes = RegionalRouteStore(directory: root.appendingPathComponent("Routes"), bundleDirectory: directory)
+        let bundles = RegionalBundleStorage(directory: directory)
+
+        let bundle = try await bundles.install(source)
+        let available = try await store.installedMaps()
+        let map = try XCTUnwrap(available.first)
+        XCTAssertEqual(available.count, 1)
+        XCTAssertEqual(map.regionalBundleID, bundle.id)
+        XCTAssertEqual(map.bounds, bundle.manifest.assets.basemap?.bounds)
+        XCTAssertEqual(map.licenseURL, bundle.manifest.assets.basemap?.licenseURL)
+        XCTAssertFalse(map.canRemove)
+        XCTAssertEqual(try Data(contentsOf: map.archive), tile)
+        let reader = PMTileArchive(url: map.archive)
+        let vectorTile = try await reader.vectorTile(MapTile(zoom: 0, x: 0, y: 0))
+        XCTAssertNotNil(vectorTile)
+        let place = try await places.current()
+        let route = try await routes.current()
+        XCTAssertEqual(place?.bundleID, bundle.id)
+        XCTAssertEqual(route?.bundleID, bundle.id)
+
+        let standaloneFile = root.appendingPathComponent("Standalone.pmtiles")
+        try tile.write(to: standaloneFile)
+        let standalone = try await store.importMap(from: standaloneFile)
+        XCTAssertTrue(standalone.canRemove)
+        _ = try await store.selectMap(map.id)
+        let reopened = MapStorage(directory: maps, bundledMap: nil, bundleDirectory: directory)
+        let selected = try await reopened.current()
+        XCTAssertEqual(selected, map)
+        try await reopened.removeMap(map.id)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: map.archive.path))
+        try FileManager.default.removeItem(at: map.archive)
+        let damaged = try await bundles.installedBundles()
+        XCTAssertEqual(damaged.map(\.id), [bundle.id])
+        XCTAssertFalse(try XCTUnwrap(damaged.first).isUsable)
+        let visibleMaps = try await reopened.installedMaps()
+        XCTAssertEqual(visibleMaps, [standalone])
+        try await bundles.remove(bundle.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: map.archive.path))
+        let fallback = try await reopened.current()
+        let remainingPlaces = try await places.installedIndexes()
+        let remainingRoutes = try await routes.installedPacks()
+        XCTAssertEqual(fallback, standalone)
+        XCTAssertTrue(remainingPlaces.isEmpty)
+        XCTAssertTrue(remainingRoutes.isEmpty)
+    }
+
+    func testBadBasemapNeverPublishesAnyBundleAssets() async throws {
+        let root = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = root.appendingPathComponent("Bundles", isDirectory: true)
+        let storage = RegionalBundleStorage(directory: directory)
+        let validBytes = basemapFixture()
+        let corrupt = root.appendingPathComponent("Wrong digest", isDirectory: true)
+        try makeRegionalBundle(at: corrupt, basemap: validBytes)
+        var wrongDigest = validBytes
+        wrongDigest[wrongDigest.count - 1] ^= 1
+        try wrongDigest.write(to: corrupt.appendingPathComponent("basemap.pmtiles"))
+
+        let malformed = root.appendingPathComponent("Wrong layout", isDirectory: true)
+        var wrongLayout = validBytes
+        wrongLayout[56] = 255
+        try makeRegionalBundle(at: malformed, basemap: wrongLayout)
+
+        let compressed = root.appendingPathComponent("Unsupported compression", isDirectory: true)
+        var wrongCompression = validBytes
+        wrongCompression[97] = 3
+        try makeRegionalBundle(at: compressed, basemap: wrongCompression)
+
+        let mismatched = root.appendingPathComponent("Wrong bounds", isDirectory: true)
+        var wrongBounds = validBytes
+        wrongBounds[102] ^= 1
+        try makeRegionalBundle(at: mismatched, basemap: wrongBounds)
+
+        for (folder, expected) in [
+            (corrupt, RegionalBundleManifest.Error.invalidArtifact("basemap.pmtiles")),
+            (malformed, .invalidArtifact("basemap.pmtiles")),
+            (compressed, .invalidArtifact("basemap.pmtiles")),
+            (mismatched, .metadataMismatch("basemap.pmtiles"))
+        ] {
+            do {
+                _ = try await storage.install(folder)
+                XCTFail("Invalid basemap should fail the bundle import")
+            } catch {
+                XCTAssertEqual(error as? RegionalBundleManifest.Error, expected)
+            }
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+        }
+    }
+
+    private func basemapFixture() -> Data {
+        var bytes = Data(repeating: 0, count: 127)
+        bytes.replaceSubrange(0..<7, with: "PMTiles".utf8)
+        bytes[7] = 3
+        bytes.replaceSubrange(96..<102, with: [UInt8(1), 1, 1, 1, 0, 0])
+        // Single uncompressed z0 vector tile with one synthetic point.
+        let tile: [UInt8] = [0x1a, 0x17, 0x0a, 7] + Array("fixture".utf8)
+            + [0x12, 7, 0x18, 1, 0x22, 3, 9, 0, 0, 0x28, 0x80, 0x20, 0x78, 2]
+        let fields: [UInt64] = [127, 5, 132, 2, 134, 0, 134, UInt64(tile.count), 1, 1, 1]
+        for (index, field) in fields.enumerated() {
+            let offset = 8 + 8 * index
+            bytes.replaceSubrange(offset..<(offset + 8), with: withUnsafeBytes(of: field.littleEndian, Array.init))
+        }
+        let coordinates: [Int32] = [-1_220_060_000, 474_950_000, -1_219_980_000, 475_050_000]
+        for (index, coordinate) in coordinates.enumerated() {
+            let offset = 102 + 4 * index
+            bytes.replaceSubrange(offset..<(offset + 4), with: withUnsafeBytes(of: coordinate.littleEndian, Array.init))
+        }
+        bytes.append(contentsOf: [1, 0, 1, UInt8(tile.count), 1])
+        bytes.append(contentsOf: "{}".utf8)
+        bytes.append(contentsOf: tile)
+        return bytes
+    }
+
+    private func makeRegionalBundle(at folder: URL, basemap: Data? = nil) throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let packURL = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Synthetic", withExtension: "tfkroute"))
         let packed = try Data(contentsOf: packURL)
@@ -176,12 +299,26 @@ final class RegionalPlaceStorageTests: XCTestCase {
                                          byteCount: Int64(bytes.count),
                                          sha256: SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined())
         }
+        let mapAsset: RegionalBundleManifest.Basemap?
+        if let basemap {
+            let file = asset("basemap.pmtiles", bytes: basemap)
+            try basemap.write(to: folder.appendingPathComponent(file.filename))
+            mapAsset = .init(
+                filename: file.filename, url: file.url, byteCount: file.byteCount, sha256: file.sha256,
+                dataVersion: "synthetic-map-v2", source: try XCTUnwrap(URL(string: "https://example.invalid/map.pmtiles")),
+                license: "MIT", licenseURL: try XCTUnwrap(URL(string: "https://opensource.org/license/mit")),
+                attribution: "Tinfoil Kit synthetic basemap",
+                bounds: .init(west: -122.006, south: 47.495, east: -121.998, north: 47.505)
+            )
+        } else {
+            mapAsset = nil
+        }
         let manifest = RegionalBundleManifest(
-            schemaVersion: 1, region: pack.region, dataVersion: pack.dataVersion, source: pack.source,
+            schemaVersion: mapAsset == nil ? 1 : 2, region: pack.region, dataVersion: pack.dataVersion, source: pack.source,
             sourceSHA256: pack.sourceSHA256, bounds: pack.bounds, artifactBaseURL: base, attribution: pack.attribution,
             license: pack.license, licenseURL: pack.licenseURL,
             assets: .init(places: asset("places.sqlite", bytes: try Data(contentsOf: places)),
-                          routing: asset("routing.tfkroute", bytes: packed))
+                          routing: asset("routing.tfkroute", bytes: packed), basemap: mapAsset)
         )
         try JSONEncoder().encode(manifest).write(to: folder.appendingPathComponent("manifest.json"))
     }
