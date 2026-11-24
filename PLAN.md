@@ -115,6 +115,8 @@ Original iOS work is MIT. Review exact dependency and distribution terms before 
 
 ## Desktop feature parity
 
+The [nearby disaster-sharing plan](DISASTER-SHARING.md) covers a lightweight install, automatic nearby discovery, and consent-based transfer of offline packs, web sources and saved answers.
+
 Compare the iOS app to desktop revision `6417927`. Revisit the inventory as each milestone lands, including the desktop portal, command-line setup and maintenance, and the household sharing service. Use native iOS workflows for equivalent outcomes and track any outcome the platform cannot provide. [Desktop design](https://github.com/tudor-city-ventures/tinfoil-kit/blob/64179271bcebffc5d76f1e3d13d2592e0089b6b1/docs/DESIGN.md)
 
 | Milestone | Beta | Verify on iOS |
