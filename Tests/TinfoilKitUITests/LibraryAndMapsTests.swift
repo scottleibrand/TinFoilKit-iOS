@@ -119,6 +119,12 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertTrue(excerpt.waitForExistence(timeout: 70))
         excerpt.tap()
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+        let findOnPage = app.buttons["Find on page"]
+        XCTAssertTrue(findOnPage.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: findOnPage)
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(app.buttons["Back in archive"].isEnabled)
+        XCTAssertFalse(app.buttons["Forward in archive"].isEnabled)
 
         app.tabBars.buttons["Ask"].tap()
         let question = app.descendants(matching: .any)["ask-question"].firstMatch

@@ -1,4 +1,3 @@
-import PDFKit
 import SwiftUI
 import WebKit
 import ZIMArchive
@@ -28,7 +27,7 @@ struct ArchiveReaderView: View {
                     }
                 }
             } else if let reader, let page {
-                ArchiveWebView(reader: reader, page: page)
+                ArchiveHTMLReader(reader: reader, page: page)
             } else if let errorMessage {
                 ContentUnavailableView("Can't open archive", systemImage: "book.closed", description: Text(errorMessage))
             } else {
@@ -69,7 +68,7 @@ struct ArchiveReaderView: View {
     }
 }
 
-private actor ArchiveReader {
+actor ArchiveReader {
     let file: URL
     private var archive: ZIMArchive?
 
@@ -97,70 +96,71 @@ private actor ArchiveReader {
     }
 }
 
-private struct ArchivePDFReader: View {
+private struct ArchiveHTMLReader: View {
     let reader: ArchiveReader
-    let path: String
-    var title: String?
-    var initialPage: Int?
-    @State private var document: PDFDocument?
-    @State private var resourceTitle: String?
-    @State private var errorMessage: String?
+    let page: URL
+    @StateObject private var controls = ArchiveWebControls()
 
     var body: some View {
-        Group {
-            if let document {
-                PDFSurface(document: document, initialPage: initialPage)
-            } else if let errorMessage {
-                ContentUnavailableView("Can't open document", systemImage: "doc", description: Text(errorMessage))
-            } else {
-                ProgressView("Opening document")
-            }
-        }
-        .navigationTitle(title ?? resourceTitle ?? "Document")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            do {
-                let resource = try await reader.resource(at: path)
-                guard resource.mimeType == "application/pdf", let document = PDFDocument(data: resource.data) else {
-                    throw CocoaError(.fileReadCorruptFile)
+        ArchiveWebView(reader: reader, page: page, controls: controls)
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button("Back in archive", systemImage: "chevron.left") { controls.goBack() }
+                        .disabled(!controls.canGoBack)
+                    Button("Forward in archive", systemImage: "chevron.right") { controls.goForward() }
+                        .disabled(!controls.canGoForward)
+                    Button("Find on page", systemImage: "doc.text.magnifyingglass") { controls.findOnPage() }
+                        .disabled(!controls.canFind)
                 }
-                resourceTitle = resource.title.isEmpty ? nil : resource.title
-                self.document = document
-            } catch {
-                errorMessage = error.localizedDescription
+            }
+    }
+}
+
+@MainActor
+private final class ArchiveWebControls: ObservableObject {
+    @Published private(set) var canGoBack = false
+    @Published private(set) var canGoForward = false
+    @Published private(set) var canFind = false
+
+    private weak var view: WKWebView?
+    private var observations: [NSKeyValueObservation] = []
+
+    func attach(to view: WKWebView) {
+        self.view = view
+        let refresh = { [weak self, weak view] in
+            DispatchQueue.main.async {
+                guard let self, let view, self.view === view else { return }
+                self.canGoBack = view.canGoBack
+                self.canGoForward = view.canGoForward
+                self.canFind = view.url?.scheme == "zim" && !view.isLoading
             }
         }
+        observations = [
+            view.observe(\.canGoBack, options: [.initial, .new]) { _, _ in refresh() },
+            view.observe(\.canGoForward, options: [.new]) { _, _ in refresh() },
+            view.observe(\.isLoading, options: [.new]) { _, _ in refresh() },
+            view.observe(\.url, options: [.new]) { _, _ in refresh() }
+        ]
     }
 
-    private struct PDFSurface: UIViewRepresentable {
-        let document: PDFDocument
-        let initialPage: Int?
+    func detach(from view: WKWebView) {
+        guard self.view === view else { return }
+        self.view = nil
+        observations.removeAll()
+    }
 
-        func makeCoordinator() -> Coordinator { Coordinator() }
+    func goBack() { view?.goBack() }
+    func goForward() { view?.goForward() }
 
-        func makeUIView(context: Context) -> PDFView {
-            let view = PDFView()
-            view.delegate = context.coordinator
-            view.document = document
-            view.autoScales = true
-            if let initialPage, let page = document.page(at: initialPage) {
-                view.go(to: page)
-            }
-            return view
-        }
-
-        func updateUIView(_ uiView: PDFView, context: Context) {}
-
-        final class Coordinator: NSObject, PDFViewDelegate {
-            // Keep archive-linked navigation local, as in the HTML reader.
-            func pdfViewWillClick(onLink sender: PDFView, with url: URL) {}
-        }
+    func findOnPage() {
+        view?.findInteraction?.presentFindNavigator(showingReplace: false)
     }
 }
 
 private struct ArchiveWebView: UIViewRepresentable {
     let reader: ArchiveReader
     let page: URL
+    let controls: ArchiveWebControls
 
     static func url(for path: String) -> URL? {
         var components = URLComponents()
@@ -171,7 +171,7 @@ private struct ArchiveWebView: UIViewRepresentable {
     }
 
     func makeCoordinator() -> Loader {
-        Loader(reader: reader)
+        Loader(reader: reader, controls: controls)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -184,18 +184,34 @@ private struct ArchiveWebView: UIViewRepresentable {
         view.navigationDelegate = context.coordinator
         view.allowsLinkPreview = false
         view.allowsBackForwardNavigationGestures = true
+        view.isFindInteractionEnabled = true
+        controls.attach(to: view)
         context.coordinator.open(page, in: view)
         return view
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: Loader) {
+        coordinator.close(uiView)
+    }
+
     final class Loader: NSObject, WKURLSchemeHandler, WKNavigationDelegate {
         private let reader: ArchiveReader
+        private let controls: ArchiveWebControls
         private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
 
-        init(reader: ArchiveReader) {
+        init(reader: ArchiveReader, controls: ArchiveWebControls) {
             self.reader = reader
+            self.controls = controls
+        }
+
+        @MainActor
+        func close(_ webView: WKWebView) {
+            controls.detach(from: webView)
+            webView.stopLoading()
+            for task in tasks.values { task.cancel() }
+            tasks.removeAll()
         }
 
         func open(_ url: URL, in webView: WKWebView) {
