@@ -63,8 +63,9 @@ final class NearbyPublicTransfer {
             DispatchQueue.main.async {
                 switch state {
                 case .ready:
-                    if let connection, NearbyPublicTLS.isPublicConnection(connection) { self?.readRequest(id, body: body) }
-                    else { self?.finishInbound(id) }
+                    if let connection, let version = NearbyPublicTLS.version(connection) {
+                        self?.readRequest(id, body: body, version: version)
+                    } else { self?.finishInbound(id) }
                 case .failed, .cancelled: self?.finishInbound(id)
                 default: break
                 }
@@ -119,8 +120,9 @@ final class NearbyPublicTransfer {
                 DispatchQueue.main.async {
                     switch state {
                     case .ready:
-                        if let connection, NearbyPublicTLS.isPublicConnection(connection) { self?.sendRequest(id) }
-                        else { self?.finishOutbound(id) }
+                        if let connection, let version = NearbyPublicTLS.version(connection) {
+                            self?.sendRequest(id, version: version)
+                        } else { self?.finishOutbound(id) }
                     case .failed, .cancelled: self?.finishOutbound(id)
                     default: break
                     }
@@ -136,15 +138,24 @@ final class NearbyPublicTransfer {
         }
     }
 
-    private func readRequest(_ id: UUID, body: Data) {
+    private func readRequest(_ id: UUID, body: Data, version: NearbyPublicTLS.Version) {
         guard lifecycle == .running, let active = inbound[id], active.phase == .preparing else { return }
         inbound[id]?.phase = .readingRequest
         let connection = active.connection
-        connection.receive(minimumIncompleteLength: Self.request.count, maximumLength: Self.request.count) {
+        let pin = NearbyPublicReference.resumePin
+        let length = version == .resumable ? NearbyPublicResume.requestLength(pin: pin) : Self.request.count
+        connection.receive(minimumIncompleteLength: length, maximumLength: length) {
             [weak self] request, _, _, error in
             DispatchQueue.main.async {
                 guard let self, self.inbound[id]?.phase == .readingRequest else { return }
-                guard error == nil, request == Self.request else {
+                guard error == nil, let request else {
+                    self.finishInbound(id)
+                    return
+                }
+                let offset = version == .resumable
+                    ? NearbyPublicResume.offset(from: request, pin: pin, byteCount: body.count)
+                    : (request == Self.request ? 0 : nil)
+                guard let offset else {
                     self.finishInbound(id)
                     return
                 }
@@ -152,7 +163,7 @@ final class NearbyPublicTransfer {
                 self.inbound[id]?.phase = .transferring
                 self.notifyActivity(previouslyActive: previouslyActive)
                 guard self.inbound[id] != nil else { return }
-                connection.send(content: body, contentContext: .finalMessage, isComplete: true,
+                connection.send(content: Data(body.dropFirst(offset)), contentContext: .finalMessage, isComplete: true,
                                 completion: .contentProcessed { [weak self] error in
                     DispatchQueue.main.async {
                         guard let self, self.inbound[id] != nil else { return }
@@ -170,7 +181,7 @@ final class NearbyPublicTransfer {
         }
     }
 
-    private func sendRequest(_ id: UUID) {
+    private func sendRequest(_ id: UUID, version: NearbyPublicTLS.Version) {
         guard lifecycle == .running, let pending = outbound,
               pending.id == id, !pending.active.isTransferring else { return }
         let previouslyActive = hasActiveTransfers
@@ -178,28 +189,60 @@ final class NearbyPublicTransfer {
         notifyActivity(previouslyActive: previouslyActive)
         guard let outbound, outbound.id == id else { return }
         let connection = outbound.active.connection
-        connection.send(content: Self.request, completion: .contentProcessed { [weak self] error in
+        let prefix = version == .resumable ? reference.checkpoint() : Data()
+        let request = version == .resumable
+            ? NearbyPublicResume.request(pin: NearbyPublicReference.resumePin, offset: prefix.count) : Self.request
+        connection.send(content: request, completion: .contentProcessed { [weak self] error in
             DispatchQueue.main.async {
                 guard self?.outbound?.id == id else { return }
-                if error == nil { self?.readReference(id, from: connection) }
+                if error == nil {
+                    self?.readReference(id, from: connection, prefix: prefix, version: version)
+                }
                 else { self?.finishOutbound(id) }
             }
         })
     }
 
-    private func readReference(_ id: UUID, from connection: NWConnection) {
+    private func readReference(_ id: UUID, from connection: NWConnection, prefix: Data,
+                               version: NearbyPublicTLS.Version) {
         let size = NearbyPublicReference.expectedByteCount
-        connection.receive(minimumIncompleteLength: size, maximumLength: size) { [weak self] bytes, _, _, error in
+        let remaining = size - prefix.count
+        let length = version == .resumable ? min(512, remaining) : remaining
+        connection.receive(minimumIncompleteLength: length, maximumLength: length) {
+            [weak self] bytes, _, isComplete, error in
             DispatchQueue.main.async {
                 guard let self, self.outbound?.id == id else { return }
-                if error == nil, let bytes {
-                    do {
-                        if try self.reference.receiveVerified(bytes) { self.didReceive(bytes) }
-                    } catch {
-                        // Invalid or no-longer-admissible bytes must never be published.
-                    }
+                guard error == nil, let bytes, !bytes.isEmpty, bytes.count <= remaining else {
+                    self.finishOutbound(id)
+                    return
                 }
-                self.finishOutbound(id)
+                let data = prefix + bytes
+                if data.count == size {
+                    do {
+                        let installed = try self.reference.receiveVerified(data)
+                        self.reference.removeCheckpoint()
+                        if installed { self.didReceive(data) }
+                    } catch NearbyPublicReference.StoreError.invalidReference {
+                        // A bad prefix must not make every later attempt fail.
+                        if version == .resumable { self.reference.removeCheckpoint() }
+                    } catch {
+                        // Keep the last prefix so an interrupted or low-space receive can retry.
+                    }
+                    self.finishOutbound(id)
+                    return
+                }
+                guard version == .resumable else {
+                    self.finishOutbound(id)
+                    return
+                }
+                do {
+                    try self.reference.saveCheckpoint(data)
+                } catch {
+                    self.finishOutbound(id)
+                    return
+                }
+                if isComplete { self.finishOutbound(id) }
+                else { self.readReference(id, from: connection, prefix: data, version: version) }
             }
         }
     }
