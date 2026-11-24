@@ -17,6 +17,7 @@ struct VerifyNearbyPublic {
         if draining {
             discovery.activityDidChange = { [weak discovery] active in
                 guard active, let discovery else { return }
+                precondition(discovery.hasActivePublicReceive == (mode == "receive-draining"))
                 discovery.finishTransfersWithoutDiscovery()
                 stoppedDiscoveryForTransfer = !discovery.isRunning
             }

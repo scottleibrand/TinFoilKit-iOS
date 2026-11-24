@@ -5,6 +5,7 @@ struct NearbyView: View {
     @Environment(\.openURL) private var openURL
     @EnvironmentObject private var nearby: NearbyLifecycle
     @EnvironmentObject private var discovery: NearbyDiscovery
+    @EnvironmentObject private var notifications: NearbyResumeNotifications
     @State private var screenID = UUID()
 
     var body: some View {
@@ -36,6 +37,19 @@ struct NearbyView: View {
                     get: { nearby.publicSyncEnabled },
                     set: { nearby.setPublicSyncEnabled($0) }
                 ))
+                if nearby.publicSyncEnabled {
+                    Toggle("Notify me about interrupted downloads", isOn: Binding(
+                        get: { notifications.isEnabled },
+                        set: { enabled in Task { await notifications.setEnabled(enabled) } }
+                    ))
+                    if notifications.authorizationUnavailable {
+                        Button("Open notification settings") {
+                            if let settings = URL(string: UIApplication.openNotificationSettingsURLString) {
+                                openURL(settings)
+                            }
+                        }
+                    }
+                }
                 if let text = discovery.publicReferenceText {
                     NavigationLink(NearbyPublicReference.title) {
                         ScrollView {

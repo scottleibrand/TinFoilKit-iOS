@@ -54,6 +54,7 @@ struct TinfoilKitApp: App {
             .onChange(of: scenePhase, initial: true) { nearby.updatePhase(scenePhase) }
             .environmentObject(nearby)
             .environmentObject(nearby.discovery)
+            .environmentObject(nearby.notifications)
         }
     }
 }

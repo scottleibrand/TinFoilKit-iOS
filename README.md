@@ -30,6 +30,8 @@ Open **Offline readiness** from the Library toolbar to check storage, installed 
 
 Open **Library → Find nearby** to see nearby devices. Enable **Sync public references** on both devices to automatically receive and relay the verified household check-in worksheet while using any part of the app. The standard build supplies the worksheet, and the lightweight build can receive it for offline reading. Switching apps pauses discovery and lets an active transfer finish if iOS grants it time. [Nearby sharing plan](DISASTER-SHARING.md) · [Apple background execution](https://developer.apple.com/documentation/uikit/extending-your-app-s-background-execution-time)
 
+Turn on **Notify me about interrupted downloads** in Nearby to get a rate-limited alert when a receive already underway stops in the background. Tap the alert to reopen Tinfoil Kit and let Nearby sync try again.
+
 ## Build locally
 
 Use an Apple Silicon Mac with Xcode 26 or later, XcodeGen, Rust, Node.js, and Python 3. Preparation downloads the reader, map and routing dependencies plus a public ZIM test fixture. Generated files and external data are stored in `.build/`.
