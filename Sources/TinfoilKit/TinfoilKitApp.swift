@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 import ZIMArchive
@@ -77,6 +78,7 @@ private struct LibraryView: View {
     @State private var errorMessage: String?
     @State private var query = ""
     @State private var results: [SummarySource] = []
+    @State private var resultsQuery = ""
     @State private var summary: SummaryRequest?
     @State private var sharedArchive: SharedArchive?
     @State private var pendingRemoval: ArchiveRemoval?
@@ -87,8 +89,8 @@ private struct LibraryView: View {
     var body: some View {
         NavigationStack {
             libraryWithDialogs
-            .task(id: SearchRun(query: query, ids: indexing.searchable)) {
-                await search()
+            .task(id: searchQuery) {
+                await search(searchQuery)
             }
             .sheet(item: $summary) { request in
                 ArticleSummaryView(library: library, question: request.question, sources: request.sources)
@@ -223,10 +225,17 @@ private struct LibraryView: View {
                     .buttonStyle(.bordered)
                     .disabled(importTask != nil)
             }
-        } else if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        } else if searchQuery.isEmpty {
             archiveList
+        } else if resultsQuery != searchQuery {
+            ProgressView("Searching library")
         } else if results.isEmpty {
-            ContentUnavailableView.search(text: query)
+            if indexing.hasPendingIndexes {
+                ContentUnavailableView("No matches yet", systemImage: "magnifyingglass",
+                                       description: Text("Search updates as more articles are indexed."))
+            } else {
+                ContentUnavailableView.search(text: query)
+            }
         } else {
             searchResults
         }
@@ -407,36 +416,61 @@ private struct LibraryView: View {
         }
     }
 
-    private func search() async {
-        let requested = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        results = []
+    private var searchQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private func search(_ requested: String) async {
         guard !requested.isEmpty else { return }
+        let (updates, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let observation = indexing.$searchRevision.sink { _ in continuation.yield(()) }
+        defer {
+            observation.cancel()
+            continuation.finish()
+        }
         do {
             try await Task.sleep(for: .milliseconds(180))
-            let installed = archives.filter { indexing.searchable.contains($0.id) }
-            var sources: [(InstalledArchive, ArticleIndex)] = []
-            for archive in installed {
-                let url = await library.fileURL(for: archive.id)
-                sources.append((archive, ArticleIndex(archiveURL: url)))
-            }
-            let matches = try await Task.detached(priority: .userInitiated) {
-                let groups = try sources.map { archive, index in
-                    try index.search(requested, includeIncomplete: true, prefixMatching: true).map {
-                        SummarySource(archive: archive, match: $0)
-                    }
+            for await _ in updates {
+                do {
+                    let matches = try await searchIndexes(for: requested)
+                    try Task.checkCancellation()
+                    results = matches
+                    resultsQuery = requested
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    if resultsQuery != requested { results = [] }
+                    resultsQuery = requested
+                    errorMessage = error.localizedDescription
                 }
-                return LibraryResultOrder.interleave(groups, limit: 50)
-            }.value
-            if !Task.isCancelled { results = matches }
+            }
         } catch is CancellationError {
         } catch {
             if !Task.isCancelled { errorMessage = error.localizedDescription }
         }
     }
 
-    private struct SearchRun: Equatable {
-        let query: String
-        let ids: Set<UUID>
+    private func searchIndexes(for requested: String) async throws -> [SummarySource] {
+        var sources: [(InstalledArchive, ArticleIndex)] = []
+        for archive in archives where indexing.searchable.contains(archive.id) {
+            try Task.checkCancellation()
+            let url = await library.fileURL(for: archive.id)
+            sources.append((archive, ArticleIndex(archiveURL: url)))
+        }
+        let inputs = sources
+        let worker = Task.detached(priority: .userInitiated) {
+            let groups = try inputs.map { archive, index in
+                try Task.checkCancellation()
+                return try index.search(requested, includeIncomplete: true, prefixMatching: true).map {
+                    SummarySource(archive: archive, match: $0)
+                }
+            }
+            return LibraryResultOrder.interleave(groups, limit: 50)
+        }
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
     }
 
     private struct SummaryRequest: Identifiable {

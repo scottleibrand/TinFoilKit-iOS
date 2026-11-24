@@ -192,13 +192,15 @@ final class ZIMArchiveTests: XCTestCase {
         XCTAssertEqual(entries, [archive])
     }
 
+    @MainActor
     func testSearchFindsCommittedBatchesBeforeIndexIsReady() async throws {
         let directory = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "climate", withExtension: "zim"))
-        let archiveURL = directory.appendingPathComponent("test.zim")
-        try FileManager.default.copyItem(at: fixture, to: archiveURL)
+        let library = InstalledLibrary(directory: directory)
+        let archive = try await library.importArchive(from: fixture)
+        let archiveURL = await library.fileURL(for: archive.id)
         let index = ArticleIndex(archiveURL: archiveURL)
         let builder = Task.detached {
             try index.build(archiveURL: archiveURL) { fraction in
@@ -212,6 +214,19 @@ final class ZIMArchiveTests: XCTestCase {
         XCTAssertFalse(index.isReady)
         XCTAssertTrue(try index.search("climate").isEmpty)
         XCTAssertFalse(try index.search("climate", includeIncomplete: true).isEmpty)
+
+        let indexing = LibraryIndexing(library: library)
+        await indexing.refresh()
+        let partialRevision = indexing.searchRevision
+        XCTAssertEqual(indexing.searchable, [archive.id])
+        let deadline = ContinuousClock.now + .seconds(45)
+        while indexing.hasPendingIndexes, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertTrue(index.isReady)
+        XCTAssertEqual(indexing.searchable, [archive.id])
+        XCTAssertGreaterThan(indexing.searchRevision, partialRevision)
+        XCTAssertFalse(try index.search("climate").isEmpty)
     }
 
     @MainActor
