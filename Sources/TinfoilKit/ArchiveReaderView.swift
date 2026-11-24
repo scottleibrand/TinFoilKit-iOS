@@ -67,7 +67,7 @@ struct ArchiveReaderView: View {
                 } else {
                     path = try await reader.mainPath()
                 }
-                guard let url = ArchiveWebView.url(for: path, fragment: initialFragment) else { throw URLError(.badURL) }
+                guard let url = ArchiveWebAddress.url(for: path, fragment: initialFragment) else { throw URLError(.badURL) }
                 self.reader = reader
                 page = url
             } catch {
@@ -165,7 +165,7 @@ private final class ArchiveWebControls: ObservableObject {
                 self.canFind = view.url?.scheme == "zim" && !view.isLoading
                 // In-page links can change the fragment without finishing a new document load.
                 if let current = self.readingPage, let url = view.url, self.canFind,
-                   String(url.path.dropFirst()) == current.path,
+                   ArchiveWebAddress.path(in: url) == current.path,
                    let next = Self.makeReadingPage(url: url, title: current.title), next != current {
                     self.readingPage = next
                 }
@@ -191,9 +191,7 @@ private final class ArchiveWebControls: ObservableObject {
     }
 
     private static func makeReadingPage(url: URL, title: String?) -> ReadingPage? {
-        guard url.scheme == "zim", url.host == "archive" else { return nil }
-        let path = String(url.path.dropFirst())
-        guard !path.isEmpty else { return nil }
+        guard let path = ArchiveWebAddress.path(in: url), !path.isEmpty else { return nil }
         let fragment = URLComponents(url: url, resolvingAgainstBaseURL: false)?.fragment
         let title = title?.trimmingCharacters(in: .whitespacesAndNewlines)
         return ReadingPage(path: path, fragment: fragment?.isEmpty == false ? fragment : nil,
@@ -212,15 +210,6 @@ private struct ArchiveWebView: UIViewRepresentable {
     let reader: ArchiveReader
     let page: URL
     let controls: ArchiveWebControls
-
-    static func url(for path: String, fragment: String? = nil) -> URL? {
-        var components = URLComponents()
-        components.scheme = "zim"
-        components.host = "archive"
-        components.path = "/" + path
-        components.fragment = fragment
-        return components.url
-    }
 
     func makeCoordinator() -> Loader {
         Loader(reader: reader, controls: controls)
@@ -292,7 +281,7 @@ private struct ArchiveWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
-            guard let url = urlSchemeTask.request.url, Self.isArchive(url) else {
+            guard let url = urlSchemeTask.request.url, let path = ArchiveWebAddress.path(in: url) else {
                 urlSchemeTask.didFailWithError(URLError(.unsupportedURL))
                 return
             }
@@ -300,7 +289,7 @@ private struct ArchiveWebView: UIViewRepresentable {
             tasks[id] = Task { @MainActor in
                 defer { tasks[id] = nil }
                 do {
-                    let resource = try await reader.resource(at: String(url.path.dropFirst()))
+                    let resource = try await reader.resource(at: path)
                     guard !Task.isCancelled else { return }
                     let response = URLResponse(
                         url: url,
