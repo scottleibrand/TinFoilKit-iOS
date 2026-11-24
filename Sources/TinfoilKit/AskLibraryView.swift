@@ -293,11 +293,14 @@ struct AskLibraryView: View {
         do {
             if request.mode != .answerFromPassages {
                 await refreshSavedContent(for: request.question, waterContext: request.waterContext)
+                let referenceQuery = request.waterContext?.searchQuestion(request.question) ?? request.question
+                let hasSavedReferenceText = !AskEvidence.combine([], savedAnswers: savedAnswers,
+                    savedWebSources: savedWebSources, question: referenceQuery).isEmpty
                 var found = try await LibraryPassages.search(
                     question: request.question, waterContext: request.waterContext, archives: indexing.archives, library: library
                 )
                 let retryUntil = ContinuousClock.now + .seconds(12)
-                while found.sources.isEmpty, savedAnswers.isEmpty, savedWebSources.isEmpty,
+                while found.sources.isEmpty, !hasSavedReferenceText,
                       indexing.hasPendingIndexes, ContinuousClock.now < retryUntil {
                     try Task.checkCancellation()
                     guard self.request?.id == request.id else { return }
@@ -307,7 +310,7 @@ struct AskLibraryView: View {
                         question: request.question, waterContext: request.waterContext, archives: indexing.archives, library: library
                     )
                 }
-                if found.sources.isEmpty, savedAnswers.isEmpty, savedWebSources.isEmpty, !indexing.hasPendingIndexes,
+                if found.sources.isEmpty, !hasSavedReferenceText, !indexing.hasPendingIndexes,
                    request.mode == .ask, request.useModel, request.waterContext == nil {
                     progress = "Checking related search terms"
                     let queries = (try? await LibraryAnswer.suggestedQueries(for: request.question)) ?? []
@@ -331,6 +334,11 @@ struct AskLibraryView: View {
                 return
             }
             guard !evidence.isEmpty else {
+                if !savedAnswers.isEmpty {
+                    message = "Found saved answers, but no matching reference passages."
+                    fallbackQuestion = request.question
+                    return
+                }
                 message = indexing.hasPendingIndexes
                     ? "No matches in searchable content yet. Indexing is still running."
                     : "No matching passages. Try other terms."
@@ -399,7 +407,7 @@ struct AskLibraryView: View {
             fallbackQuestion = question
             return
         }
-        for (index, reference) in evidence.prefix(6).enumerated() where reference.isReference {
+        for (index, reference) in evidence.prefix(6).enumerated() {
             if let quote = context.supportedQuote(in: reference.excerpt, title: reference.title) {
                 answer = "A saved reference for \(area) says “\(quote)” [\(index + 1)]"
                 message = "Check the source for the facilities and outage conditions it covers."
@@ -427,7 +435,7 @@ struct AskLibraryView: View {
         let matches = AskEvidence.combine(sources, savedAnswers: savedAnswers, savedWebSources: savedWebSources,
                                           question: waterContext?.searchQuestion(question) ?? question)
         guard let waterContext else { evidence = matches; return }
-        let scoped = matches.filter { $0.isReference && waterContext.relates($0.excerpt, title: $0.title) }
+        let scoped = matches.filter { waterContext.relates($0.excerpt, title: $0.title) }
         let ids = Set(scoped.map(\.id))
         evidence = scoped + matches.filter { !ids.contains($0.id) }
     }
@@ -437,8 +445,6 @@ struct AskLibraryView: View {
         switch evidence {
         case let .archive(source):
             ArchiveReaderView(library: library, archive: source.archive, articlePath: source.match.path)
-        case let .answer(entry, _):
-            OnlineAskSavedAnswerView(entry: entry)
         case let .web(source, _):
             OnlineAskSourceView(source: source)
         }
@@ -460,101 +466,5 @@ struct AskLibraryView: View {
     private struct OnlineSheet: Identifiable {
         let id = UUID()
         let question: String?
-    }
-}
-
-private enum AskEvidence: Identifiable {
-    case archive(SummarySource)
-    case answer(OnlineAskSavedAnswer, String)
-    case web(OnlineAskSavedSource, String)
-
-    var isReference: Bool {
-        switch self {
-        case .archive: true
-        case .web(let source, _): source.text != nil
-        case .answer: false
-        }
-    }
-
-    var id: String {
-        switch self {
-        case let .archive(source): source.id
-        case let .answer(entry, _): "saved-answer-\(entry.id)"
-        case let .web(source, _): "saved-source-\(source.id.absoluteString)"
-        }
-    }
-
-    var title: String {
-        switch self {
-        case let .archive(source): source.match.title
-        case let .answer(entry, _): entry.question
-        case let .web(source, _): source.citation.title
-        }
-    }
-
-    var excerpt: String {
-        switch self {
-        case let .archive(source): source.match.excerpt
-        case let .answer(_, text), let .web(_, text): text
-        }
-    }
-
-    var origin: String {
-        switch self {
-        case let .archive(source): source.archive.title
-        case let .answer(entry, _):
-            "Saved \(entry.provider.title) answer · \(entry.savedAt.formatted(date: .abbreviated, time: .omitted))"
-        case let .web(source, _): source.resolvedURL?.host ?? source.citation.url.host ?? "Saved web source"
-        }
-    }
-
-    static func combine(_ local: [SummarySource], savedAnswers: [OnlineAskSavedAnswer],
-                        savedWebSources: [OnlineAskSavedSource], question: String) -> [Self] {
-        let keywords = OnlineAskCache.words(question)
-        var seen: Set<URL> = []
-        var cached: [Self] = savedWebSources.compactMap { source in
-            guard let text = source.text, let fragment = bestFragment(text, keywords: keywords),
-                  seen.insert(source.id).inserted else { return nil }
-            return .web(source, fragment.text)
-        }
-        for entry in savedAnswers {
-            let candidates = entry.sources.compactMap { source -> (OnlineAskSavedSource, Fragment)? in
-                guard let excerpt = source.text ?? source.citation.excerpt,
-                      let fragment = bestFragment(excerpt, keywords: keywords), fragment.score > 0 else { return nil }
-                return (source, fragment)
-            }.sorted { $0.1.score > $1.1.score }
-            if let answer = bestFragment(entry.answer, keywords: keywords) {
-                cached.append(.answer(entry, answer.text))
-            }
-            if let (source, fragment) = candidates.first(where: { !seen.contains($0.0.id) }) {
-                seen.insert(source.id)
-                cached.append(.web(source, fragment.text))
-            }
-        }
-        let locallyIndexed = local.map(Self.archive)
-        return Array(locallyIndexed.prefix(4)) + cached + Array(locallyIndexed.dropFirst(4))
-    }
-
-    private struct Fragment {
-        let text: String
-        let score: Int
-    }
-
-    private static func bestFragment(_ text: String, keywords: Set<String>) -> Fragment? {
-        let clean = text.replacingOccurrences(of: #"\[([^\]]*)\]\(https?://[^)]+\)"#,
-                                             with: "$1", options: .regularExpression)
-        let parts = clean.split(whereSeparator: \.isNewline)
-        var best: Fragment?
-        for part in parts {
-            let words = part.split(whereSeparator: \.isWhitespace)
-            for start in stride(from: 0, to: words.count, by: 65) {
-                let text = words[start..<min(start + 65, words.count)].joined(separator: " ")
-                let score = keywords.intersection(OnlineAskCache.words(text)).count
-                if best.map({ score > $0.score }) ?? true {
-                    best = Fragment(text: text, score: score)
-                }
-            }
-        }
-        return best
     }
 }
