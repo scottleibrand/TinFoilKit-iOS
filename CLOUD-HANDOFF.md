@@ -4,7 +4,7 @@ The goal is desktop feature parity for Tinfoil Kit on iOS. [PLAN.md](PLAN.md) tr
 
 ## Start here
 
-Fetch `origin` and check both `origin/develop` and `origin/main`. Both branches were synced at `16df59b` after PR #13. Recheck the branch tips and the work below before starting an overlapping change.
+Fetch `origin` and check both `origin/develop` and `origin/main`. Both branches were synced at `fd5aeab` after PR #14. Recheck the branch tips and the work below before starting an overlapping change.
 
 Use a fresh `codex/` feature branch from the current `origin/develop` for work awaiting Apple tests. Keep each feature in its own commits so it can move to `develop` after verification. Push the feature branch for the Mac session to retrieve. Open and merge one tested feature at a time through a `develop` → `main` PR.
 
@@ -18,19 +18,21 @@ The upstream desktop checkout and generated build inputs are ignored. For parity
 - Map imports a version 1 regional bundle from Files and manages both assets as a single edition. The native Files import and removal test and 62 app unit tests passed. The signed iPhone build was installed. Basemaps are still imported separately. [PR #11](https://github.com/scottleibrand/TinFoilKit-iOS/pull/11)
 - Both app profiles include the app and ZIMArchive privacy manifests required for distribution. All 62 simulator unit tests passed and the signed standard build was installed on the iPhone. The one-time TestFlight upload still needs a confirmed App Store Connect team and signing access on the Mac. [PR #12](https://github.com/scottleibrand/TinFoilKit-iOS/pull/12)
 - Both profiles now supply version `1.0.0` and build `1` through shared build settings. The signed app's packaged version fields were verified and the build was installed on the iPhone. [PR #13](https://github.com/scottleibrand/TinFoilKit-iOS/pull/13)
+- Version 2 bundles include a verified basemap with its own edition and publisher credit. The pinned producer built the fixture, the Files UI imported, selected, and removed it, and 65 app unit tests passed. The signed build was installed on the iPhone. [PR #14](https://github.com/scottleibrand/TinFoilKit-iOS/pull/14)
 
 ## Cloud branches awaiting integration
 
-- `codex/regional-bundle-basemap` adds basemap packaging to the producer. Review it alongside `codex/import-regional-basemap`, which contains candidate iOS importer changes. Verify the full three-asset flow on iOS before integrating.
+- `codex/regional-download-fixture` adds a resumable Python downloader and interrupted-transfer fixture for version 2 bundles. Use it to test manifest pinning and recovery before wiring production regional downloads in iOS.
 - `codex/ask-offline-directions` and `codex/ask-saved-pin-directions` touch related Ask and Map paths. Compare their intent handling before combining the changes.
 - `codex/nearby-public-admission` adds catalog and storage admission checks. `codex/nearby-public-resume` and `codex/nearby-public-transfer-recovery` overlap on worksheet download resume. Review their shared transfer paths and verify the combined behavior.
 - `codex/map-range-validation` adds validation for remote PMTiles range responses. `codex/desktop-starter-packs` and `codex/catalog-audit` carry the same climate pack byte count correction. Verify any publisher metadata before integrating it.
+- `codex/full-english-wikipedia` adds the complete English Wikipedia as an individual download. `codex/household-share-link-controls` adds link rotation and a QR code to the local household sharing screen. Review these branches for their separate PRs.
 
 ## Work that can move in the cloud
 
 | Work | Cloud acceptance check |
 | --- | --- |
-| Regional map packages | Start with the basemap producer branch above. Draft a catalog entry consumable by a resumable regional downloader. Keep generated assets and source extracts out of Git. Use the pinned Valhalla container to run the full producer test. |
+| Regional map packages | Draft a catalog entry consumable by a resumable regional downloader and verify the recovery fixture above. Record publisher provenance and redistribution terms for a candidate production region. Keep generated assets and source extracts out of Git. Use the pinned Valhalla container to run the full producer test. |
 | Catalog and publisher downloads | Start with the climate byte count proposed on `codex/catalog-audit`. Continue auditing pinned URLs, exact editions, byte counts, hashes, language and terms. Confirm resume support using small actual range requests with capped responses. Expand versions and mirror metadata only with publisher evidence. |
 | Nearby public content | Work on deterministic, portable components for manifest validation, provenance, inventory matching, disk reservations and resume checkpoints. Use synthetic bytes to test interruptions, stale checkpoints, duplicates and disk limits. Reuse the existing Nearby implementation. Automatic public exchange requires an enabled setting, verified redistribution rights and sufficient storage. |
 | Ask and parity audit | Reconcile the desktop workflow inventory on `codex/desktop-parity-audit` with current main. Reuse the directions branches above. Expand deterministic fixtures as needed and leave the existing library search path for general questions. Develop synthetic retrieval and reader byte-range fixtures. |
@@ -51,6 +53,6 @@ Public web snapshots must have verified rights, provenance and no personal conte
 
 - Prepare the linked reader, maps and routing assets and run XcodeGen using the [README](README.md#build-locally). Run the app and library tests on explicit simulators with isolated DerivedData and synthetic fixtures. Build both profiles when packaging changes.
 - For downloads, run `python3 Tests/PackDownloadFixture/test_resume.py` on macOS. Test the app with an interrupted background pack transfer on the phone, reconnect on the same allowed network, and confirm the publisher is asked for the remaining bytes and the final checksum passes. Cover pause, relaunch, longer outages and cellular consent. Map tiles already saved should survive an interruption.
-- For regional packages, extend the verified folder import to basemaps and add an in-app catalog download flow. Exercise verification, cancellation and recovery with fixtures, then test addresses, services, and walking and driving routes after an iPhone cold launch in airplane mode. For Ask, verify external map handoff in airplane mode and the real on-device model on an eligible phone.
+- For regional packages, add an in-app catalog download flow that hands completed files to the verified importer. Exercise verification, cancellation and recovery with fixtures, then test addresses, services, and walking and driving routes after an iPhone cold launch in airplane mode. For Ask, verify external map handoff in airplane mode and the real on-device model on an eligible phone.
 - For Nearby, use two iPhones with Wi-Fi enabled and no access point, then repeat on a LAN without internet. Check permission, storage limits, progress after interruption, notification behavior, and consent on real devices. The cloud cannot verify iOS suspension, direct peer discovery or Wi-Fi Aware.
 - Run each PR’s signed standard iPhone build alongside simulator testing in separate DerivedData directories. Install on the paired iPhone when reachable, and report any remaining device checks before merging. The requested TestFlight upload is a separate one-time lightweight release.
