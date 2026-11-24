@@ -1,46 +1,129 @@
 # Tinfoil Kit for iOS implementation plan
 
-Build a standalone iPhone app that opens its installed library and maps after a cold launch with no network or desktop host. Use a SwiftUI shell and keep downloadable assets separate from household data.
+Build a standalone iPhone app that opens its installed library and maps after a cold launch with no network or desktop host. Use a SwiftUI shell and keep downloadable assets separate from household data. Exclude downloaded archives, indexes, map data and the tile cache from device backup. Include household notes, home and pins in backup.
+
+## Status
+
+Status as of 2026-11-24. "Built" means the feature exists in the app. It is complete only after its acceptance checks pass on a simulator and on an iPhone.
+
+| Area | Status | Remaining |
+| --- | --- | --- |
+| Offline library | Built | Run the milestone 1 acceptance checks on a device with a publisher archive. Measure PDF extraction time and search-index storage on the larger packs. |
+| Content packs | Partly built | The bundled catalog has English and Spanish choices and dated editions. Wi-Fi downloads, disk space checks, checksum verification, repair and replacement after indexing are implemented. Expand coverage, add catalog refresh and exercise real interrupted transfers. |
+| Maps | Partly built | The online tile cache, place index import and walking previews exist. Region installation with explicit coverage and the chosen routing engine remain. |
+| Ask | Partly built | Search and cited answers use Apple's on-device model. Behavior on devices without Apple Intelligence and the decision on a downloadable model remain. |
+| Household tools | Built | Run the airplane-mode restart and printing checks on a device. |
+| Household sharing | Partly built | A Desktop kit screen and a phone-hosted read-only household session exist. Review the listener and test peer connectivity. Verified pack transfer and shared queries remain. |
+| Setup, help and readiness | Partly built | Offline readiness and help exist. Portable setup remains. |
+
+## Gaps found in code review
+
+Review of the working tree on 2026-11-24. **Beta** items block the first beta. The others can follow it.
+
+### Library and reader
+
+- Verify that interrupted Files imports, map imports, pack installs and repairs recover correctly on an iPhone. Imports check storage, report progress and can be cancelled. Unreadable archive folders are reported separately from healthy archives.
+- Measure PDF page indexing and search on the actual Essentials packs. Library merges hits by each archive's rank and supports partial-word searches.
+- A large archive can't be searched, even by title, until its whole index finishes. Search the ZIM title list, or the partial index, while it builds.
+- The reader loads each resource fully into memory and refuses anything over 32 MiB, so large PDFs and videos fail. The scheme handler doesn't support byte ranges, so audio and video won't play. Stream large resources and answer range requests.
+- JavaScript is off for every archive, which breaks interactive content such as collapsible sections. Decide per pack, and keep the network block in place.
+- The PDF document list only appears for catalog packs marked as PDF collections. An imported PDF collection opens its main page instead. Listing the documents also scans every entry in the archive.
+- Verifying an imported archive only checks that it opens. Check the ZIM file's built-in MD5 checksum.
+- The reader has no visible back and forward buttons, find in page, history or bookmarks.
+
+### Content packs
+
+- **Beta.** The bundled catalog has pinned publisher editions and requires an app release to update. Add a way to refresh it and expand language, size, and preset choices against the upstream kit.
+- **Beta.** Add device acceptance checks for an interrupted edition update and for recovery after failed indexing. The old archive stays in the library until the new index is ready.
+- **Beta.** Content packs use Wi-Fi. Add per-transfer cellular opt-in and evaluate discretionary transfers for Download All.
+- Each pack has one source URL. Fall back to another official mirror when it fails.
+- A checksum failure deletes the whole download. Retry once before discarding it, and report which mirror served it.
+
+### Maps
+
+- **Beta.** Regions can't be installed from inside the app. The Seattle tiles, place index and walking graph (about 100 MB) are bundled into the app. Other regions need the Python scripts and a Files import, and there's room for only one imported tile region. Publish region packs (tiles, places and routing data) in the catalog with explicit coverage, and support more than one region.
+- **Beta.** The tile cache:
+  - reveals the areas a user views to the Source Cooperative host, which needs a privacy disclosure and an off switch;
+  - downloads over cellular;
+  - has no size limit, eviction or clear option.
+
+  `v4.pmtiles` is a moving build, so tiles from different builds can mix. Choose a production tile host and record which build each cached tile came from.
+- [Scripts/prepare-map-assets.sh](Scripts/prepare-map-assets.sh) extracts Seattle from the long-lived Source Cooperative basemap. Check the style and regenerate the derived assets when the source's ETag changes.
+- The map style is minimal and hand-written. It has no street names, house numbers or point-of-interest icons, and only English labels. Adopt the Protomaps basemaps style (BSD-3-Clause) with its fonts and icons.
+- Region coverage is a bounding box. Show coverage as the region's actual outline where it isn't rectangular.
+- The regional place index is stored in device backup. Exclude it, as other downloaded data is excluded.
+- Walking routes show a line and a distance only. There are no step-by-step directions and no driving. This waits on the routing engine choice in milestone 3.
+
+### Ask
+
+- Apple's on-device model has safety guardrails that may refuse medical and emergency questions, and a refusal currently shows as a generic failure. Measure refusals on a question set drawn from the Essentials packs, and show the passages with a clear explanation when the model declines.
+- Retrieval uses 64-word search snippets rather than article sections, and the stop-word list and prompts are English only.
+
+### Household
+
+- Household data can't be exported or imported, so moving to a phone without a backup or sharing with family isn't possible. A damaged household file blocks every edit, and there's no way to recover it.
+- Printable references depend on exact edition filenames and page numbers. A catalog update silently drops them. The post-disaster source isn't in the catalog. Check page ranges whenever the catalog changes an edition.
+
+### Tests and build
+
+- No tests cover interrupted or resumed downloads, low storage, checksum failure, edition replacement, Ask retrieval, or the walking router. The regional place index fixture runs as a separate script.
+- The UI tests need a fixture copied into the simulator by hand. Automate that, and run the unit and UI tests in CI.
 
 ## 1. Offline library
 
-- First, prove an MIT-licensed ZIM reader can build, link, and read a real archive on iOS. Evaluate zimru through a small C bridge. Pin the revision and review the dependency licenses, archive coverage, and decompression limits before adopting it. [zimru](https://github.com/jasontitus/zimru)
-- Import one single-file ZIM from Files into app-managed storage. Validate it before registering it. Display its title and size, and reopen it after relaunch. Serve articles, images, styles, and internal links to an isolated WebKit reader from the archive.
-- Build a local SQLite FTS5 index over article titles and text. Track indexing progress, retain stable archive and entry identifiers, and keep reading available while the index builds. Start with small archives and measure indexing time and additional storage before supporting large imports. [SQLite FTS5](https://www.sqlite.org/fts5.html)
+- Read ZIM archives through zimru, a clean-room MIT reader, using a small Rust bridge. [Scripts/prepare-zim-reader.sh](Scripts/prepare-zim-reader.sh) pins the revision. Review the dependency licenses, archive coverage and decompression limits again whenever the pin changes. [zimru](https://github.com/jasontitus/zimru)
+- Import a single-file ZIM from Files into app-managed storage. Validate it before registering it. Display its title and size, and reopen it after relaunch. Serve articles, images, styles and internal links to an isolated WebKit reader from the archive.
+- Before copying an import, check that the disk has room for the archive and its index. Imports need free space equal to the archive size during the copy. If that proves too restrictive for large archives, read them in place through security-scoped bookmarks.
+- Build a local SQLite FTS5 index over article titles and text. Track indexing progress, retain stable archive and entry identifiers, and keep reading available while the index builds. ZIM files embed a Xapian index, but Xapian is GPL, so build the app's own index instead of reading it. [SQLite FTS5](https://www.sqlite.org/fts5.html)
+- Measure index size relative to archive size and indexing time on a device for each catalog pack. Set an index storage budget from those measurements. Index only titles for archives above the budget, and let the user opt in to full-text indexing. Continue indexing in the background with a background processing task so large indexes don't need the app open.
 - Accept the milestone when a user can import, search for a term found only in an article body, open the result with its images, and follow an internal link after an offline cold launch. Use small fixtures on an explicit simulator with isolated DerivedData, then verify with a representative publisher archive on an iPhone.
 
 ## 2. Content packs
 
-- Use upstream's catalog and edition choices as inputs. Resolve a small set of publisher-hosted packs first. Record version, bytes, digest, source, and attribution for each supported asset.
-- Add resumable background downloads, free-space checks for staging and indexing, and verification before install. Retain the working edition until its replacement and index are ready. Exercise interrupted downloads, low storage, and failed upgrades. [Upstream download design](https://github.com/tudor-city-ventures/tinfoil-kit/blob/64179271bcebffc5d76f1e3d13d2592e0089b6b1/docs/DESIGN.md#downloading)
+- Use upstream's catalog and edition choices as inputs. Download each pack from its publisher or an official mirror such as download.kiwix.org, ftp.fau.de or dumps.wikimedia.org. Record version, bytes, digest, source and attribution for each supported asset, and verify the digest against the publisher's checksum.
+- Add resumable background downloads, free-space checks for staging and indexing, and verification before install. Retain the working edition until its replacement and index are ready. Exercise interrupted downloads, low storage and failed upgrades. [Upstream download design](https://github.com/tudor-city-ventures/tinfoil-kit/blob/64179271bcebffc5d76f1e3d13d2592e0089b6b1/docs/DESIGN.md#downloading)
 
 ## 3. Maps
 
-- Render one local Protomaps region in MapLibre with packaged style assets, visible attribution, and GPS location. Test an upstream PMTiles file and cold-launch with connectivity disabled.
-- Add regional place search and route previews when the prebuilt SQLite place index and routing data are ready. Verify search, routing, and coverage boundaries offline. [Upstream map design](https://github.com/tudor-city-ventures/tinfoil-kit/blob/64179271bcebffc5d76f1e3d13d2592e0089b6b1/docs/DESIGN.md#maps)
+- Render installed Protomaps regions in MapLibre with packaged style assets, visible attribution and GPS location. A region install covers an explicit area. Test an upstream PMTiles file and cold-launch with connectivity disabled.
+- The tile cache saves tiles fetched from Source Cooperative as the user pans. It supplements installed regions and does not replace them. When offline, show areas outside installed regions and the cache as unavailable, and never wait on the network to draw the map.
+- Add regional place search from a prebuilt SQLite place index. Verify search and coverage boundaries offline. [Upstream map design](https://github.com/tudor-city-ventures/tinfoil-kit/blob/64179271bcebffc5d76f1e3d13d2592e0089b6b1/docs/DESIGN.md#maps)
+- Upstream routes with GraphHopper, which needs Java and can't run on iOS. Walking previews currently use a graph built by [Scripts/build-walking-graph.py](Scripts/build-walking-graph.py). Evaluate Valhalla (MIT) with the probe in [Scripts/routing](Scripts/routing) for walking and driving with one-way streets and turn restrictions. Record the engine choice, its routing data format and size per region, and how that data is downloaded with a region.
 
 ## 4. Answers and sharing
 
-- Add an optional on-device model after measuring memory, latency, and thermals on the oldest supported inference device. Retrieve passages through library search, link answers to exact articles, and show the retrieved passages when evidence is insufficient. [Upstream search and answer behavior](https://github.com/tudor-city-ventures/tinfoil-kit/blob/64179271bcebffc5d76f1e3d13d2592e0089b6b1/docs/DESIGN.md#the-kit-page)
-- Evaluate an optional desktop companion that talks to the existing LAN service. After pack installation is reliable, test transfer of a single verified pack between nearby phones before adding replication or shared queries.
+- Ask uses Apple's on-device model when Apple Intelligence is available, which requires an iPhone 15 Pro or newer on iOS 26. Other devices get passage search only. Retrieve passages through library search, link answers to exact articles, and show the retrieved passages when evidence is insufficient. [Upstream search and answer behavior](https://github.com/tudor-city-ventures/tinfoil-kit/blob/64179271bcebffc5d76f1e3d13d2592e0089b6b1/docs/DESIGN.md#the-kit-page)
+- Add an Ask acceptance case for “How long does our water system keep working if there is a gridwide power outage?” Search for the combined water-service and power-loss question, with terms such as water utility, pumping, backup power, storage, and pressure. Rank passages that address the relationship ahead of unrelated outage reports or water systems. Test both during and after indexing.
+- For local service questions, use the saved home and installed service-area information to resolve the provider when possible. Ask for the utility or service area when it is ambiguous. Cite dated utility or emergency preparedness references available offline. Give an outage duration only when the evidence supports it for that service area and scenario. If local evidence is missing, explain what the available sources establish and what remains unknown. Test in airplane mode with and without a matching utility reference.
+- Decide whether to offer a downloadable model, such as llama.cpp with a small upstream model, for devices without Apple Intelligence. Decide after measuring memory, latency and thermals on the oldest device it would support. Show each model's license and usage policy before download, including Thinking Machines' acceptable use policy for Inkling.
+- Household sharing is covered in the parity table below.
 
 ## Release decisions
 
-The first beta target is an offline library, pack management, and one regional basemap. Aim for a starter configuration under 10 GB, subject to measuring actual packs and index sizes. Set the minimum OS, representative map region, and device support from dependency and device tests before publishing the beta.
+The first beta covers the offline library, pack management, one installed regional basemap, household tools, and setup and readiness. Aim for a starter configuration under 10 GB including indexes and routing data, subject to measuring actual packs. The minimum OS is iOS 17. Set the representative map region and supported devices from dependency and device tests before publishing the beta.
+
+Distribute the app free, with no purchase or subscription in front of any content. Several packs, including iFixit, LibreTexts and Khan Academy, prohibit commercial use.
 
 Original iOS work is MIT. Review exact dependency and distribution terms before shipping a GPL component. Use documented interfaces to independently deployed services where compatible, or implement the needed behavior independently. Content and model weights retain their own licenses. [Project licensing rules](AGENTS.md)
+
+## Public repository release
+
+- Publish with the current Tinfoil Kit name, adapted icon and bundle identifier. The owner will ask the upstream author whether to adopt this port or keep it as a separately branded fork. Revisit the branding before an App Store release.
+- Verify the README's build and test instructions from a fresh clone, including Valhalla preparation. Reuse the tested long-lived Seattle basemap source.
+- Review the phone-hosted household sharing listener before inviting people to run the app from source. Online Ask sends the question to the selected provider. Local library passages stay on the phone.
+- Retain the notices and update them when dependencies or content change. [Third-party notices](THIRD-PARTY.md)
 
 ## Desktop feature parity
 
 Compare the iOS app to desktop revision `6417927`. Revisit the inventory as each milestone lands, including the desktop portal, command-line setup and maintenance, and the household sharing service. Use native iOS workflows for equivalent outcomes and track any outcome the platform cannot provide. [Desktop design](https://github.com/tudor-city-ventures/tinfoil-kit/blob/64179271bcebffc5d76f1e3d13d2592e0089b6b1/docs/DESIGN.md)
 
-| Milestone | Verify on iOS |
-| --- | --- |
-| Library and content packs | Select a preset, language and edition. Install and search curated packs and larger archives. Check sizes, attribution and available storage. Verify, repair, update and remove packs while keeping valid content available. Exercise full-text search on PDF collections and confirm offline reading after restart. |
-| Household tools | Save home, pins and notes, then restart in airplane mode. Find pins by name, copy decimal and DMS coordinates, and print the household essentials and verified page ranges from the installed editions. |
-| Regional navigation | Install a named region with explicit coverage. Find street addresses and nearby services, search with coordinates, and follow selectable walking and driving steps. Check edge snapping, one-way streets and turn restrictions with offline fixtures. |
-| Ask and local chat | Run conventional search with the model off. Stream answers drawn from retrieved passages with tappable citations. Support an optional downloadable model, uncited chat, and clearly identified map questions with deterministic fallback. |
-| Household sharing | Connect two real devices to a phone-hosted session and verify access rules, interruptions and notes conflicts. Serve only content whose redistribution terms permit it. Document the foreground host lifecycle and test reconnecting. |
-| Setup, help and readiness | Make installed content, source, last refresh, available capabilities and recovery steps visible. Provide offline help and a portable setup workflow for permitted content. |
+| Milestone | Beta | Verify on iOS |
+| --- | --- | --- |
+| Library and content packs | Yes | Select a preset, language and edition. Install and search curated packs and larger archives. Check sizes, attribution and available storage. Verify, repair, update and remove packs while keeping valid content available. Exercise full-text search on PDF collections and confirm offline reading after restart. |
+| Household tools | Yes | Save home, pins and notes, then restart in airplane mode. Find pins by name, copy decimal and DMS coordinates, and print the household essentials and verified page ranges from the installed editions. |
+| Setup, help and readiness | Yes | Make installed content, source, last refresh, available capabilities and recovery steps visible. Provide offline help and a portable setup workflow for permitted content. |
+| Regional navigation | Basemap only | Install a named region with explicit coverage. Find street addresses and nearby services, search with coordinates, and follow selectable walking and driving steps. Check edge snapping, one-way streets and turn restrictions with offline fixtures. |
+| Ask and local chat | Search only | Run conventional search with the model off. Stream answers drawn from retrieved passages with tappable citations. Support an optional downloadable model, uncited chat, and clearly identified map questions with deterministic fallback. |
+| Household sharing | No | Start after pack installation is reliable. First transfer a single verified pack between two nearby phones, then add a phone-hosted session with shared queries. Declare local network and Bonjour usage. iOS suspends the host when the app leaves the foreground, so state that the host phone keeps the app open and test reconnecting after interruptions. Verify access rules and notes conflicts on two real devices. Serve only content whose redistribution terms permit it. Evaluate a desktop companion that talks to the existing LAN service separately. |
 
 Use local fixtures and isolated simulator build directories. Check representative production data and install each completed fix or feature on the connected iPhone when available.

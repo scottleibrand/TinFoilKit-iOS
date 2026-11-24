@@ -37,7 +37,7 @@ struct HouseholdShareView: View {
                     startSharing
                 }
             } footer: {
-                Text("Use a trusted Wi-Fi or Ethernet network. Anyone with the link on that network can read your selection until you leave this screen or 10 minutes pass.")
+                Text("Use a trusted Wi-Fi or Ethernet network. The link isn't encrypted, so anyone on that network who has the link or can watch its traffic can read your selection until you leave this screen or 10 minutes pass.")
             }
         }
         .navigationTitle("Share on local network")

@@ -1,15 +1,39 @@
 # Tinfoil Kit for iOS
 
-Read ZIM archives and view regional maps on an iPhone without an internet connection. The app includes full-text search for installed archives up to 1 GB, two downloadable Wikipedia packs, and a Seattle-area map with local place search. Walking previews require the Seattle walking graph. On compatible devices, the app can summarize matching passages with Apple Intelligence and link to the articles it cites.
+Read ZIM archives and view regional maps on an iPhone without an internet connection. The app includes full-text search for installed articles, a downloadable Essentials catalog, and a Seattle-area map with local place search. Large archives index in batches and resume after interruption when storage is available. Walking previews require the Seattle walking graph.
+
+Download packs individually over Wi-Fi or choose Download Essentials or Download All to get current editions in bulk. Filter by language in Content Packs to find English and Spanish editions. The Extended Library includes a larger English Wikipedia selection and iFixit guides.
+
+Press and hold an installed archive in Library to verify its publisher checksum, repair it, update it when a newer edition is listed, or remove it. Repair replaces a same-edition copy after checksum verification. An update keeps the earlier edition and its index available until the new one is verified and searchable.
+
+Library and Ask can search article text and PDF pages as indexes build. Results from PDFs open to the matching page. Ask can stream a cited answer on devices with Apple Intelligence, and you can turn its on-device model off from the options menu.
+
+When local evidence is insufficient, use **Ask online** and choose GPT, Claude, or Google Gemini. Add each provider’s API key under **Ask options → Online providers**. The app sends the question after you choose a provider and keeps API keys in the device’s Keychain. Future offline searches can use saved GPT or Claude answers, citation details, and readable source copies when available. Gemini grounding stays in the online session because Google restricts indexing and reuse of grounded responses and links. [Google grounding terms](https://ai.google.dev/gemini-api/terms#grounding-with-google-search)
+
+The Map tab saves tiles as you pan, zoom, or follow your location. Saved tiles stay in the app’s durable storage and remain available across launches. Basemap tiles use the Protomaps archive hosted by Source Cooperative. Library indexing continues while you use the Map tab. [Protomaps OpenStreetMap data](https://source.coop/protomaps/openstreetmap)
+
+In Map, press and hold a location to copy its coordinates, set it as home, or save a named pin. Map search accepts saved place names and coordinates in decimal or degrees, minutes, and seconds. The Household tab keeps notes, home, and pins on the device.
+
+Use Print the Essentials in Household for a printable copy of your household information and selected pages from installed references. Install a regional place index to include the nearest services to your saved home.
+
+To build a regional address and service index, install `osmium==4.2.0` and run `python Scripts/build-regional-place-index.py region.osm.pbf region.sqlite --region "Region name" --source https://provider.example/region.osm.pbf`, using the actual source URL. Import the resulting SQLite file from Map. It works with any basemap and includes its own OpenStreetMap attribution.
+
+Import a compatible `.tfkroute` graph from Map to plan offline walks and drives and follow individual route steps. Build a graph from a regional OSM extract with `python Scripts/build-regional-routing-pack.py --help`. Routing packs are separate from basemap tiles and place indexes. [Routing engine and graph formats](Scripts/routing/README.md)
+
+To make a graph available for installation from the app bundle, place its `.tfkroute` file in `.build/routing-packs/` before running XcodeGen.
+
+Open **Offline readiness** from the Library toolbar to check storage, installed content, indexing progress, model availability, and map coverage before a trip.
 
 ## Build locally
 
-Use Xcode, XcodeGen, Rust, Node.js, and Python 3. The first preparation downloads the pinned reader and map dependencies plus a public ZIM test fixture. Generated files and external data are stored in `.build/`.
+Use Xcode, XcodeGen, Rust, Node.js, and Python 3. The first preparation downloads the pinned reader, map and routing dependencies plus a public ZIM test fixture. Generated files and external data are stored in `.build/`.
 
 ```sh
 rustup target add aarch64-apple-ios-sim
 bash Scripts/prepare-map-assets.sh
+bash Scripts/routing/prepare-apple-routing.sh
 bash Scripts/prepare-zim-reader.sh
+xcodegen generate
 xcodebuild build -project TinfoilKit.xcodeproj -scheme TinfoilKit \
     -destination 'platform=iOS Simulator,id=YOUR_SIMULATOR_UDID' \
     -derivedDataPath .build/AppDerivedData CODE_SIGNING_ALLOWED=NO
@@ -23,4 +47,4 @@ To enable Seattle walking previews, download the Seattle PBF from BBBike, instal
 
 Run the `ZIMArchive` scheme on a dedicated simulator for library and search tests. For the `TinfoilKit` UI test scheme, install the debug app in a dedicated simulator and copy `.build/fixtures/climate.zim` into its Documents folder as `Climate Test.zim`. The test uses the Files picker to import it on a fresh install.
 
-Project source code is under the [MIT license](LICENSE). Third-party software and downloaded data retain their own terms. The [implementation plan](PLAN.md) describes the milestones and release criteria.
+Project source code is under the [MIT license](LICENSE). See the [third-party notices](THIRD-PARTY.md) for dependency and content terms and the [implementation plan](PLAN.md) for milestones and release criteria.
