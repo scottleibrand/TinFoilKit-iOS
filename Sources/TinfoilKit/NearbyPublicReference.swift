@@ -6,6 +6,7 @@ struct NearbyPublicReference: Sendable {
     static let id = manifest.id
     static let title = "Household check-in worksheet"
     static let expectedByteCount = manifest.byteCount
+    static let resumePin = "\(manifest.id)-\(manifest.sha256)"
 
     private static let manifest = NearbyPublicManifest(
         id: "household-check-in-v1", byteCount: 1_977,
@@ -55,16 +56,40 @@ struct NearbyPublicReference: Sendable {
         case .unlisted: throw StoreError.invalidReference
         case .insufficientStorage: throw StoreError.insufficientStorage
         }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        var folder = directory
-        var values = URLResourceValues()
-        values.isExcludedFromBackup = true
-        try folder.setResourceValues(values)
+        try prepareDirectory()
         let decision = admission()
         if decision == .alreadyInstalled { return false }
         guard decision == .receive else { throw StoreError.insufficientStorage }
         try data.write(to: receivedFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         return true
+    }
+
+    private func prepareDirectory() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var folder = directory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try folder.setResourceValues(values)
+    }
+
+    // The filename binds the prefix to this exact catalog edition and digest.
+    private var checkpointFile: URL {
+        directory.appendingPathComponent("\(Self.resumePin).partial")
+    }
+
+    func checkpoint() -> Data {
+        NearbyPublicResume.load(from: checkpointFile, byteCount: Self.expectedByteCount)
+    }
+
+    func saveCheckpoint(_ data: Data) throws {
+        guard (1..<Self.expectedByteCount).contains(data.count) else { throw StoreError.invalidReference }
+        guard admission() == .receive else { throw StoreError.insufficientStorage }
+        try prepareDirectory()
+        try data.write(to: checkpointFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    func removeCheckpoint() {
+        try? FileManager.default.removeItem(at: checkpointFile)
     }
 
     private var receivedFile: URL {
