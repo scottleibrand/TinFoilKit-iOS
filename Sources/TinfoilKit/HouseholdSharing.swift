@@ -61,7 +61,7 @@ struct HouseholdShareAddress: Equatable, Sendable {
 struct HouseholdSharePage: Sendable {
     let body: Data
 
-    init(snapshot: HouseholdSnapshot) {
+    init(snapshot: HouseholdSnapshot, publicWorksheet: String? = nil) {
         var content = ""
         if !snapshot.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             content += "<section><h2>Notes</h2><p>\(Self.escape(snapshot.notes))</p></section>"
@@ -71,6 +71,9 @@ struct HouseholdSharePage: Sendable {
         }
         if !snapshot.pins.isEmpty {
             content += "<section><h2>Pins</h2>" + snapshot.pins.map(Self.place).joined() + "</section>"
+        }
+        if let publicWorksheet {
+            content += "<section><h2>Public check-in worksheet</h2><p>\(Self.escape(publicWorksheet))</p></section>"
         }
         let html = """
         <!doctype html>
