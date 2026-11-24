@@ -24,6 +24,7 @@ struct RegionalBundleManifest: Codable, Equatable, Sendable {
 
     enum Error: LocalizedError, Equatable {
         case invalidManifest
+        case missingManifest(String)
         case invalidArtifact(String)
         case metadataMismatch(String)
 
@@ -31,6 +32,8 @@ struct RegionalBundleManifest: Codable, Equatable, Sendable {
             switch self {
             case .invalidManifest:
                 "The folder needs a valid Tinfoil Kit regional bundle manifest."
+            case .missingManifest(let folder):
+                "The folder “\(folder)” does not contain a manifest.json file."
             case .invalidArtifact(let name):
                 "The regional bundle file \(name) is missing, damaged, or does not match its manifest."
             case .metadataMismatch(let name):

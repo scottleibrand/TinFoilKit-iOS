@@ -209,6 +209,11 @@ final class LibraryAndMapsTests: XCTestCase {
         if open.waitForExistence(timeout: 3) { open.tap() }
         let installFinished = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: mapMenu)
         wait(for: [installFinished], timeout: 15)
+        let error = app.alerts["Map error"]
+        if error.exists {
+            XCTFail(error.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " · "))
+            return
+        }
 
         mapMenu.tap()
         app.buttons["Installed regional bundles"].tap()

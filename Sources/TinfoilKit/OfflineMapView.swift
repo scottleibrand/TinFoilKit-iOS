@@ -19,6 +19,7 @@ struct OfflineMapView: View {
     @State private var map: OfflineMap?
     @State private var style: OfflineMapStyle?
     @State private var choosing = false
+    @State private var choosingBundle = false
     @State private var importKind = MapImportKind.tiles
     @State private var searchingPlaces = false
     @State private var loading = true
@@ -161,6 +162,12 @@ struct OfflineMapView: View {
                 allowedContentTypes: importKind.contentTypes
             ) { result in
                 beginImport(result, kind: importKind)
+            }
+            .sheet(isPresented: $choosingBundle) {
+                RegionalBundleFolderPicker { folder in
+                    choosingBundle = false
+                    if let folder { beginImport(.success(folder), kind: .bundle) }
+                }
             }
             .alert("Map error", isPresented: Binding(
                 get: { errorMessage != nil },
@@ -368,6 +375,10 @@ struct OfflineMapView: View {
 
     private func chooseImport(_ kind: MapImportKind) {
         guard importTask == nil else { return }
+        if kind == .bundle {
+            choosingBundle = true
+            return
+        }
         importKind = kind
         choosing = true
     }
@@ -565,7 +576,7 @@ struct OfflineMapView: View {
             case .tiles: extensions = ["pmtiles"]
             case .places: extensions = ["sqlite", "sqlite3"]
             case .routing: extensions = ["tfkroute"]
-            case .bundle: return [.folder]
+            case .bundle: return []
             }
             return extensions.map { UTType(filenameExtension: $0) ?? .data }
         }
@@ -585,6 +596,38 @@ struct OfflineMapView: View {
         let origin: MapRoute.Point
         let destination: MapRoute.Point
         let mode: MapTravelMode
+    }
+}
+
+private struct RegionalBundleFolderPicker: UIViewControllerRepresentable {
+    let completion: (URL?) -> Void
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(completion: completion)
+    }
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let completion: (URL?) -> Void
+
+        init(completion: @escaping (URL?) -> Void) {
+            self.completion = completion
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            completion(urls.first)
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            completion(nil)
+        }
     }
 }
 

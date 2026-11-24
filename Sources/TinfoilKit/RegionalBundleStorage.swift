@@ -79,8 +79,18 @@ actor RegionalBundleStorage {
         try Self.lock.withLock {
             try Task.checkCancellation()
             guard Self.isDirectory(source) else { throw RegionalBundleManifest.Error.invalidManifest }
-            let manifest = try RegionalBundleManifest.read(from: source.appendingPathComponent("manifest.json"))
             let files = FileManager.default
+            let contents = try files.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
+            func sourceFile(_ name: String) throws -> URL {
+                guard let file = contents.first(where: { $0.lastPathComponent == name }) else {
+                    throw RegionalBundleManifest.Error.invalidArtifact(name)
+                }
+                return file
+            }
+            guard let manifestURL = contents.first(where: { $0.lastPathComponent == "manifest.json" }) else {
+                throw RegionalBundleManifest.Error.missingManifest(source.lastPathComponent)
+            }
+            let manifest = try Self.withFileAccess(manifestURL) { try RegionalBundleManifest.read(from: manifestURL) }
             var root = directory
             try files.createDirectory(at: root, withIntermediateDirectories: true)
             var attributes = URLResourceValues()
@@ -99,11 +109,11 @@ actor RegionalBundleStorage {
             let staging = ready.appendingPathExtension("partial")
             try files.createDirectory(at: staging, withIntermediateDirectories: false)
             defer { try? files.removeItem(at: staging) }
-            let placeFile = try Self.copyVerified(assets.places, from: source, to: staging)
+            let placeFile = try Self.copyVerified(assets.places, from: sourceFile(assets.places.filename), to: staging)
             let placeMetadata = try RegionalPlaceStorage.validateIndex(at: placeFile)
             try manifest.validate(places: placeMetadata)
 
-            let routeFile = try Self.copyVerified(assets.routing, from: source, to: staging)
+            let routeFile = try Self.copyVerified(assets.routing, from: sourceFile(assets.routing.filename), to: staging)
             let routeFolder = staging.appendingPathComponent("routing", isDirectory: true)
             try RegionalRouteStore.stagePack(routeFile, at: routeFolder) { try manifest.validate(routing: $0) }
             try files.removeItem(at: routeFile)
@@ -123,8 +133,15 @@ actor RegionalBundleStorage {
         }
     }
 
-    private static func copyVerified(_ asset: RegionalBundleManifest.Asset, from source: URL, to folder: URL) throws -> URL {
-        let from = source.appendingPathComponent(asset.filename)
+    private static func withFileAccess<Value>(_ file: URL, read: () throws -> Value) rethrows -> Value {
+        let accessed = file.startAccessingSecurityScopedResource()
+        defer { if accessed { file.stopAccessingSecurityScopedResource() } }
+        return try read()
+    }
+
+    private static func copyVerified(_ asset: RegionalBundleManifest.Asset, from: URL, to folder: URL) throws -> URL {
+        let accessed = from.startAccessingSecurityScopedResource()
+        defer { if accessed { from.stopAccessingSecurityScopedResource() } }
         try asset.validateFile(at: from)
         let to = folder.appendingPathComponent(asset.filename)
         guard FileManager.default.createFile(atPath: to.path, contents: nil) else { throw RouteError.storage }
