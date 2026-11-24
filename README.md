@@ -1,5 +1,7 @@
 # Tinfoil Kit for iOS
 
+This app is based on the original desktop Tinfoil Kit by Travis Bloom and Tudor City Ventures. [Desktop repository](https://github.com/tudor-city-ventures/tinfoil-kit) · [Official website](https://tinfoilkit.com/)
+
 Read ZIM archives and view regional maps on an iPhone without an internet connection. The app includes full-text search for installed articles, a downloadable Essentials catalog, and a Seattle-area map with local place search. Large archives index in batches and resume after interruption when storage is available. Walking previews require the Seattle walking graph.
 
 Download packs individually over Wi-Fi or choose Download Essentials or Download All to get current editions in bulk. Filter by language in Content Packs to find English and Spanish editions. The Extended Library includes a larger English Wikipedia selection and iFixit guides.
