@@ -31,6 +31,19 @@ final class ExploredMapTileTests: XCTestCase {
         XCTAssertNil(MapCoordinateText.parse("45 N 100 W"))
     }
 
+    func testGoogleMapsLinkContainsOnlyDestinationCoordinates() throws {
+        let url = try XCTUnwrap(MapCoordinateText.googleMapsURL(.init(latitude: -31.176, longitude: 115.432)))
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.scheme, "https")
+        XCTAssertEqual(components.host, "www.google.com")
+        XCTAssertEqual(components.path, "/maps/search/")
+        XCTAssertEqual(components.queryItems, [
+            URLQueryItem(name: "api", value: "1"),
+            URLQueryItem(name: "query", value: "-31.176000,115.432000")
+        ])
+        XCTAssertNil(MapCoordinateText.googleMapsURL(.init(latitude: 91, longitude: 0)))
+    }
+
     func testWaterStyleFillsPolygonsAndStrokesWaterways() throws {
         let style = OfflineMapStyle(seed: nil, downloadedTiles: URL.temporaryDirectory)
         let json = try JSONSerialization.jsonObject(with: Data(style.json(tileRevision: 1).utf8))

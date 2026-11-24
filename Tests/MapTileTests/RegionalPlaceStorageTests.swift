@@ -87,6 +87,16 @@ final class RegionalPlaceStorageTests: XCTestCase {
         let page = try XCTUnwrap(PDFDocument(data: printed)?.page(at: 0)?.string)
         XCTAssertTrue(page.contains("East Hospital"))
         XCTAssertTrue(page.contains("West Hospital"))
+
+        let nearest = try await RegionalPlaceSearch.nearestInstalled(.hospital, from: home, storage: storage)
+        guard case .match(let candidate) = nearest else { return XCTFail("Expected an installed hospital") }
+        XCTAssertEqual(candidate.match.place.name, "East Hospital")
+        XCTAssertLessThan(candidate.distanceMeters, 1_000)
+        let differentService = try await RegionalPlaceSearch.nearestInstalled(.pharmacy, from: home, storage: storage)
+        guard case .noMatch = differentService else { return XCTFail("Expected no matching pharmacy") }
+        let emptyStorage = RegionalPlaceStorage(directory: root.appendingPathComponent("Empty"))
+        let empty = try await RegionalPlaceSearch.nearestInstalled(.hospital, from: home, storage: emptyStorage)
+        guard case .noPlaceData = empty else { return XCTFail("Expected no installed place data") }
     }
 
     private func makeIndex(at url: URL, region: String, longitude: Double = 10, name: String? = nil) throws {

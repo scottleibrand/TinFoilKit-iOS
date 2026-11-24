@@ -28,6 +28,8 @@ After finding an article or PDF in your browser, copy its link and paste it into
 
 For questions about water service during a power outage, include your utility or service area. Ask looks for a saved reference that matches the area and quotes the passage if it gives an operating duration. The cited source shows which facilities and conditions the statement covers.
 
+With Home set and regional place data installed, ask “Where’s the nearest pharmacy?” or “Find a hospital near home.” Ask finds the closest matching place in the installed data and shows its straight-line distance from Home. Open the result in Map or choose **Open in Google Maps** to pass along the destination coordinates. The Google Maps option is also available for selected places and dropped pins in Map. [Google Maps links](https://developers.google.com/maps/documentation/urls/get-started)
+
 The Map tab saves tiles as you pan, zoom, or follow your location. Saved tiles stay in the app’s durable storage and remain available across launches. Basemap tiles use the Protomaps archive hosted by Source Cooperative. Library indexing continues while you use the Map tab. [Protomaps OpenStreetMap data](https://source.coop/protomaps/openstreetmap)
 
 Open **Map → + → Map downloads** to limit automatic downloads to Wi-Fi or turn them off. The tile provider receives requests for the areas you view. You can check how much space saved tiles use or clear them. Clearing turns automatic downloads off and leaves bundled and imported maps available.
@@ -96,6 +98,8 @@ The local ZIP measures this build. Use App Store Connect device-specific size re
 ## Test
 
 Run the `ZIMArchive` scheme on a dedicated simulator for library and search tests. For the `TinfoilKit` UI test scheme, install the debug app in a dedicated simulator and copy `.build/fixtures/climate.zim` into its Documents folder as `Climate Test.zim`. The test uses the Files picker to import it on a fresh install.
+
+For the nearby-service Ask UI test, build an index from `Tests/RegionalPlaceIndexFixture/places.osm` with `Scripts/build-regional-place-index.py`. Import it from Files using **Map → + → Import regional place data** on the dedicated simulator and set Home at latitude 47.610, longitude −122.330. The synthetic fixture should resolve to Central Hospital.
 
 Run `bash Tests/NearbyPublicFixture/run.sh` on a Mac with local networking access to exercise discovery, opt-in, relay, and completion of existing transfers after discovery stops.
 

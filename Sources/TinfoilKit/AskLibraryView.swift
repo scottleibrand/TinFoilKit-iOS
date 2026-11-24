@@ -4,6 +4,8 @@ import ZIMArchive
 struct AskLibraryView: View {
     let library: InstalledLibrary
     @ObservedObject var indexing: LibraryIndexing
+    @ObservedObject var household: HouseholdStore
+    let openMap: (MapPlace?) -> Void
     @AppStorage("askUsesOnDeviceModel") private var useModel = true
     @FocusState private var questionFocused: Bool
     @FocusState private var serviceAreaFocused: Bool
@@ -24,6 +26,8 @@ struct AskLibraryView: View {
     @State private var cited: AskEvidence?
     @State private var onlineSheet: OnlineSheet?
     @State private var fallbackQuestion: String?
+    @State private var nearbyResult: RegionalPlaceSearch.Nearby?
+    @State private var needsMapSetup = false
 
     private var currentQuestion: String { question.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var modelEnabled: Bool { useModel && LibraryAnswer.isAvailable }
@@ -133,6 +137,14 @@ struct AskLibraryView: View {
         if let message {
             Section { Text(message) }
         }
+        if needsMapSetup {
+            Section {
+                Button("Open Map", systemImage: "map") { openMap(nil) }
+            }
+        }
+        if let nearbyResult {
+            nearbyAnswer(nearbyResult)
+        }
         if !answer.isEmpty {
             Section("Answer") {
                 Text(AnswerCitations.linkedText(answer, sourceCount: min(6, evidence.count)))
@@ -197,6 +209,39 @@ struct AskLibraryView: View {
         }
     }
 
+    private func nearbyAnswer(_ result: RegionalPlaceSearch.Nearby) -> some View {
+        let match = result.match
+        let place = match.place
+        let metadata = match.region.metadata
+        let distance = Measurement(value: result.distanceMeters, unit: UnitLength.meters)
+            .formatted(.measurement(width: .abbreviated, usage: .road))
+        return Section {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(place.name).font(.headline)
+                if !place.address.isEmpty { Text(place.address) }
+                Text("\(distance) straight-line distance from Home")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            Button("Show on map", systemImage: "map") {
+                openMap(MapPlace(id: match.id, name: place.name, kind: place.categoryLabel,
+                                 latitude: place.coordinate.latitude, longitude: place.coordinate.longitude))
+            }
+            if let destination = MapCoordinateText.googleMapsURL(place.coordinate) {
+                Link(destination: destination) {
+                    Label("Open in Google Maps", systemImage: "arrow.up.right.square")
+                }
+            }
+            Link([metadata.region, metadata.dataVersion].compactMap { $0 }.joined(separator: " · "),
+                 destination: metadata.source)
+            Link(metadata.attribution, destination: metadata.licenseURL)
+                .font(.footnote)
+        } header: {
+            Text("Nearest in installed place data")
+        } footer: {
+            Text("Check current hours and access before traveling.")
+        }
+    }
+
     private func start(_ mode: Mode) {
         let question = currentQuestion
         guard !question.isEmpty, request == nil else { return }
@@ -213,8 +258,17 @@ struct AskLibraryView: View {
         answer = ""
         fallbackQuestion = nil
         message = nil
-        progress = mode == .answerFromPassages ? "Reading the matching passages" : "Searching the library"
-        request = Request(question: question, mode: mode, useModel: modelEnabled, waterContext: waterContext)
+        nearbyResult = nil
+        needsMapSetup = false
+        let nearbyCategory = mode == .ask ? NearbyServiceQuestion.parse(question)
+            .flatMap { RegionalPlaceIndex.Category(rawValue: $0.rawValue) } : nil
+        switch (mode, nearbyCategory) {
+        case (.answerFromPassages, _): progress = "Reading the matching passages"
+        case (_, .some): progress = "Searching installed place data"
+        default: progress = "Searching the library"
+        }
+        request = Request(question: question, mode: mode, useModel: modelEnabled, waterContext: waterContext,
+                          nearbyCategory: nearbyCategory)
     }
 
     private func stop() {
@@ -231,6 +285,10 @@ struct AskLibraryView: View {
                 self.request = nil
                 progress = nil
             }
+        }
+        if let category = request.nearbyCategory {
+            await answerNearby(category, request: request)
+            return
         }
         do {
             if request.mode != .answerFromPassages {
@@ -308,6 +366,33 @@ struct AskLibraryView: View {
         }
     }
 
+    private func answerNearby(_ category: RegionalPlaceIndex.Category, request: Request) async {
+        guard self.request?.id == request.id, !Task.isCancelled else { return }
+        guard let home = household.snapshot.home else {
+            message = "Press and hold your home location in Map and choose Set as home."
+            needsMapSetup = true
+            return
+        }
+        do {
+            let result = try await RegionalPlaceSearch.nearestInstalled(category, from: home, storage: RegionalPlaceStorage())
+            guard self.request?.id == request.id, !Task.isCancelled else { return }
+            switch result {
+            case .noPlaceData:
+                message = "Import regional place data from Map to look up nearby services offline."
+                needsMapSetup = true
+            case .noMatch:
+                message = "No matching service near Home was found in the installed place data."
+                fallbackQuestion = request.question
+            case .match(let nearby):
+                nearbyResult = nearby
+            }
+        } catch {
+            guard self.request?.id == request.id, !Task.isCancelled else { return }
+            message = "The installed place data could not be searched."
+            needsMapSetup = true
+        }
+    }
+
     private func explainWaterOutage(_ context: WaterOutageContext, question: String) {
         guard let area = context.serviceArea else {
             message = "Enter your water utility or service area to look for a local estimate."
@@ -369,6 +454,7 @@ struct AskLibraryView: View {
         let mode: Mode
         let useModel: Bool
         let waterContext: WaterOutageContext?
+        let nearbyCategory: RegionalPlaceIndex.Category?
     }
 
     private struct OnlineSheet: Identifiable {

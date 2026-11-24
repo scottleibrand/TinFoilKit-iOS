@@ -15,6 +15,21 @@ struct RegionalPlaceSearch: Sendable {
         let distanceMeters: Double
     }
 
+    enum InstalledLookup: Sendable {
+        case noPlaceData, noMatch, match(Nearby)
+    }
+
+    static func nearestInstalled(_ category: RegionalPlaceIndex.Category, from home: HouseholdPlace,
+                                 storage: RegionalPlaceStorage) async throws -> InstalledLookup {
+        let regions = try await storage.installedIndexes()
+        guard !regions.isEmpty else { return .noPlaceData }
+        let lookup = Task.detached {
+            try RegionalPlaceSearch(regions: regions).nearest(category, to: home.coordinate, limit: 1).first
+        }
+        let match = try await withTaskCancellationHandler { try await lookup.value } onCancel: { lookup.cancel() }
+        return match.map(InstalledLookup.match) ?? .noMatch
+    }
+
     func search(_ query: String, near origin: CLLocationCoordinate2D?, limit: Int = 40) throws -> [Match] {
         guard limit > 0 else { return [] }
         let ordered = regions.enumerated().sorted { lhs, rhs in

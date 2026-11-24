@@ -7,6 +7,19 @@ enum MapCoordinateText {
                coordinate.latitude, coordinate.longitude)
     }
 
+    static func googleMapsURL(_ coordinate: CLLocationCoordinate2D) -> URL? {
+        guard CLLocationCoordinate2DIsValid(coordinate) else { return nil }
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "www.google.com"
+        components.path = "/maps/search/"
+        components.queryItems = [
+            URLQueryItem(name: "api", value: "1"),
+            URLQueryItem(name: "query", value: decimal(coordinate).replacingOccurrences(of: " ", with: ""))
+        ]
+        return components.url
+    }
+
     static func degreesMinutesSeconds(_ coordinate: CLLocationCoordinate2D) -> String {
         let latitude = sexagesimal(coordinate.latitude, positive: "N", negative: "S")
         let longitude = sexagesimal(coordinate.longitude, positive: "E", negative: "W")
