@@ -205,8 +205,14 @@ final class LibraryAndMapsTests: XCTestCase {
             throw XCTSkip("Copy a synthetic bundle directory named Synthetic Regional Fixture into Documents.")
         }
         fixture.tap()
+        let manifest = picker.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'manifest'")).firstMatch
+        if !manifest.waitForExistence(timeout: 3), fixture.exists {
+            fixture.doubleTap()
+        }
+        XCTAssertTrue(manifest.waitForExistence(timeout: 6), "Open the bundle directory before confirming the selection.")
         let open = picker.buttons["Open"].firstMatch
-        if open.waitForExistence(timeout: 3) { open.tap() }
+        XCTAssertTrue(open.isEnabled)
+        open.tap()
         let installFinished = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: mapMenu)
         wait(for: [installFinished], timeout: 15)
         let error = app.alerts["Map error"]
