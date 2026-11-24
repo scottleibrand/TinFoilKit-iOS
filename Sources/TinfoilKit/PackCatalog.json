@@ -225,6 +225,25 @@
   },
   {
     "pack": {
+      "id": "mdwiki-en-all-maxi",
+      "title": "WikiMed Medical Encyclopedia",
+      "version": "2025-11",
+      "source": "https://download.kiwix.org/zim/other/mdwiki_en_all_maxi_2025-11.zim",
+      "sha256": "ee51df7860dbcab8c628aad32cf9972726ab708d784cdaf3e217d596920edf80",
+      "sizeEstimate": 2302838768,
+      "attribution": "WikiProjectMed contributors · CC BY-SA, CC BY and public-domain text · Media terms vary · Packaged by Kiwix"
+    },
+    "section": "extended",
+    "language": "en",
+    "isDefault": true,
+    "individualDownloadOnly": true,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false,
+    "detail": "Read and search illustrated health articles curated by WikiProjectMed.",
+    "termsURL": "https://www.mdwiki.org/wiki/WikiProjectMed:Copyright"
+  },
+  {
+    "pack": {
       "id": "ifixit-en-all",
       "title": "iFixit Repair Guides",
       "version": "2025-12",
