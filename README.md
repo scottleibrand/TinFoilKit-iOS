@@ -1,14 +1,18 @@
 # Tinfoil Kit for iOS
 
+Tinfoil Kit puts a reference library, maps, and your household’s emergency notes on your iPhone. Download what you need while you’re connected, then look up a repair, check a map, or find your family’s meeting point when cell service is down or you’re traveling out of coverage.
+
+[Build it from source](#build-locally) to set up a kit for the places you go and the people you plan with. Start with a few guides and a local map, then try them in airplane mode so you know what you’ll have when you need it.
+
 This app is based on the original desktop Tinfoil Kit by Travis Bloom and Tudor City Ventures. [Desktop repository](https://github.com/tudor-city-ventures/tinfoil-kit) · [Official website](https://tinfoilkit.com/)
 
-Read ZIM archives and view maps on an iPhone without an internet connection. The app includes full-text search for installed articles, a downloadable Essentials catalog, and local place search where regional data is installed. Large archives index in batches and resume after interruption when storage is available.
+## Using the app
 
 Download packs individually over Wi-Fi or choose Download Essentials or Download All to get current editions in bulk. Filter by language in Content Packs to find English and Spanish editions. The Extended Library includes a larger English Wikipedia selection and iFixit guides.
 
 Press and hold an installed archive in Library to verify its publisher checksum, repair it, update it when a newer edition is listed, or remove it. Repair replaces a same-edition copy after checksum verification. An update keeps the earlier edition and its index available until the new one is verified and searchable.
 
-Library and Ask can search article text and PDF pages as indexes build. Results from PDFs open to the matching page. Ask can stream a cited answer on devices with Apple Intelligence, and you can turn its on-device model off from the options menu.
+Library and Ask can search article text and PDF pages as indexes build. Indexing resumes after an interruption when storage is available. Results from PDFs open to the matching page. Ask can stream a cited answer on devices with Apple Intelligence, and you can turn its on-device model off from the options menu.
 
 When local evidence is insufficient, use **Ask online** and choose GPT, Claude, or Google Gemini. Add each provider’s API key under **Ask options → Online providers**. The app sends the question after you choose a provider and keeps API keys in the device’s Keychain. Future offline searches can use saved GPT or Claude answers, citation details, and readable source copies when available. Gemini grounding stays in the online session because Google restricts indexing and reuse of grounded responses and links. [Google grounding terms](https://ai.google.dev/gemini-api/terms#grounding-with-google-search)
 
