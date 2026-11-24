@@ -139,12 +139,12 @@ enum HouseholdPrinting {
     }
 
     static func householdPDF(for snapshot: HouseholdSnapshot) async throws -> Data {
-        let region = try? await RegionalPlaceStorage().current()
-        let task = Task.detached(priority: .userInitiated) { try householdPDF(for: snapshot, region: region) }
+        let regions = (try? await RegionalPlaceStorage().installedIndexes()) ?? []
+        let task = Task.detached(priority: .userInitiated) { try householdPDF(for: snapshot, regions: regions) }
         return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
 
-    static func householdPDF(for snapshot: HouseholdSnapshot, region: RegionalPlaceStorage.Installed?,
+    static func householdPDF(for snapshot: HouseholdSnapshot, regions: [RegionalPlaceStorage.Installed],
                              date: Date = .now) throws -> Data {
         let body = NSMutableAttributedString(string: "")
         appendHeading("Home", to: body)
@@ -170,8 +170,8 @@ enum HouseholdPrinting {
             }
         }
 
-        if let home = snapshot.home, let region, region.metadata.bounds?.contains(home.coordinate) != false {
-            try appendServices(near: home.coordinate, region: region, to: body)
+        if let home = snapshot.home, !regions.isEmpty {
+            try appendServices(near: home.coordinate, regions: regions, to: body)
         }
 
         appendHeading("Notes", to: body)
@@ -188,31 +188,35 @@ enum HouseholdPrinting {
         return try render(body: body, date: date)
     }
 
-    private static func appendServices(near home: CLLocationCoordinate2D, region: RegionalPlaceStorage.Installed,
+    private static func appendServices(near home: CLLocationCoordinate2D, regions: [RegionalPlaceStorage.Installed],
                                        to body: NSMutableAttributedString) throws {
         let categories: [(RegionalPlaceIndex.Category, String)] = [
             (.hospital, "Hospitals"), (.urgentCare, "Urgent care"), (.pharmacy, "Pharmacies"),
             (.fireStation, "Fire stations"), (.police, "Police stations")
         ]
         var addedHeading = false
+        var attributions = Set<String>()
+        let search = RegionalPlaceSearch(regions: regions)
         for (category, title) in categories {
             try Task.checkCancellation()
-            guard let nearby = try? region.index.nearest(category, to: home, limit: 2), !nearby.isEmpty else { continue }
+            guard let nearby = try? search.nearest(category, to: home, limit: 2), !nearby.isEmpty else { continue }
             if !addedHeading {
                 appendHeading("Nearby services · straight-line distance", to: body)
                 addedHeading = true
             }
             append(title, to: body, font: "Helvetica-Bold")
             for result in nearby {
-                let place = result.place
+                let place = result.match.place
+                let metadata = result.match.region.metadata
+                attributions.insert("\(metadata.attribution) · \(metadata.license)")
                 let address = place.address.isEmpty ? "" : ", \(place.address)"
                 let distance = formatDistance(result.distanceMeters)
                 let direction = direction(from: home, to: place.coordinate)
                 append("\(place.name)\(address) · \(distance) \(direction)", to: body)
             }
         }
-        if addedHeading {
-            append("\(region.metadata.attribution) · \(region.metadata.license)", to: body, size: 9)
+        for attribution in attributions.sorted() {
+            append(attribution, to: body, size: 9)
         }
         try Task.checkCancellation()
     }

@@ -10,13 +10,21 @@ This app is based on the original desktop Tinfoil Kit by Travis Bloom and Tudor 
 
 Download packs individually over Wi-Fi or choose Download Essentials or Download All to get current editions in bulk. Filter by language in Content Packs to find English and Spanish editions. The Extended Library includes a larger English Wikipedia selection and iFixit guides.
 
-Press and hold an installed archive in Library to verify its publisher checksum, repair it, update it when a newer edition is listed, or remove it. Repair replaces a same-edition copy after checksum verification. An update keeps the earlier edition and its index available until the new one is verified and searchable.
+Press and hold an installed archive in Library to verify its checksum or remove it. Catalog packs use the publisher’s SHA-256 checksum. Files imports use the ZIM’s embedded checksum to check for corruption. Catalog packs also support repair and updates. Repair replaces a same-edition copy after checksum verification. An update keeps the earlier edition and its index available until the new one is verified and searchable.
 
 Library and Ask can search article text and PDF pages as indexes build. Indexing resumes after an interruption when storage is available. Results from PDFs open to the matching page. Ask can stream a cited answer on devices with Apple Intelligence, and you can turn its on-device model off from the options menu.
 
-When local evidence is insufficient, use **Ask online** and choose GPT, Claude, or Google Gemini. Add each provider’s API key under **Ask options → Online providers**. The app sends the question after you choose a provider and keeps API keys in the device’s Keychain. Future offline searches can use saved GPT or Claude answers, citation details, and readable source copies when available. Gemini grounding stays in the online session because Google restricts indexing and reuse of grounded responses and links. [Google grounding terms](https://ai.google.dev/gemini-api/terms#grounding-with-google-search)
+In an open article, use the archive back and forward buttons to retrace followed links, and **Find on page** to search the current article. In a PDF, use **Find in document** to jump between matches. Both reader searches work offline.
+
+Use **Add bookmark** in an article or PDF, then reopen it under **Library → Reading list**. The list also keeps recent reading and reopens PDFs on the page you were viewing. Clearing recent reading keeps your bookmarks.
+
+When local evidence is insufficient, use **Ask online** to search Google or copy the question and open ChatGPT, Claude, or Gemini without an API key. These results open outside Tinfoil Kit. To ask inside Tinfoil Kit, add a provider’s API key under **Ask options → Online providers**. The app sends the question after you choose a provider and keeps API keys in the device’s Keychain. Future offline searches can use saved GPT or Claude answers, citation details, and readable source copies when available. Gemini grounding stays in the online session because Google restricts indexing and reuse of grounded responses and links. [Google grounding terms](https://ai.google.dev/gemini-api/terms#grounding-with-google-search)
+
+After finding an article or PDF in your browser, copy its link and paste it into **Ask online → Save a web source**. You can also open **Saved web sources** from Ask options. Ask can cite readable text the publisher allows the app to save, and you can reopen or remove the source from that list. These copies stay on the device.
 
 The Map tab saves tiles as you pan, zoom, or follow your location. Saved tiles stay in the app’s durable storage and remain available across launches. Basemap tiles use the Protomaps archive hosted by Source Cooperative. Library indexing continues while you use the Map tab. [Protomaps OpenStreetMap data](https://source.coop/protomaps/openstreetmap)
+
+Use **Map → + → Import map tiles** to add a regional PMTiles basemap from Files. **Installed basemaps** shows each map’s coverage and lets you switch between regions offline. Swipe an imported basemap to remove it.
 
 In Map, press and hold a location to copy its coordinates, set it as home, or save a named pin. Map search accepts saved place names and coordinates in decimal or degrees, minutes, and seconds. The Household tab keeps notes, home, and pins on the device.
 
@@ -26,13 +34,17 @@ In **Household → Share on local network**, select the household details to sha
 
 Use Print the Essentials in Household for a printable copy of your household information and selected pages from installed references. Install a regional place index to include the nearest services to your saved home.
 
-To build a regional address and service index, install `osmium==4.2.0` and run `python Scripts/build-regional-place-index.py region.osm.pbf region.sqlite --region "Region name" --source https://provider.example/region.osm.pbf`, using the actual source URL. Import the resulting SQLite file from Map. It works with any basemap and includes its own OpenStreetMap attribution.
+To build a regional address and service index, install `osmium==4.2.0` and run `python Scripts/build-regional-place-index.py region.osm.pbf region.sqlite --region "Region name" --source https://provider.example/region.osm.pbf`, using the actual source URL. Import the resulting SQLite file from Map. Address search and nearby services use all installed regional indexes, regardless of the active basemap. Open **Map → + → Installed place data** to review or remove an index and see its source and attribution.
 
 Import a compatible `.tfkroute` graph from Map to plan offline walks and drives and follow individual route steps. Build a graph from a regional OSM extract with `python Scripts/build-regional-routing-pack.py --help`. Routing packs are separate from basemap tiles and place indexes. [Routing engine and graph formats](Scripts/routing/README.md)
 
 To make a graph available for installation from the app bundle, place its `.tfkroute` file in `.build/routing-packs/` before running XcodeGen. Routing preparation creates this folder even when no graphs are bundled.
 
 Open **Offline readiness** from the Library toolbar to check storage, installed content, indexing progress, model availability, and map coverage before a trip.
+
+Open **Library → Find nearby** to see nearby devices. Enable **Sync public references** on both devices to automatically receive and relay the verified household check-in worksheet while using any part of the app. The standard build supplies the worksheet, and the lightweight build can receive it for offline reading. Switching apps pauses discovery and lets an active transfer finish if iOS grants it time. [Nearby sharing plan](DISASTER-SHARING.md) · [Apple background execution](https://developer.apple.com/documentation/uikit/extending-your-app-s-background-execution-time)
+
+Turn on **Notify me about interrupted downloads** in Nearby to get a rate-limited alert when a receive already underway stops in the background. Tap the alert to reopen Tinfoil Kit and let Nearby sync try again.
 
 ## Build locally
 
@@ -76,5 +88,7 @@ The local ZIP measures this build. Use App Store Connect device-specific size re
 ## Test
 
 Run the `ZIMArchive` scheme on a dedicated simulator for library and search tests. For the `TinfoilKit` UI test scheme, install the debug app in a dedicated simulator and copy `.build/fixtures/climate.zim` into its Documents folder as `Climate Test.zim`. The test uses the Files picker to import it on a fresh install.
+
+Run `bash Tests/NearbyPublicFixture/run.sh` on a Mac with local networking access to exercise discovery, opt-in, relay, and completion of existing transfers after discovery stops.
 
 Project source code is under the [MIT license](LICENSE). See the [third-party notices](THIRD-PARTY.md) for dependency and content terms and the [implementation plan](PLAN.md) for milestones and release criteria.

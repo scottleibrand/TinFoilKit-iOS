@@ -44,12 +44,27 @@ final class LibraryAndMapsTests: XCTestCase {
         }
 
         app.tabBars.buttons["Map"].tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let denyLocation = springboard.alerts.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH 'Don' AND label ENDSWITH 'Allow'")
+        ).firstMatch
+        if denyLocation.waitForExistence(timeout: 3) { denyLocation.tap() }
         XCTAssertTrue(app.staticTexts["Seattle area"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.links["© OpenStreetMap contributors"].exists)
+        let attribution = app.descendants(matching: .any)["© OpenStreetMap contributors"].firstMatch
+        XCTAssertTrue(attribution.waitForExistence(timeout: 5))
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Seattle offline map"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+
+        app.buttons["Import map data"].tap()
+        app.buttons["Installed basemaps"].tap()
+        XCTAssertTrue(app.navigationBars["Installed basemaps"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Seattle area"].exists)
+        app.buttons["Done"].tap()
+        app.buttons["Import map data"].tap()
+        app.buttons["Installed place data"].tap()
+        XCTAssertTrue(app.navigationBars["Installed place data"].waitForExistence(timeout: 5))
     }
 
     func testSeattleWalkingPreview() throws {
@@ -111,6 +126,15 @@ final class LibraryAndMapsTests: XCTestCase {
         app.terminate()
         app.launch()
         XCTAssertTrue(fixture.waitForExistence(timeout: 10))
+        fixture.press(forDuration: 1)
+        let verify = app.buttons["Verify checksum"]
+        XCTAssertTrue(verify.waitForExistence(timeout: 5))
+        verify.tap()
+        let verified = app.alerts["Checksum verified"]
+        XCTAssertTrue(verified.waitForExistence(timeout: 10))
+        XCTAssertTrue(verified.staticTexts.containing(NSPredicate(format: "label CONTAINS 'embedded ZIM checksum'")).firstMatch.exists)
+        verified.buttons["OK"].tap()
+
         let search = app.searchFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
@@ -119,6 +143,30 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertTrue(excerpt.waitForExistence(timeout: 70))
         excerpt.tap()
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+        let findOnPage = app.buttons["Find on page"]
+        XCTAssertTrue(findOnPage.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: findOnPage)
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(app.buttons["Back in archive"].isEnabled)
+        XCTAssertFalse(app.buttons["Forward in archive"].isEnabled)
+
+        let removeBookmark = app.buttons["Remove bookmark"]
+        if removeBookmark.exists { removeBookmark.tap() }
+        let addBookmark = app.buttons["Add bookmark"]
+        XCTAssertTrue(addBookmark.waitForExistence(timeout: 5))
+        addBookmark.tap()
+        XCTAssertTrue(removeBookmark.waitForExistence(timeout: 5))
+
+        app.terminate()
+        app.launch()
+        let readingList = app.buttons["Reading list"]
+        XCTAssertTrue(readingList.waitForExistence(timeout: 10))
+        readingList.tap()
+        let saved = app.descendants(matching: .any)["reading-bookmark-entry"].firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 5))
+        saved.tap()
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(removeBookmark.waitForExistence(timeout: 10))
 
         app.tabBars.buttons["Ask"].tap()
         let question = app.descendants(matching: .any)["ask-question"].firstMatch
@@ -132,5 +180,15 @@ final class LibraryAndMapsTests: XCTestCase {
         app.buttons["ask-submit"].tap()
         XCTAssertTrue(app.staticTexts["Matching passages"].waitForExistence(timeout: 30))
         XCTAssertFalse(app.staticTexts["Answer"].exists)
+        let online = app.buttons["Ask online"]
+        XCTAssertTrue(online.waitForExistence(timeout: 5))
+        online.tap()
+        XCTAssertTrue(app.buttons["Search Google"].waitForExistence(timeout: 5))
+        for provider in ["ChatGPT", "Claude", "Google Gemini"] {
+            XCTAssertTrue(app.buttons["Copy question and open \(provider)"].exists)
+        }
+        app.buttons["Save a web source"].tap()
+        XCTAssertTrue(app.navigationBars["Saved web sources"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["Source URL"].exists)
     }
 }

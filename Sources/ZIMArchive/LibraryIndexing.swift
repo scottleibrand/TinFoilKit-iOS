@@ -13,6 +13,7 @@ public final class LibraryIndexing: ObservableObject {
     @Published public private(set) var archives: [InstalledArchive] = []
     @Published public private(set) var damagedArchiveIDs: [UUID] = []
     @Published public private(set) var searchable: Set<UUID> = []
+    @Published public private(set) var searchRevision = 0
     @Published public private(set) var progress: Progress?
     @Published public private(set) var errors: [UUID: String] = [:]
     @Published public private(set) var refreshError: String?
@@ -28,6 +29,7 @@ public final class LibraryIndexing: ObservableObject {
     private var removing: Set<UUID> = []
     private var inventoryRevision = 0
     private var refreshGeneration = 0
+    private var nextSearchUpdate = ContinuousClock.now
 
     public init(library: InstalledLibrary) {
         self.library = library
@@ -48,8 +50,11 @@ public final class LibraryIndexing: ObservableObject {
             archives = inventory.archives
             damagedArchiveIDs = inventory.damaged
             let ids = Set(archives.map(\.id))
-            searchable.formIntersection(ids)
-            searchable.formUnion(readable)
+            let nextSearchable = searchable.intersection(ids).union(readable)
+            if nextSearchable != searchable {
+                searchable = nextSearchable
+                searchRevision += 1
+            }
             completedIndexes.formIntersection(ids)
             errors = errors.filter { ids.contains($0.key) }
             refreshError = nil
@@ -74,7 +79,7 @@ public final class LibraryIndexing: ObservableObject {
         try await library.removeArchive(id)
         inventoryRevision += 1
         archives.removeAll { $0.id == id }
-        searchable.remove(id)
+        if searchable.remove(id) != nil { searchRevision += 1 }
         completedIndexes.remove(id)
         errors[id] = nil
         await refresh()
@@ -109,15 +114,17 @@ public final class LibraryIndexing: ObservableObject {
             let index = ArticleIndex(archiveURL: url)
             if !index.isReady {
                 progress = Progress(id: archive.id, title: archive.title, fraction: 0)
+                nextSearchUpdate = .now
                 let build = Task.detached(priority: .utility) { [weak self] in
                     try index.build(archiveURL: url) { [weak self] fraction in
                         Task { @MainActor in
                             guard let self, self.progress?.id == archive.id else { return }
-                            if !self.searchable.contains(archive.id), index.hasSearchableIndex {
-                                self.searchable.insert(archive.id)
-                            }
                             let latest = max(self.progress?.fraction ?? 0, fraction)
                             self.progress?.fraction = latest
+                            guard fraction > 0, fraction < 1, ContinuousClock.now >= self.nextSearchUpdate else { return }
+                            if !self.searchable.contains(archive.id) { self.searchable.insert(archive.id) }
+                            self.searchRevision += 1
+                            self.nextSearchUpdate = .now + .seconds(1)
                         }
                     }
                 }
@@ -130,11 +137,15 @@ public final class LibraryIndexing: ObservableObject {
                     if !(error is CancellationError) {
                         errors[archive.id] = "Search index unavailable. \(error.localizedDescription)"
                     }
+                    if index.hasSearchableIndex { searchable.insert(archive.id) }
+                    else { searchable.remove(archive.id) }
+                    searchRevision += 1
                     continue
                 }
             }
             searchable.insert(archive.id)
             completedIndexes.insert(archive.id)
+            searchRevision += 1
             await finishUpdate(archive)
         }
     }
@@ -147,7 +158,7 @@ public final class LibraryIndexing: ObservableObject {
             guard let removedID = try await library.finishUpdate(archive) else { return }
             inventoryRevision += 1
             archives.removeAll { $0.id == removedID }
-            searchable.remove(removedID)
+            if searchable.remove(removedID) != nil { searchRevision += 1 }
             completedIndexes.remove(removedID)
             errors[removedID] = nil
             errors[archive.id] = nil

@@ -2,6 +2,28 @@ import XCTest
 @testable import TinfoilKit
 
 final class OnlineAskCacheTests: XCTestCase {
+    func testUserSavedWebSourcesAreSearchableAfterReopeningAndCanBeRemoved() async throws {
+        let folder = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let citation = OnlineAskCitation(url: URL(string: "https://example.com/utility")!,
+                                        title: "Water utility guide", excerpt: nil)
+        let source = OnlineAskSavedSource(citation: citation, resolvedURL: nil,
+                                          text: "The backup generator supplies reservoir pumps.", note: nil)
+        let cache = OnlineAskCache(directory: folder)
+        try await cache.saveWebSource(source)
+        try await cache.saveWebSource(source)
+
+        let reopened = OnlineAskCache(directory: folder)
+        let matched = try await reopened.searchWebSources("Which generator supplies the reservoir pumps?")
+        XCTAssertEqual(matched.map(\.id), [source.id])
+        XCTAssertEqual(matched.first?.text, source.text)
+        let unrelated = try await reopened.searchWebSources("crochet hat")
+        XCTAssertTrue(unrelated.isEmpty)
+        try await reopened.removeWebSource(source.id)
+        let remaining = try await reopened.webSources()
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
     func testSourcesCanAnswerAnotherOfflineSearchAfterReopening() async throws {
         let folder = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }

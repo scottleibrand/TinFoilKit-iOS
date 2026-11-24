@@ -24,12 +24,12 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 
 - Verify that interrupted Files imports, map imports, pack installs and repairs recover correctly on an iPhone. Imports check storage, report progress and can be cancelled. Unreadable archive folders are reported separately from healthy archives.
 - Measure PDF page indexing and search on the actual Essentials packs. Library merges hits by each archive's rank and supports partial-word searches.
-- A large archive can't be searched, even by title, until its whole index finishes. Search the ZIM title list, or the partial index, while it builds.
+- Library search refreshes as each archive commits more of its index. Titles outside the indexed portion remain unavailable until their batch finishes.
 - The reader loads each resource fully into memory and refuses anything over 32 MiB, so large PDFs and videos fail. The scheme handler doesn't support byte ranges, so audio and video won't play. Stream large resources and answer range requests.
 - JavaScript is off for every archive, which breaks interactive content such as collapsible sections. Decide per pack, and keep the network block in place.
 - The PDF document list only appears for catalog packs marked as PDF collections. An imported PDF collection opens its main page instead. Listing the documents also scans every entry in the archive.
-- Verifying an imported archive only checks that it opens. Check the ZIM file's built-in MD5 checksum.
-- The reader has no visible back and forward buttons, find in page, history or bookmarks.
+- Library can verify the embedded ZIM checksum of imported files and the publisher SHA-256 checksum of catalog packs. Verify both on a device.
+- The reader has back and forward controls and find within articles and PDFs. Reading history and bookmarks persist, including PDF page and article section links.
 
 ### Content packs
 
@@ -41,7 +41,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 
 ### Maps
 
-- **Beta.** Regions can't be installed from inside the app. The Seattle tiles, place index and walking graph (about 100 MB) are bundled into the app. Other regions need the Python scripts and a Files import, and there's room for only one imported tile region. Publish region packs (tiles, places and routing data) in the catalog with explicit coverage, and support more than one region.
+- **Beta.** The map keeps multiple imported basemaps with coverage and a saved selection. Address and service search and household printing use multiple installed place indexes. Publish region packs (tiles, places and routing data) in the catalog for direct installation, and let users manage multiple routing graphs.
 - **Beta.** The tile cache:
   - reveals the areas a user views to the Source Cooperative host, which needs a privacy disclosure and an off switch;
   - downloads over cellular;
@@ -51,7 +51,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 - [Scripts/prepare-map-assets.sh](Scripts/prepare-map-assets.sh) extracts Seattle from the long-lived Source Cooperative basemap. Check the style and regenerate the derived assets when the source's ETag changes.
 - The map style is minimal and hand-written. It has no street names, house numbers or point-of-interest icons, and only English labels. Adopt the Protomaps basemaps style (BSD-3-Clause) with its fonts and icons.
 - Region coverage is a bounding box. Show coverage as the region's actual outline where it isn't rectangular.
-- The regional place index is stored in device backup. Exclude it, as other downloaded data is excluded.
+- Regional place indexes are excluded from device backup.
 - Walking routes show a line and a distance only. There are no step-by-step directions and no driving. This waits on the routing engine choice in milestone 3.
 
 ### Ask

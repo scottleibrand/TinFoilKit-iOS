@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 import ZIMArchive
@@ -5,9 +6,12 @@ import ZIMArchive
 @main
 struct TinfoilKitApp: App {
     @UIApplicationDelegateAdaptor(DownloadAppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var packs = PackDownloads.shared
     @StateObject private var indexing = LibraryIndexing(library: .standard)
     @StateObject private var household = HouseholdStore()
+    @StateObject private var nearby = NearbyLifecycle()
+    @StateObject private var readingShelf = ReadingShelf()
     @AppStorage("hasSeenOfflineStarterGuide") private var hasSeenOfflineStarterGuide = false
     @State private var showingOfflineStarterGuide = false
 
@@ -49,6 +53,11 @@ struct TinfoilKitApp: App {
                     packs.archiveRemoved(archive)
                 }
             }
+            .onChange(of: scenePhase, initial: true) { nearby.updatePhase(scenePhase) }
+            .environmentObject(nearby)
+            .environmentObject(nearby.discovery)
+            .environmentObject(nearby.notifications)
+            .environmentObject(readingShelf)
         }
     }
 }
@@ -57,13 +66,19 @@ private struct LibraryView: View {
     let library: InstalledLibrary
     @ObservedObject var packs: PackDownloads
     @ObservedObject var indexing: LibraryIndexing
+    @EnvironmentObject private var readingShelf: ReadingShelf
     private var archives: [InstalledArchive] { indexing.archives }
+    private var hasLibraryItems: Bool {
+        !archives.isEmpty || !indexing.damagedArchiveIDs.isEmpty ||
+            !readingShelf.bookmarks.isEmpty || !readingShelf.recent.isEmpty
+    }
     @State private var choosingArchive = false
     @State private var importTask: Task<Void, Never>?
     @State private var importProgress = 0.0
     @State private var errorMessage: String?
     @State private var query = ""
     @State private var results: [SummarySource] = []
+    @State private var resultsQuery = ""
     @State private var summary: SummaryRequest?
     @State private var sharedArchive: SharedArchive?
     @State private var pendingRemoval: ArchiveRemoval?
@@ -74,8 +89,8 @@ private struct LibraryView: View {
     var body: some View {
         NavigationStack {
             libraryWithDialogs
-            .task(id: SearchRun(query: query, ids: indexing.searchable)) {
-                await search()
+            .task(id: searchQuery) {
+                await search(searchQuery)
             }
             .sheet(item: $summary) { request in
                 ArticleSummaryView(library: library, question: request.question, sources: request.sources)
@@ -165,7 +180,7 @@ private struct LibraryView: View {
             } label: {
                 Label("Offline readiness", systemImage: "checkmark.circle")
             }
-            if !archives.isEmpty || !indexing.damagedArchiveIDs.isEmpty {
+            if hasLibraryItems {
                 Button("Import archive", systemImage: "plus") { choosingArchive = true }
                     .disabled(importTask != nil)
             }
@@ -196,7 +211,7 @@ private struct LibraryView: View {
 
     @ViewBuilder
     private var libraryContent: some View {
-        if archives.isEmpty && indexing.damagedArchiveIDs.isEmpty {
+        if !hasLibraryItems {
             ContentUnavailableView {
                 Label("No archives installed", systemImage: "books.vertical")
             } description: {
@@ -204,14 +219,23 @@ private struct LibraryView: View {
             } actions: {
                 NavigationLink("Offline starter guide") { DisasterStarterView() }
                     .buttonStyle(.borderedProminent)
+                NavigationLink("Find nearby") { NearbyView() }
+                    .buttonStyle(.bordered)
                 Button("Import from Files") { choosingArchive = true }
                     .buttonStyle(.bordered)
                     .disabled(importTask != nil)
             }
-        } else if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        } else if searchQuery.isEmpty {
             archiveList
+        } else if resultsQuery != searchQuery {
+            ProgressView("Searching library")
         } else if results.isEmpty {
-            ContentUnavailableView.search(text: query)
+            if indexing.hasPendingIndexes {
+                ContentUnavailableView("No matches yet", systemImage: "magnifyingglass",
+                                       description: Text("Search updates as more articles are indexed."))
+            } else {
+                ContentUnavailableView.search(text: query)
+            }
         } else {
             searchResults
         }
@@ -240,6 +264,16 @@ private struct LibraryView: View {
 
     private var archiveList: some View {
         List {
+            NavigationLink {
+                ReadingShelfView(library: library, indexing: indexing)
+            } label: {
+                Label("Reading list", systemImage: "bookmark")
+            }
+            NavigationLink {
+                NearbyView()
+            } label: {
+                Label("Find nearby", systemImage: "dot.radiowaves.left.and.right")
+            }
             NavigationLink("Offline starter guide") { DisasterStarterView() }
             if !indexing.damagedArchiveIDs.isEmpty {
                 Section("Damaged archives") {
@@ -291,12 +325,10 @@ private struct LibraryView: View {
                         }
                         .disabled(verifyingID == archive.id)
                     }
-                    if archive.pack != nil {
-                        Button("Verify checksum", systemImage: "checkmark.shield") {
-                            Task { await verify(archive) }
-                        }
-                        .disabled(verifyingID != nil)
+                    Button("Verify checksum", systemImage: "checkmark.shield") {
+                        Task { await verify(archive) }
                     }
+                    .disabled(verifyingID != nil || packs.isRepairing(archive))
                     if packs.canRepair(archive) {
                         Button("Repair archive", systemImage: "arrow.clockwise") {
                             do { try packs.repair(archive) }
@@ -347,7 +379,11 @@ private struct LibraryView: View {
         defer { verifyingID = nil }
         do {
             try await library.verifyArchive(archive)
-            verificationMessage = "\(archive.title) matches the publisher’s SHA-256 checksum."
+            verificationMessage = if archive.pack != nil {
+                "\(archive.title) matches the publisher’s SHA-256 checksum."
+            } else {
+                "\(archive.title) matches its embedded ZIM checksum."
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -380,36 +416,61 @@ private struct LibraryView: View {
         }
     }
 
-    private func search() async {
-        let requested = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        results = []
+    private var searchQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private func search(_ requested: String) async {
         guard !requested.isEmpty else { return }
+        let (updates, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let observation = indexing.$searchRevision.sink { _ in continuation.yield(()) }
+        defer {
+            observation.cancel()
+            continuation.finish()
+        }
         do {
             try await Task.sleep(for: .milliseconds(180))
-            let installed = archives.filter { indexing.searchable.contains($0.id) }
-            var sources: [(InstalledArchive, ArticleIndex)] = []
-            for archive in installed {
-                let url = await library.fileURL(for: archive.id)
-                sources.append((archive, ArticleIndex(archiveURL: url)))
-            }
-            let matches = try await Task.detached(priority: .userInitiated) {
-                let groups = try sources.map { archive, index in
-                    try index.search(requested, includeIncomplete: true, prefixMatching: true).map {
-                        SummarySource(archive: archive, match: $0)
-                    }
+            for await _ in updates {
+                do {
+                    let matches = try await searchIndexes(for: requested)
+                    try Task.checkCancellation()
+                    results = matches
+                    resultsQuery = requested
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    if resultsQuery != requested { results = [] }
+                    resultsQuery = requested
+                    errorMessage = error.localizedDescription
                 }
-                return LibraryResultOrder.interleave(groups, limit: 50)
-            }.value
-            if !Task.isCancelled { results = matches }
+            }
         } catch is CancellationError {
         } catch {
             if !Task.isCancelled { errorMessage = error.localizedDescription }
         }
     }
 
-    private struct SearchRun: Equatable {
-        let query: String
-        let ids: Set<UUID>
+    private func searchIndexes(for requested: String) async throws -> [SummarySource] {
+        var sources: [(InstalledArchive, ArticleIndex)] = []
+        for archive in archives where indexing.searchable.contains(archive.id) {
+            try Task.checkCancellation()
+            let url = await library.fileURL(for: archive.id)
+            sources.append((archive, ArticleIndex(archiveURL: url)))
+        }
+        let inputs = sources
+        let worker = Task.detached(priority: .userInitiated) {
+            let groups = try inputs.map { archive, index in
+                try Task.checkCancellation()
+                return try index.search(requested, includeIncomplete: true, prefixMatching: true).map {
+                    SummarySource(archive: archive, match: $0)
+                }
+            }
+            return LibraryResultOrder.interleave(groups, limit: 50)
+        }
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
     }
 
     private struct SummaryRequest: Identifiable {

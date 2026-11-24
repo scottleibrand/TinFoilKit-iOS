@@ -7,7 +7,7 @@ struct OfflineMapView: View {
     @ObservedObject var household: HouseholdStore
     @State private var storage = MapStorage()
     @State private var regionStorage = RegionalPlaceStorage()
-    @State private var region: RegionalPlaceStorage.Installed?
+    @State private var placeRegions: [RegionalPlaceStorage.Installed] = []
     @State private var routeStorage = RegionalRouteStore()
     @State private var routingRegion: RegionalRouteStore.Installed?
     @StateObject private var location = MapLocation()
@@ -31,6 +31,8 @@ struct OfflineMapView: View {
     @State private var importingRouting = false
     @State private var pointActions: HouseholdPlace?
     @State private var editingPin: HouseholdPlace?
+    @State private var showingBasemaps = false
+    @State private var showingPlaceRegions = false
 
     private var savedPlaces: [HouseholdPlace] {
         (household.snapshot.home.map { [$0] } ?? []) + household.snapshot.pins
@@ -103,12 +105,21 @@ struct OfflineMapView: View {
             .sheet(isPresented: $showingSteps) {
                 if let route { steps(for: route) }
             }
+            .sheet(isPresented: $showingBasemaps) {
+                InstalledBasemapsView(storage: storage, activeMapID: map?.id) { selected in
+                    savedPosition = ""
+                    setMap(selected)
+                }
+            }
+            .sheet(isPresented: $showingPlaceRegions) {
+                InstalledPlaceDataView(storage: regionStorage, regions: $placeRegions)
+            }
             .onChange(of: location.fix?.timestamp) {
                 if let fix = location.fix {
                     marker = MapMarker(coordinate: fix.coordinate, title: "Current position")
                 }
             }
-            .onAppear { location.setVisible(true) }
+            .onAppear { location.setVisible(true, centerInitially: savedPosition.isEmpty) }
             .onDisappear { location.setVisible(false) }
             .fileImporter(
                 isPresented: $choosing,
@@ -130,7 +141,7 @@ struct OfflineMapView: View {
                 guard style == nil else { return }
                 do {
                     setMap(try await storage.current())
-                    region = try await regionStorage.current()
+                    placeRegions = try await regionStorage.installedIndexes()
                 }
                 catch { errorMessage = error.localizedDescription }
                 do { routingRegion = try await routeStorage.current() }
@@ -175,8 +186,8 @@ struct OfflineMapView: View {
                         }
                         Text(mapTitle)
                             .font(.footnote.weight(.semibold))
-                        if let region {
-                            Link("Place data · \(region.metadata.region)", destination: region.metadata.licenseURL)
+                        if !placeRegions.isEmpty {
+                            Button("Installed place data") { showingPlaceRegions = true }
                                 .font(.caption)
                         }
                         Group {
@@ -248,6 +259,8 @@ struct OfflineMapView: View {
                     systemImage: location.following ? "location.fill" : "location"
                 ) { handleLocationButton() }
                 Menu {
+                    Button("Installed basemaps", systemImage: "map") { showingBasemaps = true }
+                    Button("Installed place data", systemImage: "list.bullet") { showingPlaceRegions = true }
                     Button("Import map tiles", systemImage: "map") { chooseImport(.tiles) }
                     Button("Import regional place data", systemImage: "magnifyingglass") {
                         chooseImport(.places)
@@ -296,8 +309,9 @@ struct OfflineMapView: View {
 
     private var placeSearch: some View {
         MapPlaceSearch(
-            index: placeIndex, region: region,
-            origin: location.fix?.coordinate ?? household.snapshot.home?.coordinate ?? MapPosition(savedPosition)?.coordinate,
+            index: placeIndex, regions: placeRegions,
+            origin: routeOrigin?.coordinate ?? location.fix?.coordinate ?? household.snapshot.home?.coordinate
+                ?? MapPosition(savedPosition)?.coordinate,
             savedPlaces: savedPlaces
         ) { place in
             marker = MapMarker(coordinate: place.coordinate, title: place.name)
@@ -323,7 +337,8 @@ struct OfflineMapView: View {
                 savedPosition = ""
                 setMap(imported)
             case .places:
-                region = try await regionStorage.install(file)
+                _ = try await regionStorage.install(file)
+                placeRegions = try await regionStorage.installedIndexes()
             case .routing:
                 importingRouting = true
                 defer { importingRouting = false }
@@ -354,10 +369,11 @@ struct OfflineMapView: View {
     }
 
     private func setMap(_ map: OfflineMap?) {
+        let initialMarker = style == nil ? marker : nil
         self.map = map
         style = OfflineMapStyle(seed: map, downloadedTiles: ExploredMapTiles.directory)
         viewport = nil
-        marker = nil
+        marker = initialMarker
         selectedPlace = nil
         route = nil
         routeRequest = nil
@@ -665,6 +681,10 @@ private final class MapLocation: NSObject, ObservableObject, @preconcurrency CLL
     @Published private(set) var following = false
     private let manager = CLLocationManager()
     private var visible = false
+    private var hasOpenedMap = false
+    private var needsInitialFix = false
+    private var requestedAuthorization = false
+    private var requestingFix = false
 
     override init() {
         super.init()
@@ -674,18 +694,24 @@ private final class MapLocation: NSObject, ObservableObject, @preconcurrency CLL
     }
 
     func toggleFollowing() {
+        needsInitialFix = false
         following.toggle()
         if following {
             message = "Finding your position"
             updateTracking()
         } else {
             manager.stopUpdatingLocation()
+            requestingFix = false
             message = nil
         }
     }
 
-    func setVisible(_ visible: Bool) {
+    func setVisible(_ visible: Bool, centerInitially: Bool = false) {
         self.visible = visible
+        if visible, !hasOpenedMap {
+            hasOpenedMap = true
+            needsInitialFix = centerInitially || manager.authorizationStatus == .notDetermined
+        }
         updateTracking()
     }
 
@@ -694,27 +720,42 @@ private final class MapLocation: NSObject, ObservableObject, @preconcurrency CLL
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard following, visible else { return }
+        requestingFix = false
+        guard visible, following || needsInitialFix else { return }
+        needsInitialFix = false
         fix = locations.last(where: { $0.horizontalAccuracy >= 0 })
         message = fix == nil ? "Could not get a location." : nil
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        guard following, visible else { return }
+        requestingFix = false
+        guard visible, following || needsInitialFix else { return }
+        needsInitialFix = false
         message = "Could not get a location."
     }
 
     private func updateTracking() {
-        guard visible, following else {
+        guard visible, following || needsInitialFix else {
             manager.stopUpdatingLocation()
+            requestingFix = false
             return
         }
         switch manager.authorizationStatus {
         case .notDetermined:
-            manager.requestWhenInUseAuthorization()
+            if !requestedAuthorization {
+                requestedAuthorization = true
+                manager.requestWhenInUseAuthorization()
+            }
         case .authorizedAlways, .authorizedWhenInUse:
-            manager.startUpdatingLocation()
+            if following {
+                requestingFix = false
+                manager.startUpdatingLocation()
+            } else if !requestingFix {
+                requestingFix = true
+                manager.requestLocation()
+            }
         default:
+            needsInitialFix = false
             following = false
             message = "Location access is off."
         }

@@ -1,7 +1,7 @@
 import CoreLocation
 import Foundation
 
-struct OfflineMap: Equatable {
+struct OfflineMap: Equatable, Identifiable, Sendable {
     let archive: URL
     let title: String
     let minLongitude: Double
@@ -9,6 +9,8 @@ struct OfflineMap: Equatable {
     let maxLongitude: Double
     let maxLatitude: Double
     let maxZoom: UInt8
+    var id: String { archive.lastPathComponent }
+    let isBundled: Bool
 
     var center: CLLocationCoordinate2D {
         CLLocationCoordinate2D(
@@ -17,7 +19,7 @@ struct OfflineMap: Equatable {
         )
     }
 
-    init(archive: URL, title: String) throws {
+    init(archive: URL, title: String, isBundled: Bool = false) throws {
         let file = try FileHandle(forReadingFrom: archive)
         defer { try? file.close() }
         guard let header = try file.read(upToCount: 127), header.count == 127,
@@ -40,6 +42,7 @@ struct OfflineMap: Equatable {
         }
         self.archive = archive
         self.title = title
+        self.isBundled = isBundled
     }
 
     func contains(_ coordinate: CLLocationCoordinate2D) -> Bool {
@@ -136,17 +139,59 @@ struct OfflineMapStyle: Identifiable {
 }
 
 actor MapStorage {
-    private let directory = URL.applicationSupportDirectory.appendingPathComponent("Maps", isDirectory: true)
-    private var archive: URL { directory.appendingPathComponent("imported.pmtiles") }
+    private let directory: URL
+    private let bundledMap: URL?
+    private var legacyArchive: URL { directory.appendingPathComponent("imported.pmtiles") }
+    private var selection: URL { directory.appendingPathComponent("current-basemap") }
+
+    init(
+        directory: URL = URL.applicationSupportDirectory.appendingPathComponent("Maps", isDirectory: true),
+        bundledMap: URL? = Bundle.main.url(forResource: "seattle", withExtension: "pmtiles", subdirectory: "map-assets")
+    ) {
+        self.directory = directory
+        self.bundledMap = bundledMap
+    }
 
     func current() throws -> OfflineMap? {
-        if FileManager.default.fileExists(atPath: archive.path) {
-            return try OfflineMap(archive: archive, title: "Imported map")
+        let maps = try installedMaps()
+        if let selected = try? String(contentsOf: selection, encoding: .utf8),
+           let map = maps.first(where: { $0.id == selected }) {
+            return map
         }
-        guard let local = Bundle.main.url(forResource: "seattle", withExtension: "pmtiles", subdirectory: "map-assets") else {
-            return nil
+        return maps.first { $0.id == legacyArchive.lastPathComponent }
+            ?? maps.first(where: \.isBundled) ?? maps.first
+    }
+
+    func installedMaps() throws -> [OfflineMap] {
+        var maps: [OfflineMap] = []
+        if let bundledMap, let map = try? OfflineMap(archive: bundledMap, title: "Seattle area", isBundled: true) {
+            maps.append(map)
         }
-        return try OfflineMap(archive: local, title: "Seattle area")
+        guard FileManager.default.fileExists(atPath: directory.path) else { return maps }
+        if let legacy = try? OfflineMap(archive: legacyArchive, title: "Imported map") { maps.append(legacy) }
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isRegularFileKey])
+        let imports = files.compactMap { archive -> OfflineMap? in
+            let stem = archive.deletingPathExtension().lastPathComponent
+            guard archive.pathExtension == "pmtiles", stem.count > 37,
+                  UUID(uuidString: String(stem.prefix(36))) != nil, stem.dropFirst(36).first == "-",
+                  (try? archive.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return nil }
+            return try? OfflineMap(archive: archive, title: String(stem.dropFirst(37)))
+        }
+        return maps + imports.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    func selectMap(_ id: OfflineMap.ID) throws -> OfflineMap {
+        guard let map = try installedMaps().first(where: { $0.id == id }) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        try prepareDirectory()
+        try Data(map.id.utf8).write(to: selection, options: .atomic)
+        return map
+    }
+
+    func removeMap(_ id: OfflineMap.ID) throws {
+        guard let map = try installedMaps().first(where: { $0.id == id }), !map.isBundled else { return }
+        try FileManager.default.removeItem(at: map.archive)
     }
 
     func importMap(from source: URL) throws -> OfflineMap {
@@ -154,11 +199,7 @@ actor MapStorage {
             throw OfflineMap.MapError.invalidArchive
         }
         let files = FileManager.default
-        try files.createDirectory(at: directory, withIntermediateDirectories: true)
-        var localDirectory = directory
-        var values = URLResourceValues()
-        values.isExcludedFromBackup = true
-        try localDirectory.setResourceValues(values)
+        try prepareDirectory()
         let staging = StagingCleanup.beginImport(in: directory)
         defer { StagingCleanup.endImport(at: staging) }
         let accessed = source.startAccessingSecurityScopedResource()
@@ -175,12 +216,27 @@ actor MapStorage {
         } else {
             try files.copyItem(at: source, to: staging)
         }
-        _ = try OfflineMap(archive: staging, title: "Imported map")
-        if files.fileExists(atPath: archive.path) {
-            _ = try files.replaceItemAt(archive, withItemAt: staging)
-        } else {
-            try files.moveItem(at: staging, to: archive)
+        let sourceName = source.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = sourceName.isEmpty ? "Imported map" : String(sourceName.unicodeScalars.prefix(48))
+        let archive = directory.appendingPathComponent("\(UUID().uuidString)-\(title).pmtiles")
+        _ = try OfflineMap(archive: staging, title: title)
+        try Task.checkCancellation()
+        try files.moveItem(at: staging, to: archive)
+        do {
+            let map = try OfflineMap(archive: archive, title: title)
+            try Data(map.id.utf8).write(to: selection, options: .atomic)
+            return map
+        } catch {
+            try? files.removeItem(at: archive)
+            throw error
         }
-        return try OfflineMap(archive: archive, title: "Imported map")
+    }
+
+    private func prepareDirectory() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var localDirectory = directory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try localDirectory.setResourceValues(values)
     }
 }

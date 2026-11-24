@@ -1,10 +1,13 @@
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
 import WebKit
 
 struct OnlineAskView: View {
     let question: String?
     let onSaved: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @State private var configured: Set<OnlineAskProvider> = []
     @State private var editing: OnlineAskProvider?
     @State private var key = ""
@@ -13,28 +16,42 @@ struct OnlineAskView: View {
     @State private var searchEntryPoint: String?
     @State private var status: String?
     @State private var error: String?
+    @State private var showingSavedSources = false
 
     var body: some View {
         NavigationStack {
             List {
                 if let question {
-                    Section("Question to send") { Text(question) }
+                    Section("Question") { Text(question).textSelection(.enabled) }
                     Section {
-                        ForEach(OnlineAskProvider.allCases) { provider in
-                            Button {
-                                if configured.contains(provider) {
-                                    pending = provider
-                                } else {
-                                    edit(provider)
-                                }
-                            } label: {
-                                Label(configured.contains(provider) ? "Ask \(provider.title)" : "Set up \(provider.title)",
-                                      systemImage: "globe")
-                            }
-                            .disabled(pending != nil)
+                        if let searchURL = OnlineAskWebSearch.googleURL(for: question) {
+                            Button("Search Google", systemImage: "magnifyingglass") { openURL(searchURL) }
                         }
+                        ForEach(OnlineAskProvider.allCases) { provider in
+                            Button("Copy question and open \(provider == .gpt ? "ChatGPT" : provider.title)",
+                                   systemImage: "arrow.up.right.square") {
+                                UIPasteboard.general.setItems([[UTType.utf8PlainText.identifier: question]],
+                                    options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(600)])
+                                openURL(provider.website)
+                            }
+                        }
+                        Button("Save a web source", systemImage: "arrow.down.document") { showingSavedSources = true }
+                    } header: {
+                        Text("Use without an API key")
                     } footer: {
-                        Text("Only this question is sent to the selected provider. An internet connection and a provider API key are required. Provider charges may apply.")
+                        Text("Google Search receives the question. For chat, paste the copied question into the provider. Results open outside Tinfoil Kit.")
+                    }
+                    if !configured.isEmpty {
+                        Section {
+                            ForEach(OnlineAskProvider.allCases.filter { configured.contains($0) }) { provider in
+                                Button("Ask \(provider.title)", systemImage: "globe") { pending = provider }
+                                    .disabled(pending != nil)
+                            }
+                        } header: {
+                            Text("Ask in Tinfoil Kit")
+                        } footer: {
+                            Text("Only this question is sent to the selected provider. Provider charges may apply.")
+                        }
                     }
                 }
                 if let status { Section { Text(status).foregroundStyle(.secondary) } }
@@ -57,7 +74,7 @@ struct OnlineAskView: View {
                 } header: {
                     Text("Provider API keys")
                 } footer: {
-                    Text("Keys stay in this device’s Keychain.")
+                    Text("Add a key to ask inside Tinfoil Kit. Keys stay in this device’s Keychain.")
                 }
             }
             .navigationTitle(question == nil ? "Online providers" : "Ask online")
@@ -66,6 +83,9 @@ struct OnlineAskView: View {
             .task { refreshKeys() }
             .task(id: pending) {
                 if let provider = pending { await ask(provider) }
+            }
+            .sheet(isPresented: $showingSavedSources) {
+                SavedWebSourcesView(onChange: onSaved)
             }
             .sheet(item: $editing) { provider in
                 NavigationStack {

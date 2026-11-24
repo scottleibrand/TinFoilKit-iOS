@@ -6,7 +6,7 @@ struct OfflineReadinessView: View {
     @AppStorage("askUsesOnDeviceModel") private var useModel = true
     @State private var availableBytes: Int64?
     @State private var map: Result<OfflineMap?, Error>?
-    @State private var places: Result<RegionalPlaceStorage.Installed?, Error>?
+    @State private var places: Result<[RegionalPlaceStorage.Installed]?, Error>?
     @State private var routing: Result<RegionalRouteStore.Installed?, Error>?
 
     var body: some View {
@@ -91,16 +91,18 @@ struct OfflineReadinessView: View {
                 Link("OpenStreetMap attribution", destination: Self.osmAttribution)
                 Text("Map may also contain areas saved as you browse.")
             }
-            coverageRow("Address and service search", state: places, missing: placeSearchStatus) { active in
-                let metadata = active.metadata
-                Text(metadata.region)
-                Text("\(metadata.placeCount.formatted()) mapped places")
-                if let version = metadata.dataVersion { Text("Data edition \(version)") }
-                if let bounds = metadata.bounds {
-                    coverageBounds(west: bounds.west, south: bounds.south, east: bounds.east, north: bounds.north)
+            coverageRow("Address and service search", state: places, missing: placeSearchStatus) { indexes in
+                ForEach(indexes) { placeIndex in
+                    let metadata = placeIndex.metadata
+                    Text(metadata.region)
+                    Text("\(metadata.placeCount.formatted()) mapped places")
+                    if let version = metadata.dataVersion { Text("Data edition \(version)") }
+                    if let bounds = metadata.bounds {
+                        coverageBounds(west: bounds.west, south: bounds.south, east: bounds.east, north: bounds.north)
+                    }
+                    Link("Data source", destination: metadata.source)
+                    Link("\(metadata.attribution) · \(metadata.license)", destination: metadata.licenseURL)
                 }
-                Link("Data source", destination: metadata.source)
-                Link("\(metadata.attribution) · \(metadata.license)", destination: metadata.licenseURL)
             }
             coverageRow("Walking and driving", state: routing, missing: routingStatus) { active in
                 let pack = active.pack
@@ -162,7 +164,10 @@ struct OfflineReadinessView: View {
             .volumeAvailableCapacityForImportantUsage
         do { map = .success(try await MapStorage().current()) }
         catch { map = .failure(error) }
-        do { places = .success(try await RegionalPlaceStorage().current()) }
+        do {
+            let indexes = try await RegionalPlaceStorage().installedIndexes()
+            places = .success(indexes.isEmpty ? nil : indexes)
+        }
         catch { places = .failure(error) }
         do { routing = .success(try await RegionalRouteStore().current()) }
         catch { routing = .failure(error) }

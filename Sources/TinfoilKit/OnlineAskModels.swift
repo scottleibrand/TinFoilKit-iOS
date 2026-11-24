@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 enum OnlineAskProvider: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -11,6 +12,27 @@ enum OnlineAskProvider: String, CaseIterable, Codable, Identifiable, Sendable {
         case .claude: "Claude"
         case .gemini: "Google Gemini"
         }
+    }
+
+    var website: URL {
+        switch self {
+        case .gpt: URL(string: "https://chatgpt.com/")!
+        case .claude: URL(string: "https://claude.ai/")!
+        case .gemini: URL(string: "https://gemini.google.com/")!
+        }
+    }
+}
+
+enum OnlineAskWebSearch {
+    static func googleURL(for question: String) -> URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "www.google.com"
+        components.path = "/search"
+        components.queryItems = [URLQueryItem(name: "q", value: question)]
+        // Form-style query parsers interpret a bare plus as a space.
+        components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        return components.url
     }
 }
 
@@ -53,16 +75,65 @@ actor OnlineAskCache {
 
     init(directory: URL) { self.directory = directory }
 
+    private var webSourcesDirectory: URL { directory.appendingPathComponent("WebSources", isDirectory: true) }
+
+    func saveWebSource(_ source: OnlineAskSavedSource) throws {
+        guard let body = source.text, !body.isEmpty else { return }
+        try FileManager.default.createDirectory(at: webSourcesDirectory, withIntermediateDirectories: true)
+        try prepareDirectory()
+        try JSONEncoder().encode(source).write(to: webSourceFile(source.id),
+                                               options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    func removeWebSource(_ url: URL) throws {
+        let file = webSourceFile(url)
+        if FileManager.default.fileExists(atPath: file.path) { try FileManager.default.removeItem(at: file) }
+    }
+
+    func webSources() throws -> [OnlineAskSavedSource] {
+        guard FileManager.default.fileExists(atPath: webSourcesDirectory.path) else { return [] }
+        let files = try FileManager.default.contentsOfDirectory(at: webSourcesDirectory, includingPropertiesForKeys: nil)
+        let decoder = JSONDecoder()
+        return try files.compactMap { file in
+            try Task.checkCancellation()
+            guard file.pathExtension == "json", let data = try? Data(contentsOf: file) else { return nil }
+            return try? decoder.decode(OnlineAskSavedSource.self, from: data)
+        }
+    }
+
+    func searchWebSources(_ question: String) throws -> [OnlineAskSavedSource] {
+        let terms = Self.words(question)
+        guard !terms.isEmpty else { return [] }
+        return try webSources().compactMap { source -> (Int, OnlineAskSavedSource)? in
+            try Task.checkCancellation()
+            let titleMatches = terms.intersection(Self.words(source.citation.title)).count
+            let bodyMatches = terms.intersection(Self.words(source.text ?? "")).count
+            guard titleMatches + bodyMatches > 0 else { return nil }
+            return (2 * titleMatches + bodyMatches, source)
+        }.sorted { lhs, rhs in
+            lhs.0 == rhs.0 ? lhs.1.id.absoluteString < rhs.1.id.absoluteString : lhs.0 > rhs.0
+        }.prefix(4).map { $0.1 }
+    }
+
+    private func webSourceFile(_ url: URL) -> URL {
+        let digest = SHA256.hash(data: Data(url.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
+        return webSourcesDirectory.appendingPathComponent(digest).appendingPathExtension("json")
+    }
+
     func save(_ answer: OnlineAskSavedAnswer) throws {
+        try prepareDirectory()
+        try JSONEncoder().encode(answer).write(
+            to: directory.appendingPathComponent(answer.id.uuidString).appendingPathExtension("json"),
+            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+        )
+    }
+
+    private func prepareDirectory() throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var folder = directory
         var resources = URLResourceValues()
         resources.isExcludedFromBackup = true
         try folder.setResourceValues(resources)
-        try JSONEncoder().encode(answer).write(
-            to: directory.appendingPathComponent(answer.id.uuidString).appendingPathExtension("json"),
-            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
-        )
     }
 
     func search(_ question: String) throws -> [OnlineAskSavedAnswer] {

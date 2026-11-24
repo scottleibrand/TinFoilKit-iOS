@@ -15,6 +15,8 @@ struct AskLibraryView: View {
     @State private var message: String?
     @State private var unreadableArchives = 0
     @State private var savedAnswers: [OnlineAskSavedAnswer] = []
+    @State private var savedWebSources: [OnlineAskSavedSource] = []
+    @State private var showingSavedSources = false
     @State private var evidence: [AskEvidence] = []
     @State private var cited: AskEvidence?
     @State private var onlineSheet: OnlineSheet?
@@ -46,7 +48,7 @@ struct AskLibraryView: View {
                     }
                 } footer: {
                     if indexing.archives.isEmpty {
-                        Text("Search checks saved answers and installed content packs.")
+                        Text("Search checks saved web sources, saved answers, and installed content packs.")
                     } else if indexing.hasPendingIndexes {
                         if let index = indexing.progress {
                             Text("Indexing \(index.title) · \(index.fraction.formatted(.percent.precision(.fractionLength(0))))")
@@ -71,6 +73,7 @@ struct AskLibraryView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button("Online providers", systemImage: "key") { onlineSheet = OnlineSheet(question: nil) }
+                        Button("Saved web sources", systemImage: "doc.text") { showingSavedSources = true }
                         if LibraryAnswer.isAvailable {
                             Toggle("Use on-device model", isOn: $useModel)
                         }
@@ -86,8 +89,13 @@ struct AskLibraryView: View {
             .sheet(item: $onlineSheet) { sheet in
                 OnlineAskView(question: sheet.question) {
                     if let question = sheet.question {
-                        Task { await refreshSavedAnswers(for: question) }
+                        Task { await refreshSavedContent(for: question) }
                     }
+                }
+            }
+            .sheet(isPresented: $showingSavedSources) {
+                SavedWebSourcesView {
+                    Task { await refreshSavedContent(for: currentQuestion) }
                 }
             }
             .sheet(item: $cited) { reference in
@@ -175,6 +183,7 @@ struct AskLibraryView: View {
         if mode != .answerFromPassages {
             sources = []
             savedAnswers = []
+            savedWebSources = []
             evidence = []
             searchedQuestion = nil
             unreadableArchives = 0
@@ -203,12 +212,12 @@ struct AskLibraryView: View {
         }
         do {
             if request.mode != .answerFromPassages {
-                await refreshSavedAnswers(for: request.question)
+                await refreshSavedContent(for: request.question)
                 var found = try await LibraryPassages.search(
                     question: request.question, archives: indexing.archives, library: library
                 )
                 let retryUntil = ContinuousClock.now + .seconds(12)
-                while found.sources.isEmpty, savedAnswers.isEmpty,
+                while found.sources.isEmpty, savedAnswers.isEmpty, savedWebSources.isEmpty,
                       indexing.hasPendingIndexes, ContinuousClock.now < retryUntil {
                     try Task.checkCancellation()
                     guard self.request?.id == request.id else { return }
@@ -218,7 +227,7 @@ struct AskLibraryView: View {
                         question: request.question, archives: indexing.archives, library: library
                     )
                 }
-                if found.sources.isEmpty, savedAnswers.isEmpty, !indexing.hasPendingIndexes,
+                if found.sources.isEmpty, savedAnswers.isEmpty, savedWebSources.isEmpty, !indexing.hasPendingIndexes,
                    request.mode == .ask, request.useModel {
                     progress = "Checking related search terms"
                     let queries = (try? await LibraryAnswer.suggestedQueries(for: request.question)) ?? []
@@ -235,7 +244,7 @@ struct AskLibraryView: View {
                 sources = found.sources
                 searchedQuestion = request.question
                 unreadableArchives = found.unreadableArchives
-                evidence = AskEvidence.combine(sources, savedAnswers: savedAnswers, question: request.question)
+                updateEvidence(for: request.question)
             }
             guard !evidence.isEmpty else {
                 message = indexing.hasPendingIndexes
@@ -273,10 +282,21 @@ struct AskLibraryView: View {
         }
     }
 
-    private func refreshSavedAnswers(for question: String) async {
-        let found = (try? await OnlineAskCache.shared.search(question)) ?? []
+    private func refreshSavedContent(for question: String) async {
+        let answers = (try? await OnlineAskCache.shared.search(question)) ?? []
+        let webSources = (try? await OnlineAskCache.shared.searchWebSources(question)) ?? []
         guard !Task.isCancelled, currentQuestion == question else { return }
-        savedAnswers = found
+        savedAnswers = answers
+        savedWebSources = webSources
+        if request == nil, answer.isEmpty, searchedQuestion == question {
+            updateEvidence(for: question)
+            if !evidence.isEmpty { message = nil }
+        }
+    }
+
+    private func updateEvidence(for question: String) {
+        evidence = AskEvidence.combine(sources, savedAnswers: savedAnswers, savedWebSources: savedWebSources,
+                                       question: question)
     }
 
     @ViewBuilder
@@ -346,10 +366,14 @@ private enum AskEvidence: Identifiable {
     }
 
     static func combine(_ local: [SummarySource], savedAnswers: [OnlineAskSavedAnswer],
-                        question: String) -> [Self] {
+                        savedWebSources: [OnlineAskSavedSource], question: String) -> [Self] {
         let keywords = OnlineAskCache.words(question)
         var seen: Set<URL> = []
-        var cached: [Self] = []
+        var cached: [Self] = savedWebSources.compactMap { source in
+            guard let text = source.text, let fragment = bestFragment(text, keywords: keywords),
+                  seen.insert(source.id).inserted else { return nil }
+            return .web(source, fragment.text)
+        }
         for entry in savedAnswers {
             let candidates = entry.sources.compactMap { source -> (OnlineAskSavedSource, Fragment)? in
                 guard let excerpt = source.text ?? source.citation.excerpt,

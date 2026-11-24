@@ -103,6 +103,25 @@ pub unsafe extern "C" fn tfk_archive_entry_count(archive: &TFKArchive) -> u32 {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn tfk_archive_verify_checksum(archive: &TFKArchive) -> *mut c_char {
+    let archive = &archive.0;
+    let message = if !archive.has_checksum() {
+        "This ZIM archive does not contain a checksum.".to_owned()
+    } else if archive.header().checksum_pos.checked_add(16) != Some(archive.file_len()) {
+        "The ZIM checksum is not at the end of the archive. The file may be damaged.".to_owned()
+    } else {
+        match archive.check() {
+            Ok(true) => return ptr::null_mut(),
+            Ok(false) => "The ZIM archive does not match its embedded checksum.".to_owned(),
+            Err(error) => format!("The ZIM checksum could not be verified. {error}"),
+        }
+    };
+    CString::new(message)
+        .unwrap_or_else(|_| CString::new("The ZIM checksum could not be verified.").unwrap())
+        .into_raw()
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn tfk_archive_title(archive: &TFKArchive) -> *mut c_char {
     archive
         .0

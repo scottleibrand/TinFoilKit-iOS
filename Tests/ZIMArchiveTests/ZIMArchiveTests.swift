@@ -14,6 +14,28 @@ private final class Fractions: @unchecked Sendable {
 }
 
 final class ZIMArchiveTests: XCTestCase {
+    func testImportedArchiveVerificationDetectsCorruption() async throws {
+        let directory = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "climate", withExtension: "zim"))
+        let library = InstalledLibrary(directory: directory)
+        let imported = try await library.importArchive(from: fixture)
+        try await library.verifyArchive(imported)
+
+        let installed = await library.fileURL(for: imported.id)
+        var bytes = try Data(contentsOf: installed)
+        bytes[bytes.count - 1] ^= 1
+        try bytes.write(to: installed, options: .atomic)
+        XCTAssertGreaterThan(try ZIMArchive(fileURL: installed).entryCount, 0)
+
+        do {
+            try await library.verifyArchive(imported)
+            XCTFail("Expected verification to reject a damaged checksum")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "The ZIM archive does not match its embedded checksum.")
+        }
+    }
+
     func testDamagedManifestDoesNotHideOtherArchives() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -170,13 +192,15 @@ final class ZIMArchiveTests: XCTestCase {
         XCTAssertEqual(entries, [archive])
     }
 
+    @MainActor
     func testSearchFindsCommittedBatchesBeforeIndexIsReady() async throws {
         let directory = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "climate", withExtension: "zim"))
-        let archiveURL = directory.appendingPathComponent("test.zim")
-        try FileManager.default.copyItem(at: fixture, to: archiveURL)
+        let library = InstalledLibrary(directory: directory)
+        let archive = try await library.importArchive(from: fixture)
+        let archiveURL = await library.fileURL(for: archive.id)
         let index = ArticleIndex(archiveURL: archiveURL)
         let builder = Task.detached {
             try index.build(archiveURL: archiveURL) { fraction in
@@ -190,6 +214,19 @@ final class ZIMArchiveTests: XCTestCase {
         XCTAssertFalse(index.isReady)
         XCTAssertTrue(try index.search("climate").isEmpty)
         XCTAssertFalse(try index.search("climate", includeIncomplete: true).isEmpty)
+
+        let indexing = LibraryIndexing(library: library)
+        await indexing.refresh()
+        let partialRevision = indexing.searchRevision
+        XCTAssertEqual(indexing.searchable, [archive.id])
+        let deadline = ContinuousClock.now + .seconds(45)
+        while indexing.hasPendingIndexes, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertTrue(index.isReady)
+        XCTAssertEqual(indexing.searchable, [archive.id])
+        XCTAssertGreaterThan(indexing.searchRevision, partialRevision)
+        XCTAssertFalse(try index.search("climate").isEmpty)
     }
 
     @MainActor
