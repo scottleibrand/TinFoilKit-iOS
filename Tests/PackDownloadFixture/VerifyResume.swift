@@ -13,21 +13,25 @@ struct VerifyResume {
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
 
-        let received: Data
-        do {
-            let (file, _) = try await session.download(from: url)
-            received = try Data(contentsOf: file)
-            print("URLSession recovered the broken connection internally.")
-        } catch {
-            let resumeKey = NSURLSessionDownloadTaskResumeData
-            guard let resume = (error as NSError).userInfo[resumeKey] as? Data, !resume.isEmpty else { throw error }
-            try resume.write(to: resumeFile, options: .atomic)
-            let (file, _) = try await session.download(resumeFrom: Data(contentsOf: resumeFile))
-            received = try Data(contentsOf: file)
-            print("Recreated the download from persisted URLSession resume data.")
+        for attempt in 0...3 {
+            do {
+                let file: URL
+                if attempt == 0 {
+                    (file, _) = try await session.download(from: url)
+                } else {
+                    (file, _) = try await session.download(resumeFrom: Data(contentsOf: resumeFile))
+                }
+                guard try Data(contentsOf: file) == expected else { throw FixtureError.incorrectBytes }
+                print("The resumed file matches the original bytes.")
+                return
+            } catch {
+                let resumeKey = NSURLSessionDownloadTaskResumeData
+                guard attempt < 3,
+                      let resume = (error as NSError).userInfo[resumeKey] as? Data, !resume.isEmpty else { throw error }
+                try resume.write(to: resumeFile, options: .atomic)
+                print("Persisted URLSession resume data after interruption.")
+            }
         }
-        guard received == expected else { throw FixtureError.incorrectBytes }
-        print("The resumed file matches the original bytes.")
     }
 
     private enum FixtureError: Error { case incorrectBytes }

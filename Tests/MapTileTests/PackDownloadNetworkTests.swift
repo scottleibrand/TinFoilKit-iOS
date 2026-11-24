@@ -30,4 +30,35 @@ final class PackDownloadNetworkTests: XCTestCase {
         XCTAssertEqual(PackDownloadNetwork.wifiOnly.resumeExtension, "resume")
         XCTAssertNotEqual(PackDownloadNetwork.wifiOnly.resumeExtension, PackDownloadNetwork.cellularAllowed.resumeExtension)
     }
+
+    func testManualResumePreservesCheckpointNetwork() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transfer = PackTransfer(directory: directory) { _ in }
+        let key = "water-2026-09"
+        let checkpoint = Data([1, 2, 3])
+        XCTAssertEqual(transfer.resumeNetwork(key), .wifiOnly)
+        try transfer.saveResume(checkpoint, key: key, network: .cellularAllowed)
+        XCTAssertEqual(transfer.resumeNetwork(key), .cellularAllowed)
+        XCTAssertEqual(try Data(contentsOf: transfer.resumeURL(key, network: .cellularAllowed)), checkpoint)
+        try transfer.saveResume(checkpoint, key: key, network: .wifiOnly)
+        XCTAssertEqual(transfer.resumeNetwork(key), .wifiOnly)
+        transfer.clearResume(key)
+        XCTAssertFalse(transfer.hasResume(key))
+    }
+
+    func testTemporaryPublisherErrorsBackOffAndPermanentErrorsStop() throws {
+        let url = try XCTUnwrap(URL(string: "https://example.org/pack.zim"))
+        func response(_ status: Int, retryAfter: String? = nil) throws -> HTTPURLResponse {
+            try XCTUnwrap(HTTPURLResponse(url: url, statusCode: status, httpVersion: nil,
+                                         headerFields: retryAfter.map { ["Retry-After": $0] }))
+        }
+        let first = PackDownloadAttempt(key: "pack")
+        XCTAssertEqual(first.retryDelay(for: try response(503)), 2)
+        XCTAssertEqual(first.retryDelay(for: try response(429, retryAfter: "30")), 30)
+        XCTAssertNil(first.retryDelay(for: try response(503, retryAfter: "86400")))
+        XCTAssertNil(first.retryDelay(for: try response(404)))
+        XCTAssertNil(PackDownloadAttempt(key: "pack", retryCount: 3).retryDelay(for: try response(503)))
+    }
 }
