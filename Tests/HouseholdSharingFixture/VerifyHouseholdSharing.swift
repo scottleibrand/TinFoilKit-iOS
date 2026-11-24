@@ -57,16 +57,29 @@ enum VerifyHouseholdSharing {
         precondition(newLink.lastPathComponent != link.lastPathComponent)
         let (_, activeResponse) = try await browser.data(from: newLink)
         precondition((activeResponse as? HTTPURLResponse)?.statusCode == 200)
+        stoppable.replaceLink()
+        guard case let .listening(replacement) = await newIterator.next() else {
+            fatalError("Could not replace the active sharing link")
+        }
+        precondition(replacement.host == newLink.host && replacement.port == newLink.port)
+        precondition(replacement.lastPathComponent != newLink.lastPathComponent)
+        let (revokedBody, revokedResponse) = try await browser.data(from: newLink)
+        precondition((revokedResponse as? HTTPURLResponse)?.statusCode == 404)
+        precondition(!String(decoding: revokedBody, as: UTF8.self).contains("Meet"))
+        let (replacementBody, replacementResponse) = try await browser.data(from: replacement)
+        precondition((replacementResponse as? HTTPURLResponse)?.statusCode == 200)
+        precondition(replacementBody == body)
+
         stoppable.stop()
         let clock = ContinuousClock()
         let deadline = clock.now + .seconds(2)
         while clock.now < deadline {
             do {
-                let request = URLRequest(url: newLink, timeoutInterval: 0.5)
+                let request = URLRequest(url: replacement, timeoutInterval: 0.5)
                 _ = try await browser.data(for: request)
                 try await Task.sleep(for: .milliseconds(50))
             } catch let error as URLError where error.code == .cannotConnectToHost || error.code == .networkConnectionLost {
-                print("Verified private household viewing, withheld fields, read-only requests, expiry, and manual stop.")
+                print("Verified private household viewing, withheld fields, read-only requests, link replacement, expiry, and manual stop.")
                 return
             }
         }

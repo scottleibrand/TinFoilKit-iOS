@@ -1,3 +1,5 @@
+import CoreImage
+import CoreImage.CIFilterBuiltins
 import Foundation
 import Network
 import SwiftUI
@@ -26,10 +28,26 @@ struct HouseholdShareView: View {
                     ShareLink(item: link) {
                         Label("Share local link", systemImage: "square.and.arrow.up")
                     }
+                    if let code = qrCode(for: link) {
+                        DisclosureGroup("Show QR code") {
+                            Image(decorative: code, scale: 1)
+                                .interpolation(.none)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 176, height: 176)
+                                .padding(12)
+                                .background(.white)
+                                .accessibilityLabel("Local sharing QR code")
+                        }
+                    }
+                    Button("Replace link", systemImage: "arrow.clockwise") { session.replaceLink() }
                     Button("Stop sharing", role: .destructive) { session.stop() }
                 case .starting:
                     ProgressView("Starting local sharing")
                     Button("Cancel", role: .cancel) { session.stop() }
+                case .replacing:
+                    ProgressView("Replacing link")
+                    Button("Stop sharing", role: .destructive) { session.stop() }
                 case .idle:
                     startSharing
                 case .message(let text):
@@ -37,7 +55,7 @@ struct HouseholdShareView: View {
                     startSharing
                 }
             } footer: {
-                Text("Use a trusted Wi-Fi or Ethernet network. The link isn't encrypted, so anyone on that network who has the link or can watch its traffic can read your selection until you leave this screen or 10 minutes pass.")
+                Text("Use a trusted Wi-Fi or Ethernet network. The link isn't encrypted, so anyone on that network who has the link or can watch its traffic can read your selection until you leave this screen or 10 minutes pass. Replacing the link revokes the previous link.")
             }
         }
         .navigationTitle("Share on local network")
@@ -45,6 +63,15 @@ struct HouseholdShareView: View {
         .onChange(of: scenePhase) {
             if scenePhase == .background { session.stop() }
         }
+    }
+
+    private static let imageContext = CIContext()
+
+    private func qrCode(for link: URL) -> CGImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(link.absoluteString.utf8)
+        guard let output = filter.outputImage else { return nil }
+        return Self.imageContext.createCGImage(output, from: output.extent)
     }
 
     private var hasNotes: Bool { !snapshot.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -65,7 +92,7 @@ struct HouseholdShareView: View {
 @MainActor
 private final class HouseholdShareSession: ObservableObject {
     enum State {
-        case idle, starting, ready(URL), message(String)
+        case idle, starting, replacing, ready(URL), message(String)
     }
 
     @Published private(set) var state: State = .idle
@@ -77,7 +104,7 @@ private final class HouseholdShareSession: ObservableObject {
 
     var running: Bool {
         switch state {
-        case .starting, .ready: true
+        case .starting, .replacing, .ready: true
         default: false
         }
     }
@@ -102,6 +129,12 @@ private final class HouseholdShareSession: ObservableObject {
             Task { @MainActor in self?.pathChanged(localAddress, page: page, attempt: id) }
         }
         monitor.start(queue: DispatchQueue(label: "org.tinfoilkit.share-path"))
+    }
+
+    func replaceLink() {
+        guard case .ready = state, let server else { return }
+        state = .replacing
+        server.replaceLink()
     }
 
     func stop() {

@@ -120,7 +120,7 @@ final class HouseholdShareServer: @unchecked Sendable {
     private let listener: NWListener
     private let address: HouseholdShareAddress
     private let event: @Sendable (Event) -> Void
-    private let resourcePath: String
+    private var resourcePath: String
     private let page: HouseholdSharePage
     private let lifetime: TimeInterval
     private let deadline: ContinuousClock.Instant
@@ -134,10 +134,7 @@ final class HouseholdShareServer: @unchecked Sendable {
         self.event = event
         self.lifetime = lifetime
         self.deadline = ContinuousClock.now + .seconds(lifetime)
-        var entropy = [UInt8](repeating: 0, count: 32)
-        let status = entropy.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, $0.count, $0.baseAddress!) }
-        guard status == errSecSuccess else { throw ShareError.tokenUnavailable }
-        resourcePath = "/household/" + entropy.map { String(format: "%02x", $0) }.joined()
+        resourcePath = try Self.makeResourcePath()
         let parameters = NWParameters.tcp
         parameters.acceptLocalOnly = true
         parameters.prohibitedInterfaceTypes = [.cellular]
@@ -150,12 +147,7 @@ final class HouseholdShareServer: @unchecked Sendable {
             guard let self, !self.closed else { return }
             switch state {
             case .ready:
-                if let port = self.listener.port,
-                   let url = URL(string: "http://\(self.address.host):\(port.rawValue)\(self.resourcePath)") {
-                    self.event(.listening(url))
-                } else {
-                    self.finish(.failed("The phone could not create a sharing link."))
-                }
+                self.publishLink()
             case let .waiting(error), let .failed(error):
                 self.finish(.failed(error.localizedDescription))
             default:
@@ -168,6 +160,36 @@ final class HouseholdShareServer: @unchecked Sendable {
         }
         listener.start(queue: queue)
         queue.asyncAfter(deadline: .now() + lifetime) { [weak self] in self?.finish(.expired) }
+    }
+
+    func replaceLink() {
+        queue.async { [self] in
+            guard !closed, ContinuousClock.now < deadline else { return }
+            do {
+                resourcePath = try Self.makeResourcePath()
+                for connection in connections.values { connection.cancel() }
+                connections.removeAll()
+                publishLink()
+            } catch {
+                finish(.failed(error.localizedDescription))
+            }
+        }
+    }
+
+    private func publishLink() {
+        if let port = listener.port,
+           let url = URL(string: "http://\(address.host):\(port.rawValue)\(resourcePath)") {
+            event(.listening(url))
+        } else {
+            finish(.failed("The phone could not create a sharing link."))
+        }
+    }
+
+    private static func makeResourcePath() throws -> String {
+        var entropy = [UInt8](repeating: 0, count: 32)
+        let status = entropy.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, $0.count, $0.baseAddress!) }
+        guard status == errSecSuccess else { throw ShareError.tokenUnavailable }
+        return "/household/" + entropy.map { String(format: "%02x", $0) }.joined()
     }
 
     func stop() {
