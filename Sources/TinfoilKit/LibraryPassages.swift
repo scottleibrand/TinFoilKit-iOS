@@ -14,6 +14,7 @@ struct LibraryPassages: Sendable {
     static func search(
         question: String,
         suggestedQueries: [String] = [],
+        waterContext: WaterOutageContext? = nil,
         archives: [InstalledArchive],
         library: InstalledLibrary
     ) async throws -> Self {
@@ -24,8 +25,8 @@ struct LibraryPassages: Sendable {
             indexed.append((archive, file))
         }
         let inputs = indexed
-        let queries = queries(for: question, suggested: suggestedQueries)
-        let intent = SearchIntent(question)
+        let queries = (waterContext?.scopedQueries ?? []) + queries(for: question, suggested: suggestedQueries)
+        let intent = SearchIntent(waterContext?.searchQuestion(question) ?? question)
         let task = Task.detached(priority: .userInitiated) {
             try search(queries: queries, intent: intent, indexed: inputs)
         }

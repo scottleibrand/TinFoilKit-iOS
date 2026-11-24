@@ -24,6 +24,8 @@ When local evidence is insufficient, use **Ask online** to search Google or copy
 
 After finding an article or PDF in your browser, copy its link and paste it into **Ask online → Save a web source**. You can also open **Saved web sources** from Ask options. Ask can cite readable text the publisher allows the app to save, and you can reopen or remove the source from that list. These copies stay on the device.
 
+For questions about water service during a power outage, include your utility or service area. Ask looks for a saved reference that matches the area and quotes the passage if it gives an operating duration. The cited source shows which facilities and conditions the statement covers.
+
 The Map tab saves tiles as you pan, zoom, or follow your location. Saved tiles stay in the app’s durable storage and remain available across launches. Basemap tiles use the Protomaps archive hosted by Source Cooperative. Library indexing continues while you use the Map tab. [Protomaps OpenStreetMap data](https://source.coop/protomaps/openstreetmap)
 
 Open **Map → + → Map downloads** to limit automatic downloads to Wi-Fi or turn them off. The tile provider receives requests for the areas you view. You can check how much space saved tiles use or clear them. Clearing turns automatic downloads off and leaves bundled and imported maps available.
