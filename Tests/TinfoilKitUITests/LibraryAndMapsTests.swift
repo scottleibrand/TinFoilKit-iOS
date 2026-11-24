@@ -36,6 +36,39 @@ final class LibraryAndMapsTests: XCTestCase {
             .waitForExistence(timeout: 25))
     }
 
+    func testNearbyServiceOpensTheClosestInstalledPlaceOnMap() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-askUsesOnDeviceModel", "NO", "-mapDownloadPolicy", "off"]
+        app.launch()
+        app.tabBars.buttons["Ask"].tap()
+        let question = app.descendants(matching: .any)["ask-question"].firstMatch
+        XCTAssertTrue(question.waitForExistence(timeout: 10))
+        question.tap()
+        question.typeText("Where is the nearest hospital?")
+        app.buttons["ask-submit"].tap()
+
+        let central = app.staticTexts["Central Hospital"]
+        guard central.waitForExistence(timeout: 8) else {
+            if app.buttons["Open Map"].exists {
+                throw XCTSkip("Install the synthetic regional place index and set the test Home before running.")
+            }
+            XCTFail("Expected the closest hospital from the synthetic place index.")
+            return
+        }
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'distance from Home'"))
+            .firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any)["Open in Google Maps"].firstMatch.exists)
+        app.buttons["Show on map"].tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let denyLocation = springboard.alerts.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH 'Don' AND label ENDSWITH 'Allow'")
+        ).firstMatch
+        if denyLocation.waitForExistence(timeout: 3) { denyLocation.tap() }
+        XCTAssertTrue(app.navigationBars["Map"].waitForExistence(timeout: 8))
+        XCTAssertTrue(central.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["Open in Google Maps"].firstMatch.exists)
+    }
+
     func testHouseholdNotesSurviveSwitchingTabsAndRelaunch() {
         let app = XCUIApplication()
         let tab = app.tabBars.buttons["Household"]
