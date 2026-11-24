@@ -49,7 +49,19 @@ python Scripts/build-regional-bundle.py build region.osm.pbf .build/region-bundl
 python Scripts/build-regional-bundle.py verify .build/region-bundle
 ```
 
-The output directory contains `places.sqlite`, `routing.tfkroute` and `manifest.json`. The catalog manifest records the source hash, edition, bounds, attribution, license and the URL, SHA-256 and byte count of each installable artifact. Verification checks the local files against that manifest, including the embedded graph digest and matching place and route metadata. Publish the files and reviewed manifest through a trusted catalog channel. The manifest itself carries no signature. Use a separately sourced basemap and import the two files with the app's existing place and routing import flows.
+The output directory contains `places.sqlite`, `routing.tfkroute` and `manifest.json`. The catalog manifest records the source hash, edition, bounds, attribution, license and the URL, SHA-256 and byte count of each installable artifact. Verification checks the local files against that manifest, including the embedded graph digest and matching place and route metadata. Publish the files and reviewed manifest through a trusted catalog channel. The manifest itself carries no signature.
+
+To include a separately sourced basemap, add these arguments to the build command. Use a PMTiles v3 archive with Mapbox Vector Tiles and a tile schema compatible with the app's Protomaps style. Use the exact byte count and SHA-256 of the local PMTiles file.
+
+```sh
+  --basemap region.pmtiles --basemap-edition BASEMAP_REVISION \
+  --basemap-source https://basemap-publisher.example/region.pmtiles \
+  --basemap-license ODbL-1.0 --basemap-license-url https://www.openstreetmap.org/copyright \
+  --basemap-attribution '© OpenStreetMap contributors · Protomaps' \
+  --basemap-byte-count "$BASEMAP_BYTES" --basemap-sha256 "$BASEMAP_SHA256"
+```
+
+Two-artifact bundles use schema version 1. A basemap adds `basemap.pmtiles` and uses schema version 2. Its `assets.basemap` entry adds `dataVersion`, `source`, `license`, `licenseURL`, `attribution` and `bounds` alongside `filename`, `url`, `byteCount` and `sha256`. The basemap's own bounds come from the PMTiles header and must contain the full region. The check uses declared bounds. Assess tile and zoom coverage for the intended area before publishing. The basemap keeps its own publisher attribution and terms. The place and routing artifacts keep the manifest's top-level OpenStreetMap attribution and terms. The app can currently import these files individually from Map.
 
 Production extracts use OpenStreetMap data. Preserve the copyright notice, ODbL terms and source edition when redistributing the files. Verify additional publisher terms before publishing. Keep downloaded extracts, generated indexes and routing graphs out of Git.
 
@@ -59,4 +71,4 @@ Run the end-to-end producer fixture with the same Python and Docker setup.
 python Tests/RegionalBundleFixture/run.py
 ```
 
-The test converts the pinned, original MIT-licensed synthetic network to PBF with an invented pharmacy and address. It uses reserved fixture URLs and exercises the production attribution fields. It checks source pinning, both artifact hashes and rejection of a modified manifest or routing payload. The temporary build stays under the ignored `.build/` directory.
+The test converts the pinned, original MIT-licensed synthetic network to PBF with an invented pharmacy and address. It also generates a separate MIT-licensed PMTiles file with one synthetic vector tile. It checks both manifest versions, basemap provenance, coverage, size and hashes, and rejection of malformed or changed artifacts. The temporary builds stay under the ignored `.build/` directory.
