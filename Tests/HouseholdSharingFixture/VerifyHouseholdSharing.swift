@@ -5,6 +5,9 @@ enum VerifyHouseholdSharing {
     static func main() async throws {
         let home = HouseholdPlace(name: "Home <north>", latitude: 47.6, longitude: -122.3)
         let page = HouseholdSharePage(snapshot: HouseholdSnapshot(notes: "Meet by A & B\n<gate>", home: home))
+        let seed = URL(fileURLWithPath: "Resources/NearbyPublic/household-check-in-v1.txt")
+        let worksheet = try String(contentsOf: seed, encoding: .utf8)
+        let publicPage = HouseholdSharePage(snapshot: HouseholdSnapshot(), publicWorksheet: worksheet)
         let loopback = HouseholdShareAddress(interface: "lo0", host: "127.0.0.1", address: 0x7f000001, mask: UInt32.max)
 
         let (events, emitter) = AsyncStream<HouseholdShareServer.Event>.makeStream()
@@ -39,6 +42,7 @@ enum VerifyHouseholdSharing {
         precondition(received.contains("Meet by A &amp; B\n&lt;gate&gt;"))
         precondition(received.contains("Home &lt;north&gt;"))
         precondition(!received.contains("<h2>Pins</h2>"))
+        precondition(!received.contains("Public check-in worksheet"))
         precondition(http?.value(forHTTPHeaderField: "Cache-Control") == "no-store")
 
         guard case .expired = await iterator.next() else { fatalError("Unconfirmed expiry") }
@@ -48,15 +52,19 @@ enum VerifyHouseholdSharing {
         } catch is URLError {}
 
         let (newEvents, newEmitter) = AsyncStream<HouseholdShareServer.Event>.makeStream()
-        let stoppable = try HouseholdShareServer(address: loopback, page: page, lifetime: 60) { event in
+        let stoppable = try HouseholdShareServer(address: loopback, page: publicPage, lifetime: 60) { event in
             newEmitter.yield(event)
         }
         var newIterator = newEvents.makeAsyncIterator()
         stoppable.start()
         guard case let .listening(newLink) = await newIterator.next() else { fatalError("Could not restart sharing") }
         precondition(newLink.lastPathComponent != link.lastPathComponent)
-        let (_, activeResponse) = try await browser.data(from: newLink)
+        let (publicBody, activeResponse) = try await browser.data(from: newLink)
         precondition((activeResponse as? HTTPURLResponse)?.statusCode == 200)
+        let publicHTML = String(decoding: publicBody, as: UTF8.self)
+        precondition(publicHTML.contains("<h2>Public check-in worksheet</h2>"))
+        precondition(publicHTML.contains("out-of-area contact"))
+        precondition(!publicHTML.contains("<h2>Notes</h2>") && !publicHTML.contains("<h2>Home</h2>"))
         stoppable.stop()
         let clock = ContinuousClock()
         let deadline = clock.now + .seconds(2)
