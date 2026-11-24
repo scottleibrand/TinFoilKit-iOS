@@ -35,7 +35,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 
 - **Beta.** The bundled catalog has pinned publisher editions and requires an app release to update. Add a way to refresh it and expand language, size, and preset choices against the upstream kit.
 - **Beta.** Add device acceptance checks for an interrupted edition update and for recovery after failed indexing. The old archive stays in the library until the new index is ready.
-- **Beta.** Bulk pack downloads use Wi-Fi. Individual transfers can allow cellular data after size confirmation. Verify pause and resume on a physical phone and evaluate discretionary transfers for Download All.
+- **Beta.** Bulk pack downloads use Wi-Fi. Individual transfers can allow cellular data after size confirmation. Temporary connection failures retry on the original network policy, using resume data when iOS supplies it. Verify pause and resume on a physical phone and evaluate discretionary transfers for Download All.
 - Each pack has one source URL. Fall back to another official mirror when it fails.
 - A checksum failure deletes the whole download. Retry once before discarding it, and report which mirror served it.
 

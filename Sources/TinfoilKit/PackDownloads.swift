@@ -17,6 +17,42 @@ enum PackDownloadNetwork: String, CaseIterable, Sendable {
     var resumeExtension: String { self == .wifiOnly ? "resume" : "cellular-resume" }
 }
 
+struct PackDownloadAttempt: Sendable {
+    let key: String
+    let retryCount: Int
+    private static let delays: [TimeInterval] = [2, 5, 15]
+
+    init(key: String, retryCount: Int = 0) {
+        self.key = key
+        self.retryCount = retryCount
+    }
+
+    init?(description: String?) {
+        guard let description, !description.isEmpty else { return nil }
+        let parts = description.split(separator: "|", omittingEmptySubsequences: false)
+        guard let key = parts.first, !key.isEmpty else { return nil }
+        if parts.count == 1 {
+            self.init(key: String(key))
+        } else {
+            guard parts.count == 2, let count = Int(parts[1]), (1...Self.delays.count).contains(count) else { return nil }
+            self.init(key: String(key), retryCount: count)
+        }
+    }
+
+    var taskDescription: String { retryCount == 0 ? key : "\(key)|\(retryCount)" }
+
+    func retryDelay(for error: NSError) -> TimeInterval? {
+        guard error.domain == NSURLErrorDomain, Self.delays.indices.contains(retryCount) else { return nil }
+        switch URLError.Code(rawValue: error.code) {
+        case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .dnsLookupFailed,
+             .notConnectedToInternet:
+            return Self.delays[retryCount]
+        default:
+            return nil
+        }
+    }
+}
+
 @MainActor
 final class PackDownloads: ObservableObject {
     static let shared = PackDownloads()
@@ -59,6 +95,7 @@ final class PackDownloads: ObservableObject {
 
     enum Status {
         case downloading(Double?)
+        case retrying
         case pausing
         case paused
         case verifying
@@ -73,13 +110,15 @@ final class PackDownloads: ObservableObject {
         var sessionTasks: [String: (task: URLSessionDownloadTask, network: PackDownloadNetwork)] = [:]
         for network in PackDownloadNetwork.allCases {
             for case let task as URLSessionDownloadTask in await transfer.session(for: network).allTasks {
-                guard let key = task.taskDescription else { continue }
-                sessionTasks[key] = (task, network)
+                guard let attempt = PackDownloadAttempt(description: task.taskDescription),
+                      task.state == .running || task.state == .suspended else { continue }
+                sessionTasks[attempt.key] = (task, network)
             }
         }
         let installed = (try? await library.archives()) ?? []
         for pack in Self.catalog {
             let key = pack.editionKey
+            if tasks[key] != nil { continue }
             if case .verifying = statuses[key] { continue }
             let repair = repairTarget(key)
             let update = updateTarget(key)
@@ -91,7 +130,8 @@ final class PackDownloads: ObservableObject {
                 statuses[key] = .installed
             } else if let active = sessionTasks[key] {
                 tasks[key] = active
-                statuses[key] = .downloading(nil)
+                let retryCount = PackDownloadAttempt(description: active.task.taskDescription)?.retryCount ?? 0
+                statuses[key] = retryCount > 0 && active.task.countOfBytesReceived == 0 ? .retrying : .downloading(nil)
             } else if FileManager.default.fileExists(atPath: transfer.downloadURL(key).path) {
                 install(pack)
             } else if transfer.hasResume(key) {
@@ -202,7 +242,7 @@ final class PackDownloads: ObservableObject {
             let key = pack.editionKey
             guard updateTarget(key) == archive.id else { return false }
             switch statuses[key] {
-            case .pausing, .downloading, .verifying: return true
+            case .pausing, .downloading, .retrying, .verifying: return true
             default: return false
             }
         }
@@ -218,7 +258,7 @@ final class PackDownloads: ObservableObject {
     func isRepairing(_ archive: InstalledArchive) -> Bool {
         guard let pack = archive.pack, repairTarget(pack.editionKey) == archive.id else { return false }
         switch statuses[pack.editionKey] {
-        case .pausing, .downloading, .verifying: return true
+        case .pausing, .downloading, .retrying, .verifying: return true
         default: return false
         }
     }
@@ -257,7 +297,7 @@ final class PackDownloads: ObservableObject {
         guard tasks[key] == nil else { return false }
         switch statuses[key] {
         case nil, .paused, .failed: return true
-        case .downloading, .pausing, .verifying, .installed: return false
+        case .downloading, .retrying, .pausing, .verifying, .installed: return false
         }
     }
 
@@ -272,7 +312,7 @@ final class PackDownloads: ObservableObject {
         let reservedBytes = Self.catalog.reduce(Int64.zero) { total, pack in
             let key = pack.editionKey
             switch statuses[key] {
-            case .downloading:
+            case .downloading, .retrying:
                 let received = max(0, tasks[key]?.task.countOfBytesReceived ?? 0)
                 return total + capacityEstimate(for: pack) - min(received, pack.sizeEstimate)
             case .verifying:
@@ -285,20 +325,26 @@ final class PackDownloads: ObservableObject {
         if let bytes = available.volumeAvailableCapacityForImportantUsage, bytes < required {
             throw InsufficientStorage(shortfall: required - bytes)
         }
-        let session = transfer.session(for: network)
         for pack in packs {
-            let key = pack.editionKey
-            let task: URLSessionDownloadTask
-            if let resume = try? Data(contentsOf: transfer.resumeURL(key, network: network)) {
-                task = session.downloadTask(withResumeData: resume)
-            } else {
-                task = session.downloadTask(with: pack.source)
-            }
-            task.taskDescription = key
-            tasks[key] = (task, network)
-            statuses[key] = .downloading(nil)
-            task.resume()
+            beginDownload(pack, network: network, attempt: PackDownloadAttempt(key: pack.editionKey))
         }
+    }
+
+    private func beginDownload(_ pack: PublishedPack, network: PackDownloadNetwork, attempt: PackDownloadAttempt,
+                               delay: TimeInterval? = nil) {
+        let session = transfer.session(for: network)
+        let resumeURL = transfer.resumeURL(attempt.key, network: network)
+        let task: URLSessionDownloadTask
+        if let resume = try? Data(contentsOf: resumeURL) {
+            task = session.downloadTask(withResumeData: resume)
+        } else {
+            task = session.downloadTask(with: pack.source)
+        }
+        task.taskDescription = attempt.taskDescription
+        if let delay { task.earliestBeginDate = Date().addingTimeInterval(delay) }
+        tasks[attempt.key] = (task, network)
+        statuses[attempt.key] = delay == nil ? .downloading(nil) : .retrying
+        task.resume()
     }
 
     private func capacityEstimate(for pack: PublishedPack) -> Int64 {
@@ -335,20 +381,30 @@ final class PackDownloads: ObservableObject {
     private func handle(_ event: PackTransfer.Event) {
         switch event {
         case let .progress(ticket, fraction):
-            guard accepts(ticket), case .downloading = statuses[ticket.key] else { return }
-            statuses[ticket.key] = .downloading(fraction)
+            guard accepts(ticket) else { return }
+            switch statuses[ticket.key] {
+            case .downloading, .retrying: statuses[ticket.key] = .downloading(fraction)
+            default: break
+            }
         case let .downloaded(ticket):
             guard accepts(ticket) else { return }
             let key = ticket.key
             tasks[key] = nil
             if let pack = Self.catalog.first(where: { $0.editionKey == key }) { install(pack) }
-        case let .failed(ticket, message):
-            guard accepts(ticket) else { return }
+        case let .failed(ticket, message, delay):
             let key = ticket.key
+            guard accepts(ticket), tasks[key] != nil || restoring else { return }
             tasks[key] = nil
             switch statuses[key] {
             case .pausing, .paused, .verifying, .installed: break
-            default: statuses[key] = .failed(message)
+            default:
+                if let delay, let pack = Self.catalog.first(where: { $0.editionKey == key }) {
+                    beginDownload(pack, network: ticket.network,
+                                  attempt: PackDownloadAttempt(key: key, retryCount: ticket.attempt.retryCount + 1),
+                                  delay: delay)
+                } else {
+                    statuses[key] = .failed(message)
+                }
             }
         case let .finishedEvents(network):
             backgroundCompletions.removeValue(forKey: network)?()
@@ -389,14 +445,16 @@ final class PackDownloads: ObservableObject {
 
 private final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     struct Ticket: Sendable {
-        let key: String
+        let attempt: PackDownloadAttempt
         let network: PackDownloadNetwork
         let taskID: Int
+        var key: String { attempt.key }
 
         init?(session: URLSession, task: URLSessionTask) {
-            guard let key = task.taskDescription, let identifier = session.configuration.identifier,
+            guard let attempt = PackDownloadAttempt(description: task.taskDescription),
+                  let identifier = session.configuration.identifier,
                   let network = PackDownloadNetwork(rawValue: identifier) else { return nil }
-            self.key = key
+            self.attempt = attempt
             self.network = network
             taskID = task.taskIdentifier
         }
@@ -405,7 +463,7 @@ private final class PackTransfer: NSObject, URLSessionDownloadDelegate, @uncheck
     enum Event: Sendable {
         case progress(Ticket, Double?)
         case downloaded(Ticket)
-        case failed(Ticket, String)
+        case failed(Ticket, String, retryAfter: TimeInterval?)
         case finishedEvents(PackDownloadNetwork)
     }
 
@@ -454,7 +512,7 @@ private final class PackTransfer: NSObject, URLSessionDownloadDelegate, @uncheck
     ) {
         guard let ticket = Ticket(session: session, task: downloadTask) else { return }
         guard let response = downloadTask.response as? HTTPURLResponse, (200...299).contains(response.statusCode) else {
-            post(.failed(ticket, "The publisher did not return the archive."))
+            post(.failed(ticket, "The publisher did not return the archive.", retryAfter: nil))
             return
         }
         do {
@@ -465,7 +523,7 @@ private final class PackTransfer: NSObject, URLSessionDownloadDelegate, @uncheck
             }
             post(.downloaded(ticket))
         } catch {
-            post(.failed(ticket, error.localizedDescription))
+            post(.failed(ticket, error.localizedDescription, retryAfter: nil))
         }
     }
 
@@ -485,7 +543,7 @@ private final class PackTransfer: NSObject, URLSessionDownloadDelegate, @uncheck
             try? saveResume(data, key: ticket.key, network: ticket.network)
         }
         guard error.code != NSURLErrorCancelled || error.domain != NSURLErrorDomain else { return }
-        post(.failed(ticket, error.localizedDescription))
+        post(.failed(ticket, error.localizedDescription, retryAfter: ticket.attempt.retryDelay(for: error)))
     }
 
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {

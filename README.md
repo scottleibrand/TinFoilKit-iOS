@@ -10,6 +10,8 @@ This app is based on the original desktop Tinfoil Kit by Travis Bloom and Tudor 
 
 Download packs individually over Wi-Fi or choose Download Essentials or Download All to get current editions in bulk. When Wi-Fi is unavailable, open the options beside a pack’s download button to review its size and allow cellular data for that transfer. Filter by language in Content Packs to find English and Spanish editions. The Extended Library includes a larger English Wikipedia selection and iFixit guides.
 
+Pack downloads retry after temporary connection failures and keep the original Wi-Fi or cellular setting. When the publisher supports resuming and iOS still has the partial file, the retry picks up where it left off. Otherwise it starts the file again. [Apple’s download resumption guide](https://developer.apple.com/documentation/foundation/pausing-and-resuming-downloads)
+
 Press and hold an installed archive in Library to verify its checksum or remove it. Catalog packs use the publisher’s SHA-256 checksum. Files imports use the ZIM’s embedded checksum to check for corruption. Catalog packs also support repair and updates. Repair replaces a same-edition copy after checksum verification. An update keeps the earlier edition and its index available until the new one is verified and searchable.
 
 Library and Ask can search article text and PDF pages as indexes build. Indexing resumes after an interruption when storage is available. Results from PDFs open to the matching page. Ask can stream a cited answer on devices with Apple Intelligence, and you can turn its on-device model off from the options menu.
