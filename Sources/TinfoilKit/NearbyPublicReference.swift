@@ -44,13 +44,37 @@ struct NearbyPublicReference: Sendable {
         guard Self.matches(data) else { throw StoreError.invalidReference }
         guard loadVerified() == nil else { return }
         guard canReceive() else { throw StoreError.insufficientStorage }
+        try prepareDirectory()
+        guard canReceive() else { throw StoreError.insufficientStorage }
+        try data.write(to: receivedFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    private func prepareDirectory() throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var folder = directory
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try folder.setResourceValues(values)
+    }
+
+    // The filename binds the prefix to this exact catalog edition and digest.
+    private var checkpointFile: URL {
+        directory.appendingPathComponent("\(Self.id)-\(Self.sha256).partial")
+    }
+
+    func checkpoint() -> Data {
+        NearbyPublicResume.load(from: checkpointFile, byteCount: Self.expectedByteCount)
+    }
+
+    func saveCheckpoint(_ data: Data) throws {
+        guard (1..<Self.expectedByteCount).contains(data.count) else { throw StoreError.invalidReference }
         guard canReceive() else { throw StoreError.insufficientStorage }
-        try data.write(to: receivedFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try prepareDirectory()
+        try data.write(to: checkpointFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    func removeCheckpoint() {
+        try? FileManager.default.removeItem(at: checkpointFile)
     }
 
     private var receivedFile: URL {

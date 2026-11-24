@@ -10,7 +10,7 @@ cleanup() {
 trap cleanup EXIT
 xcrun swiftc -module-cache-path "$output/module-cache" -o "$output/verify" \
     Tests/NearbyPublicFixture/VerifyNearbyPublic.swift \
-    Sources/TinfoilKit/Nearby{Discovery,PublicReference,PublicTLS,PublicTransfer}.swift
+    Sources/TinfoilKit/Nearby{Discovery,PublicReference,PublicResume,PublicTLS,PublicTransfer}.swift
 seed=Resources/NearbyPublic/household-check-in-v1.txt
 
 
@@ -18,6 +18,7 @@ seed=Resources/NearbyPublic/household-check-in-v1.txt
 sender=$!
 "$output/verify" disabled "$output/disabled" -
 "$output/verify" receive "$output/second" -
+"$output/verify" receive-checkpoint "$output/resumed" - "$seed"
 kill "$sender"
 wait "$sender" 2>/dev/null || true
 
