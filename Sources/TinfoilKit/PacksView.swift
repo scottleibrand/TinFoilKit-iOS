@@ -99,6 +99,9 @@ struct PacksView: View {
                 ProgressView(label)
             }
             Button("Pause") { downloads.pause(pack) }
+        case .retrying:
+            ProgressView("Waiting to retry download")
+            Button("Pause") { downloads.pause(pack) }
         case .pausing:
             ProgressView("Pausing")
         case .paused:
