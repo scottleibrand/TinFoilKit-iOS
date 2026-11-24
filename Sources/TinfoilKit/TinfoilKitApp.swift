@@ -10,6 +10,7 @@ struct TinfoilKitApp: App {
     @StateObject private var indexing = LibraryIndexing(library: .standard)
     @StateObject private var household = HouseholdStore()
     @StateObject private var nearby = NearbyLifecycle()
+    @StateObject private var readingShelf = ReadingShelf()
     @AppStorage("hasSeenOfflineStarterGuide") private var hasSeenOfflineStarterGuide = false
     @State private var showingOfflineStarterGuide = false
 
@@ -55,6 +56,7 @@ struct TinfoilKitApp: App {
             .environmentObject(nearby)
             .environmentObject(nearby.discovery)
             .environmentObject(nearby.notifications)
+            .environmentObject(readingShelf)
         }
     }
 }
@@ -63,7 +65,12 @@ private struct LibraryView: View {
     let library: InstalledLibrary
     @ObservedObject var packs: PackDownloads
     @ObservedObject var indexing: LibraryIndexing
+    @EnvironmentObject private var readingShelf: ReadingShelf
     private var archives: [InstalledArchive] { indexing.archives }
+    private var hasLibraryItems: Bool {
+        !archives.isEmpty || !indexing.damagedArchiveIDs.isEmpty ||
+            !readingShelf.bookmarks.isEmpty || !readingShelf.recent.isEmpty
+    }
     @State private var choosingArchive = false
     @State private var importTask: Task<Void, Never>?
     @State private var importProgress = 0.0
@@ -171,7 +178,7 @@ private struct LibraryView: View {
             } label: {
                 Label("Offline readiness", systemImage: "checkmark.circle")
             }
-            if !archives.isEmpty || !indexing.damagedArchiveIDs.isEmpty {
+            if hasLibraryItems {
                 Button("Import archive", systemImage: "plus") { choosingArchive = true }
                     .disabled(importTask != nil)
             }
@@ -202,7 +209,7 @@ private struct LibraryView: View {
 
     @ViewBuilder
     private var libraryContent: some View {
-        if archives.isEmpty && indexing.damagedArchiveIDs.isEmpty {
+        if !hasLibraryItems {
             ContentUnavailableView {
                 Label("No archives installed", systemImage: "books.vertical")
             } description: {
@@ -248,6 +255,11 @@ private struct LibraryView: View {
 
     private var archiveList: some View {
         List {
+            NavigationLink {
+                ReadingShelfView(library: library, indexing: indexing)
+            } label: {
+                Label("Reading list", systemImage: "bookmark")
+            }
             NavigationLink {
                 NearbyView()
             } label: {

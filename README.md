@@ -10,6 +10,8 @@ Library and Ask can search article text and PDF pages as indexes build. Results 
 
 In an open article, use the archive back and forward buttons to retrace followed links, and **Find on page** to search the current article. In a PDF, use **Find in document** to jump between matches. Both reader searches work offline.
 
+Use **Add bookmark** in an article or PDF, then reopen it under **Library → Reading list**. The list also keeps recent reading and reopens PDFs on the page you were viewing. Clearing recent reading keeps your bookmarks.
+
 When local evidence is insufficient, use **Ask online** and choose GPT, Claude, or Google Gemini. Add each provider’s API key under **Ask options → Online providers**. The app sends the question after you choose a provider and keeps API keys in the device’s Keychain. Future offline searches can use saved GPT or Claude answers, citation details, and readable source copies when available. Gemini grounding stays in the online session because Google restricts indexing and reuse of grounded responses and links. [Google grounding terms](https://ai.google.dev/gemini-api/terms#grounding-with-google-search)
 
 The Map tab saves tiles as you pan, zoom, or follow your location. Saved tiles stay in the app’s durable storage and remain available across launches. Basemap tiles use the Protomaps archive hosted by Source Cooperative. Library indexing continues while you use the Map tab. [Protomaps OpenStreetMap data](https://source.coop/protomaps/openstreetmap)

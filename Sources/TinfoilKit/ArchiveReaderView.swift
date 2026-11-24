@@ -6,28 +6,32 @@ struct ArchiveReaderView: View {
     let library: InstalledLibrary
     let archive: InstalledArchive
     var articlePath: String? = nil
+    var initialPageIndex: Int? = nil
+    var initialFragment: String? = nil
     @State private var reader: ArchiveReader?
     @State private var page: URL?
     @State private var documents: [ZIMArchive.PDFEntry]?
-    @State private var pdfReference: ArchivePDFReference?
+    @State private var pdfReference: (path: String, pageIndex: Int)?
     @State private var errorMessage: String?
 
     var body: some View {
         Group {
             if let reader, let pdfReference {
-                ArchivePDFReader(reader: reader, path: pdfReference.path, initialPage: pdfReference.pageIndex)
+                ArchivePDFReader(reader: reader, archiveID: archive.id, path: pdfReference.path,
+                                 initialPage: pdfReference.pageIndex)
             } else if let reader, let documents {
                 if documents.isEmpty {
                     ContentUnavailableView("No documents", systemImage: "doc")
                 } else {
                     List(documents) { document in
                         NavigationLink(document.title) {
-                            ArchivePDFReader(reader: reader, path: document.path, title: document.title)
+                            ArchivePDFReader(reader: reader, archiveID: archive.id, path: document.path,
+                                             title: document.title)
                         }
                     }
                 }
             } else if let reader, let page {
-                ArchiveHTMLReader(reader: reader, page: page)
+                ArchiveHTMLReader(reader: reader, page: page, archive: archive)
             } else if let errorMessage {
                 ContentUnavailableView("Can't open archive", systemImage: "book.closed", description: Text(errorMessage))
             } else {
@@ -40,8 +44,13 @@ struct ArchiveReaderView: View {
             do {
                 let file = await library.fileURL(for: archive.id)
                 let reader = ArchiveReader(file: file)
+                if let articlePath, let initialPageIndex {
+                    pdfReference = (articlePath, initialPageIndex)
+                    self.reader = reader
+                    return
+                }
                 if let articlePath, let reference = ArchivePDFReference(articlePath: articlePath) {
-                    pdfReference = reference
+                    pdfReference = (reference.path, reference.pageIndex)
                     self.reader = reader
                     return
                 }
@@ -58,7 +67,7 @@ struct ArchiveReaderView: View {
                 } else {
                     path = try await reader.mainPath()
                 }
-                guard let url = ArchiveWebView.url(for: path) else { throw URLError(.badURL) }
+                guard let url = ArchiveWebView.url(for: path, fragment: initialFragment) else { throw URLError(.badURL) }
                 self.reader = reader
                 page = url
             } catch {
@@ -99,6 +108,8 @@ actor ArchiveReader {
 private struct ArchiveHTMLReader: View {
     let reader: ArchiveReader
     let page: URL
+    let archive: InstalledArchive
+    @EnvironmentObject private var readingShelf: ReadingShelf
     @StateObject private var controls = ArchiveWebControls()
 
     var body: some View {
@@ -111,8 +122,20 @@ private struct ArchiveHTMLReader: View {
                         .disabled(!controls.canGoForward)
                     Button("Find on page", systemImage: "doc.text.magnifyingglass") { controls.findOnPage() }
                         .disabled(!controls.canFind)
+                    if let page = controls.readingPage {
+                        ReadingBookmarkButton(location: location(for: page), title: page.title ?? archive.title)
+                            .disabled(!controls.canFind)
+                    }
                 }
             }
+            .onChange(of: controls.readingPage, initial: true) {
+                guard let page = controls.readingPage else { return }
+                try? readingShelf.recordVisit(location(for: page), title: page.title ?? archive.title)
+            }
+    }
+
+    private func location(for page: ArchiveWebControls.ReadingPage) -> ReadingLocation {
+        ReadingLocation(archiveID: archive.id, path: page.path, fragment: page.fragment)
     }
 }
 
@@ -121,6 +144,13 @@ private final class ArchiveWebControls: ObservableObject {
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
     @Published private(set) var canFind = false
+    @Published private(set) var readingPage: ReadingPage?
+
+    struct ReadingPage: Equatable {
+        let path: String
+        let fragment: String?
+        let title: String?
+    }
 
     private weak var view: WKWebView?
     private var observations: [NSKeyValueObservation] = []
@@ -133,6 +163,12 @@ private final class ArchiveWebControls: ObservableObject {
                 self.canGoBack = view.canGoBack
                 self.canGoForward = view.canGoForward
                 self.canFind = view.url?.scheme == "zim" && !view.isLoading
+                // In-page links can change the fragment without finishing a new document load.
+                if let current = self.readingPage, let url = view.url, self.canFind,
+                   String(url.path.dropFirst()) == current.path,
+                   let next = Self.makeReadingPage(url: url, title: current.title), next != current {
+                    self.readingPage = next
+                }
             }
         }
         observations = [
@@ -149,6 +185,21 @@ private final class ArchiveWebControls: ObservableObject {
         observations.removeAll()
     }
 
+    func didFinish(in view: WKWebView) {
+        guard self.view === view, let url = view.url else { return }
+        readingPage = Self.makeReadingPage(url: url, title: view.title)
+    }
+
+    private static func makeReadingPage(url: URL, title: String?) -> ReadingPage? {
+        guard url.scheme == "zim", url.host == "archive" else { return nil }
+        let path = String(url.path.dropFirst())
+        guard !path.isEmpty else { return nil }
+        let fragment = URLComponents(url: url, resolvingAgainstBaseURL: false)?.fragment
+        let title = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ReadingPage(path: path, fragment: fragment?.isEmpty == false ? fragment : nil,
+                           title: title?.isEmpty == false ? title : nil)
+    }
+
     func goBack() { view?.goBack() }
     func goForward() { view?.goForward() }
 
@@ -162,11 +213,12 @@ private struct ArchiveWebView: UIViewRepresentable {
     let page: URL
     let controls: ArchiveWebControls
 
-    static func url(for path: String) -> URL? {
+    static func url(for path: String, fragment: String? = nil) -> URL? {
         var components = URLComponents()
         components.scheme = "zim"
         components.host = "archive"
         components.path = "/" + path
+        components.fragment = fragment
         return components.url
     }
 
@@ -276,6 +328,10 @@ private struct ArchiveWebView: UIViewRepresentable {
         ) {
             let url = navigationAction.request.url
             decisionHandler(url.map(Self.isArchive) == true || url?.absoluteString == "about:blank" ? .allow : .cancel)
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            controls.didFinish(in: webView)
         }
 
         private static func isArchive(_ url: URL) -> Bool {

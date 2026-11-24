@@ -29,7 +29,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 - JavaScript is off for every archive, which breaks interactive content such as collapsible sections. Decide per pack, and keep the network block in place.
 - The PDF document list only appears for catalog packs marked as PDF collections. An imported PDF collection opens its main page instead. Listing the documents also scans every entry in the archive.
 - Verifying an imported archive only checks that it opens. Check the ZIM file's built-in MD5 checksum.
-- The reader has back and forward controls and find within articles and PDFs. Add persistent reading history and bookmarks.
+- The reader has back and forward controls and find within articles and PDFs. Reading history and bookmarks persist, including PDF page and article section links.
 
 ### Content packs
 

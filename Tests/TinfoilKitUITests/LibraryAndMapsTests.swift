@@ -126,6 +126,24 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertFalse(app.buttons["Back in archive"].isEnabled)
         XCTAssertFalse(app.buttons["Forward in archive"].isEnabled)
 
+        let removeBookmark = app.buttons["Remove bookmark"]
+        if removeBookmark.exists { removeBookmark.tap() }
+        let addBookmark = app.buttons["Add bookmark"]
+        XCTAssertTrue(addBookmark.waitForExistence(timeout: 5))
+        addBookmark.tap()
+        XCTAssertTrue(removeBookmark.waitForExistence(timeout: 5))
+
+        app.terminate()
+        app.launch()
+        let readingList = app.buttons["Reading list"]
+        XCTAssertTrue(readingList.waitForExistence(timeout: 10))
+        readingList.tap()
+        let saved = app.descendants(matching: .any)["reading-bookmark-entry"].firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 5))
+        saved.tap()
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(removeBookmark.waitForExistence(timeout: 10))
+
         app.tabBars.buttons["Ask"].tap()
         let question = app.descendants(matching: .any)["ask-question"].firstMatch
         XCTAssertTrue(question.waitForExistence(timeout: 10))
