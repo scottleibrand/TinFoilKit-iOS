@@ -57,7 +57,26 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 ### Household
 
 - Household notes, home and pins can move through an iPhone backup file or the desktop kit's notes and places files. Verify Files import, export and damaged-data recovery on a device.
-- Printable references depend on exact edition filenames and page numbers. A catalog update silently drops them. The post-disaster source isn't in the catalog. Check page ranges whenever the catalog changes an edition.
+- Printable references match verified catalog installations by the exact archive edition filename. Recheck paths and page ranges whenever a catalog edition changes. [Print reference definitions](Sources/TinfoilKit/HouseholdPrinting.swift)
+
+#### Print reference checks
+
+On November 24, 2026, bounded HTTP 206 reads located all nine configured PDF paths in the five publisher archives. The largest stored cluster was 6,269,263 bytes. The extracted PDFs were unencrypted and below the reader's resource size limit. `pdfinfo` and `pdftotext` confirmed the subjects and ranges below. The checks used the original PDFs' one-based page positions, which the app converts to zero-based PDFKit indexes. [Water 2024-08](https://download.kiwix.org/zim/other/zimgit-water_en_2024-08.zim.meta4) · [Field medicine 2024-08](https://download.kiwix.org/zim/other/zimgit-medicine_en_2024-08.zim.meta4) · [Post-disaster 2024-05](https://download.kiwix.org/zim/other/zimgit-post-disaster_en_2024-05.zim.meta4) · [Military medicine 2026-10](https://download.kiwix.org/zim/zimit/irp.fas.org_en_military-medicine_2026-10.zim.meta4) · [Ready.gov 2026-10](https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim.meta4)
+
+| Excerpt | PDF pages | Printed labels | Preview pages |
+| --- | --- | --- | ---: |
+| Safe drinking water | 1–2 | Unnumbered | 2 |
+| Emergency first aid | 124–129 | 77–82 | 6 |
+| Diarrhea and dehydration | 198–199 | 151–152 | 2 |
+| Power outages | 1–2 | Unnumbered | 2 |
+| Burns and broken bones | 143–147 | 96–100 | 5 |
+| Tourniquets for severe bleeding | 45–49 | 2-25 to 2-29 | 5 |
+
+The post-disaster copies of the water guide, *Where There Is No Doctor* and FM 4-25.11 matched their primary PDF digests byte for byte. The separate military-medicine copy of FM 4-25.11 has a different digest and matched the same excerpt topic and page labels. Both Ready.gov paths point to byte-identical two-page FEMA handouts.
+
+For the Apple check, use a dedicated simulator or test phone. Install Water Treatment and Field Medicine from Content Packs with publisher checksum verification. In a build that includes the desktop starter packs, check the fallbacks with an isolated library containing only Post-Disaster, then only Military Medicine. After an airplane-mode restart, open each expected preview and compare its first and last pages and page count to the table. Check the system print preview for the excerpt and household sheet.
+
+Ready.gov still needs offline reader verification before catalog inclusion. Its printable PDF can be tested separately with a hash-checked exact-edition archive in a test harness. A Files import has no verified catalog metadata, so it does not activate a printable reference in the app.
 
 ### Tests and build
 
