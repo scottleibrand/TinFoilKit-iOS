@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 import ZIMArchive
 
-enum PackDownloadNetwork: String, CaseIterable, Sendable {
+enum PackDownloadNetwork: String, CaseIterable, Codable, Sendable {
     case wifiOnly = "org.tinfoilkit.ios.publisher-packs"
     case cellularAllowed = "org.tinfoilkit.ios.publisher-packs.cellular"
 
@@ -20,26 +20,42 @@ enum PackDownloadNetwork: String, CaseIterable, Sendable {
 struct PackDownloadAttempt: Sendable {
     let key: String
     let retryCount: Int
+    let retriedChecksum: Bool
     private static let delays: [TimeInterval] = [2, 5, 15]
+    private static let checksumPrefix = "checksum-retry:"
 
-    init(key: String, retryCount: Int = 0) {
+    init(key: String, retryCount: Int = 0, retriedChecksum: Bool = false) {
         self.key = key
         self.retryCount = retryCount
+        self.retriedChecksum = retriedChecksum
     }
 
     init?(description: String?) {
         guard let description, !description.isEmpty else { return nil }
-        let parts = description.split(separator: "|", omittingEmptySubsequences: false)
+        let retriedChecksum = description.hasPrefix(Self.checksumPrefix)
+        let payload = description.dropFirst(retriedChecksum ? Self.checksumPrefix.count : 0)
+        let parts = payload.split(separator: "|", omittingEmptySubsequences: false)
         guard let key = parts.first, !key.isEmpty else { return nil }
         if parts.count == 1 {
-            self.init(key: String(key))
+            self.init(key: String(key), retriedChecksum: retriedChecksum)
         } else {
             guard parts.count == 2, let count = Int(parts[1]), (1...Self.delays.count).contains(count) else { return nil }
-            self.init(key: String(key), retryCount: count)
+            self.init(key: String(key), retryCount: count, retriedChecksum: retriedChecksum)
         }
     }
 
-    var taskDescription: String { retryCount == 0 ? key : "\(key)|\(retryCount)" }
+    var taskDescription: String {
+        let payload = retryCount == 0 ? key : "\(key)|\(retryCount)"
+        return retriedChecksum ? Self.checksumPrefix + payload : payload
+    }
+
+    var transportRetry: Self {
+        Self(key: key, retryCount: retryCount + 1, retriedChecksum: retriedChecksum)
+    }
+
+    var checksumRetry: Self? {
+        retriedChecksum ? nil : Self(key: key, retriedChecksum: true)
+    }
 
     func retryDelay(for error: NSError) -> TimeInterval? {
         guard error.domain == NSURLErrorDomain, Self.delays.indices.contains(retryCount) else { return nil }
@@ -141,7 +157,7 @@ final class PackDownloads: ObservableObject {
             if repair == nil, let current = installed.first(where: { $0.pack == pack }),
                update == nil || current.replacesArchiveID == update {
                 if update != nil { try? FileManager.default.removeItem(at: updateURL(key)) }
-                try? FileManager.default.removeItem(at: transfer.downloadURL(key))
+                transfer.discardDownload(key)
                 transfer.clearResume(key)
                 statuses[key] = .installed
             } else if let active = sessionTasks[key] {
@@ -206,7 +222,7 @@ final class PackDownloads: ObservableObject {
         if repairTarget(key) == archive.id {
             try? FileManager.default.removeItem(at: repairURL(key))
             transfer.clearResume(key)
-            try? FileManager.default.removeItem(at: transfer.downloadURL(key))
+            transfer.discardDownload(key)
             statuses[key] = nil
         } else if case .installed = statuses[key] {
             statuses[key] = nil
@@ -216,7 +232,7 @@ final class PackDownloads: ObservableObject {
             tasks.removeValue(forKey: updateKey)?.task.cancel()
             try? FileManager.default.removeItem(at: updateURL(updateKey))
             transfer.clearResume(updateKey)
-            try? FileManager.default.removeItem(at: transfer.downloadURL(updateKey))
+            transfer.discardDownload(updateKey)
             statuses[updateKey] = nil
         }
     }
@@ -350,12 +366,23 @@ final class PackDownloads: ObservableObject {
             throw InsufficientStorage(shortfall: required - bytes)
         }
         for pack in packs {
-            beginDownload(pack, network: network, attempt: PackDownloadAttempt(key: pack.editionKey))
+            let key = pack.editionKey
+            let previous = transfer.verificationContext(key)
+            let resumedChecksumRetry = transfer.hasResume(key, network: network) && previous?.network == network
+                && previous?.attempt(for: key)?.retriedChecksum == true
+            beginDownload(pack, network: network, attempt: PackDownloadAttempt(key: key, retriedChecksum: resumedChecksumRetry))
         }
     }
 
     private func beginDownload(_ pack: PublishedPack, network: PackDownloadNetwork, attempt: PackDownloadAttempt,
                                delay: TimeInterval? = nil) {
+        do {
+            let verification = PackTransfer.VerificationContext(attempt: attempt, network: network, host: nil)
+            try transfer.recordVerification(verification, key: attempt.key)
+        } catch {
+            statuses[attempt.key] = .failed(error.localizedDescription)
+            return
+        }
         let session = transfer.session(for: network)
         let resumeURL = transfer.resumeURL(attempt.key, network: network)
         let task: URLSessionDownloadTask
@@ -423,9 +450,7 @@ final class PackDownloads: ObservableObject {
             case .pausing, .paused, .verifying, .installed: break
             default:
                 if let delay, let pack = Self.catalog.first(where: { $0.editionKey == key }) {
-                    beginDownload(pack, network: ticket.network,
-                                  attempt: PackDownloadAttempt(key: key, retryCount: ticket.attempt.retryCount + 1),
-                                  delay: delay)
+                    beginDownload(pack, network: ticket.network, attempt: ticket.attempt.transportRetry, delay: delay)
                 } else {
                     statuses[key] = .failed(message)
                 }
@@ -445,6 +470,7 @@ final class PackDownloads: ObservableObject {
         if case .verifying = statuses[key] { return }
         statuses[key] = .verifying
         let file = transfer.downloadURL(key)
+        let verification = transfer.verificationContext(key)
         Task {
             do {
                 if let archiveID = repairTarget(key) {
@@ -454,12 +480,23 @@ final class PackDownloads: ObservableObject {
                     try await library.installPack(pack, from: file, replacing: updateTarget(key), movingSource: true)
                     try? FileManager.default.removeItem(at: updateURL(key))
                 }
-                try? FileManager.default.removeItem(at: file)
+                transfer.discardDownload(key)
                 transfer.clearResume(key)
                 statuses[key] = .installed
                 installedRevision += 1
+            } catch let error as InstalledLibrary.PublisherChecksumMismatch {
+                // Never carry partial bytes from a transfer that failed verification.
+                transfer.discardDownload(key)
+                transfer.clearResume(key)
+                guard case .verifying = statuses[key] else { return }
+                if let verification, let retry = verification.attempt(for: key)?.checksumRetry,
+                   !FileManager.default.fileExists(atPath: file.path), !transfer.hasResume(key) {
+                    beginDownload(pack, network: verification.network, attempt: retry)
+                } else {
+                    statuses[key] = .failed(verification?.failureMessage ?? error.localizedDescription)
+                }
             } catch {
-                try? FileManager.default.removeItem(at: file)
+                transfer.discardDownload(key)
                 transfer.clearResume(key)
                 statuses[key] = .failed(error.localizedDescription)
             }
@@ -468,6 +505,27 @@ final class PackDownloads: ObservableObject {
 }
 
 final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    struct VerificationContext: Codable, Sendable {
+        let network: PackDownloadNetwork
+        let host: String?
+        private let attemptDescription: String
+
+        init(attempt: PackDownloadAttempt, network: PackDownloadNetwork, host: String?) {
+            attemptDescription = attempt.taskDescription
+            self.network = network
+            self.host = host
+        }
+
+        func attempt(for key: String) -> PackDownloadAttempt? {
+            guard let attempt = PackDownloadAttempt(description: attemptDescription), attempt.key == key else { return nil }
+            return attempt
+        }
+
+        var failureMessage: String? {
+            host.map { "The download from \($0) does not match the publisher’s checksum." }
+        }
+    }
+
     struct Ticket: Sendable {
         let attempt: PackDownloadAttempt
         let network: PackDownloadNetwork
@@ -513,6 +571,32 @@ final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
         directory.appendingPathComponent(key).appendingPathExtension("zim")
     }
 
+    private func verificationURL(_ key: String) -> URL {
+        directory.appendingPathComponent(key).appendingPathExtension("verification")
+    }
+
+    func verificationContext(_ key: String) -> VerificationContext? {
+        guard let data = try? Data(contentsOf: verificationURL(key)) else { return nil }
+        return try? JSONDecoder().decode(VerificationContext.self, from: data)
+    }
+
+    func recordVerification(_ verification: VerificationContext, key: String) throws {
+        try JSONEncoder().encode(verification).write(to: verificationURL(key), options: .atomic)
+    }
+
+    func discardDownload(_ key: String) {
+        try? FileManager.default.removeItem(at: downloadURL(key))
+        try? FileManager.default.removeItem(at: verificationURL(key))
+    }
+
+    func stageDownload(at location: URL, key: String, verification: VerificationContext) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let staged = downloadURL(key)
+        guard !FileManager.default.fileExists(atPath: staged.path) else { return }
+        try recordVerification(verification, key: key)
+        try FileManager.default.moveItem(at: location, to: staged)
+    }
+
     func resumeURL(_ key: String, network: PackDownloadNetwork) -> URL {
         directory.appendingPathComponent(key).appendingPathExtension(network.resumeExtension)
     }
@@ -521,7 +605,7 @@ final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
         PackDownloadNetwork.allCases.contains { hasResume(key, network: $0) }
     }
 
-    private func hasResume(_ key: String, network: PackDownloadNetwork) -> Bool {
+    func hasResume(_ key: String, network: PackDownloadNetwork) -> Bool {
         FileManager.default.fileExists(atPath: resumeURL(key, network: network).path)
     }
 
@@ -556,11 +640,8 @@ final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
             return
         }
         do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let file = downloadURL(ticket.key)
-            if !FileManager.default.fileExists(atPath: file.path) {
-                try FileManager.default.moveItem(at: location, to: file)
-            }
+            let verification = VerificationContext(attempt: ticket.attempt, network: ticket.network, host: response.url?.host)
+            try stageDownload(at: location, key: ticket.key, verification: verification)
             post(.downloaded(ticket))
         } catch {
             post(.failed(ticket, error.localizedDescription, retryAfter: nil))

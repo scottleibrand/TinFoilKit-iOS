@@ -23,6 +23,10 @@ public struct InstalledArchive: Identifiable, Equatable, Sendable, Codable {
 
 /// Owns imported archive copies and their manifests.
 public actor InstalledLibrary {
+    public struct PublisherChecksumMismatch: LocalizedError {
+        public var errorDescription: String? { "The download does not match the publisher’s checksum." }
+    }
+
     /// The installed archives, plus folders whose manifest or archive can no longer be read.
     public struct Inventory: Equatable, Sendable {
         public let archives: [InstalledArchive]
@@ -345,7 +349,7 @@ public actor InstalledLibrary {
             hasher.update(data: bytes)
         }
         let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        guard digest == expectedHash else { throw ImportError.checksumMismatch }
+        guard digest == expectedHash else { throw PublisherChecksumMismatch() }
     }
 
     private func prepareDirectory() throws {
@@ -375,7 +379,6 @@ public actor InstalledLibrary {
         case invalidFile
         case emptyArchive
         case busy
-        case checksumMismatch
         case invalidRepair
         case invalidUpdate
 
@@ -384,7 +387,6 @@ public actor InstalledLibrary {
             case .invalidFile: "Choose a single .zim archive from Files."
             case .emptyArchive: "This archive has no entries."
             case .busy: "An archive operation is already in progress. Try again when it finishes."
-            case .checksumMismatch: "The download does not match the publisher’s checksum."
             case .invalidRepair: "This edition is no longer installed. Download it from Content packs."
             case .invalidUpdate: "This archive can no longer be updated to the selected edition."
             }

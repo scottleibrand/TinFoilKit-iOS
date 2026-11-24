@@ -2,6 +2,41 @@ import XCTest
 @testable import TinfoilKit
 
 final class PackDownloadNetworkTests: XCTestCase {
+    func testChecksumRetryKeepsSavedNetworkAndStopsAfterOneFreshTransfer() throws {
+        let directory = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let key = "pack-2026-10"
+        let host = "mirror.example.org"
+        let temporary = directory.appendingPathComponent("download.tmp")
+        let transfer = PackTransfer(directory: directory) { _ in }
+        let first = PackDownloadAttempt(key: key, retryCount: 2)
+        let firstContext = PackTransfer.VerificationContext(attempt: first, network: .cellularAllowed, host: host)
+        try Data([0]).write(to: temporary)
+        try transfer.stageDownload(at: temporary, key: key, verification: firstContext)
+
+        let relaunched = PackTransfer(directory: directory) { _ in }
+        let restored = try XCTUnwrap(relaunched.verificationContext(key))
+        XCTAssertEqual(restored.network, .cellularAllowed)
+        XCTAssertEqual(restored.host, host)
+        XCTAssertNil(restored.attempt(for: "other-pack"))
+        let checksumRetry = try XCTUnwrap(restored.attempt(for: key)?.checksumRetry)
+        XCTAssertEqual(checksumRetry.retryCount, 0)
+        let attempt = try XCTUnwrap(PackDownloadAttempt(description: checksumRetry.transportRetry.taskDescription))
+        XCTAssertNil(attempt.checksumRetry)
+
+        relaunched.discardDownload(key)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: transfer.downloadURL(key).path))
+        XCTAssertNil(relaunched.verificationContext(key))
+        try Data([1]).write(to: temporary)
+        let secondContext = PackTransfer.VerificationContext(attempt: attempt, network: restored.network, host: host)
+        try relaunched.stageDownload(at: temporary, key: key, verification: secondContext)
+        let afterRetry = try XCTUnwrap(transfer.verificationContext(key))
+        XCTAssertNil(afterRetry.attempt(for: key)?.checksumRetry)
+        XCTAssertTrue(try XCTUnwrap(afterRetry.failureMessage).contains(host))
+        XCTAssertEqual(try Data(contentsOf: transfer.downloadURL(key)), Data([1]))
+    }
+
     func testInterruptedDownloadsRetryWithABoundedBackoff() throws {
         let lost = URLError(.networkConnectionLost) as NSError
         let old = try XCTUnwrap(PackDownloadAttempt(description: "water-2026-09"))
