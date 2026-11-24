@@ -1,7 +1,7 @@
 import Foundation
 
-struct SavedPinRouteQuestion: Equatable {
-    enum Mode: Equatable {
+struct HomeRouteQuestion: Equatable, Sendable {
+    enum Mode: Equatable, Sendable {
         case walking, driving
     }
 
@@ -23,6 +23,23 @@ struct SavedPinRouteQuestion: Equatable {
 
     func matchingPins(in names: [String]) -> [Int] {
         names.indices.filter { Self.normalize(names[$0]) == destination }
+    }
+
+    var isStreetAddress: Bool {
+        let words = destination.split(separator: " ")
+        return words.count >= 2 && words[0].first?.isNumber == true && words.dropFirst().contains {
+            $0.contains(where: \.isLetter)
+        }
+    }
+
+    func matchesAddress(_ address: String) -> Bool {
+        let sought = Self.addressParts(destination)
+        let actual = Self.addressParts(address)
+        return isStreetAddress && !sought.isEmpty && actual.starts(with: sought)
+    }
+
+    private static func addressParts(_ address: String) -> [String] {
+        address.split(separator: ",", omittingEmptySubsequences: false).map { normalize(String($0)) }
     }
 
     private static func normalize(_ text: String) -> String {
