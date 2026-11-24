@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build or verify regional place and routing artifacts with a catalog manifest."""
+"""Build or verify a regional catalog bundle of place, routing and optional basemap artifacts."""
 
 import argparse
 from contextlib import closing
@@ -19,6 +19,8 @@ from urllib.parse import urlsplit
 
 SCRIPTS = Path(__file__).resolve().parent
 ASSETS = {"places": "places.sqlite", "routing": "routing.tfkroute"}
+BASEMAP_NAME = "basemap.pmtiles"
+BASEMAP_FIELDS = ("dataVersion", "source", "license", "licenseURL", "attribution", "byteCount", "sha256")
 BOUND_KEYS = ("west", "south", "east", "north")
 ATTRIBUTION = "© OpenStreetMap contributors"
 LICENSE = "ODbL-1.0"
@@ -122,7 +124,58 @@ def validate_routing(path, metadata):
     return actual
 
 
-def bundle_manifest(directory, metadata):
+def pmtiles_bounds(path, byte_count):
+    # PMTiles v3 uses little-endian offsets and signed E7 coordinates in its 127-byte header.
+    with path.open("rb") as stream:
+        header = stream.read(127)
+    if (len(header) != 127 or header[:8] != b"PMTiles\x03" or header[99] != 1
+            or not header[100] <= header[101] <= 30):
+        raise ValueError("Expected a PMTiles v3 Mapbox Vector Tile basemap.")
+    root, metadata, leaves, tiles = struct.iter_unpack("<QQ", header[8:72])
+    if not root[1] or sum(root) > 16_384 or not tiles[1]:
+        raise ValueError("The PMTiles basemap needs a root directory and tile data.")
+    previous_end = 127
+    for offset, length in sorted(section for section in (root, metadata, leaves, tiles) if section[1]):
+        if offset < previous_end or offset + length > byte_count:
+            raise ValueError("A PMTiles basemap section overlaps or exceeds the archive.")
+        previous_end = offset + length
+    west, south, east, north = (value / 10_000_000 for value in struct.unpack_from("<iiii", header, 102))
+    if not (-180 <= west < east <= 180 and -90 <= south < north <= 90):
+        raise ValueError("The PMTiles basemap bounds are invalid.")
+    return dict(zip(BOUND_KEYS, (west, south, east, north)))
+
+
+def basemap_asset(path, declared, bundle):
+    entry = {key: declared[key] for key in BASEMAP_FIELDS}
+    if any(not isinstance(entry[key], str) or not entry[key].strip()
+           for key in ("dataVersion", "license", "attribution")):
+        raise ValueError("Provide the basemap edition, license identifier and attribution.")
+    if not all(valid_https(entry[key]) for key in ("source", "licenseURL")):
+        raise ValueError("Provide HTTPS basemap source and license URLs without credentials or fragments.")
+    if type(entry["byteCount"]) is not int or entry["byteCount"] <= 127:
+        raise ValueError("Provide the exact basemap byte count.")
+    if not isinstance(entry["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]):
+        raise ValueError("Provide a lowercase SHA-256 for the basemap.")
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"Expected {BASEMAP_NAME} to be a regular file.")
+    if path.stat().st_size != entry["byteCount"]:
+        raise ValueError("The basemap does not match the declared byte count.")
+    if digest(path) != entry["sha256"]:
+        raise ValueError("The basemap does not match the pinned SHA-256.")
+
+    coverage = pmtiles_bounds(path, entry["byteCount"])
+    region = bundle["bounds"]
+    west, south, east, north = (region[key] for key in BOUND_KEYS)
+    if west > east:
+        west, east = -180, 180
+    if not (coverage["west"] <= west and coverage["east"] >= east
+            and coverage["south"] <= south and coverage["north"] >= north):
+        raise ValueError("The PMTiles basemap bounds do not cover the full bundle region.")
+    return dict(entry, filename=BASEMAP_NAME, bounds=coverage,
+                url=bundle["artifactBaseURL"].rstrip("/") + "/" + BASEMAP_NAME)
+
+
+def bundle_manifest(directory, metadata, basemap=None):
     validate_metadata(metadata)
     shared = dict(metadata, attribution=ATTRIBUTION, license=LICENSE, licenseURL=LICENSE_URL)
     assets = {}
@@ -141,7 +194,9 @@ def bundle_manifest(directory, metadata):
             "byteCount": path.stat().st_size,
             "sha256": digest(path),
         }
-    return dict(shared, schemaVersion=1, assets=assets)
+    if basemap is not None:
+        assets["basemap"] = basemap
+    return dict(shared, schemaVersion=2 if basemap is not None else 1, assets=assets)
 
 
 def build(args):
@@ -151,6 +206,16 @@ def build(args):
         "bounds": dict(zip(BOUND_KEYS, args.bounds)), "artifactBaseURL": args.artifact_base_url,
     }
     validate_metadata(metadata)
+    basemap_fields = {
+        "dataVersion": args.basemap_edition, "source": args.basemap_source,
+        "license": args.basemap_license, "licenseURL": args.basemap_license_url,
+        "attribution": args.basemap_attribution, "byteCount": args.basemap_byte_count, "sha256": args.basemap_sha256,
+    }
+    if args.basemap is None and any(value is not None for value in basemap_fields.values()):
+        raise ValueError("Provide --basemap when supplying basemap metadata.")
+    if args.basemap is not None and (
+            args.basemap.suffix.lower() != ".pmtiles" or any(value is None for value in basemap_fields.values())):
+        raise ValueError("Provide a .pmtiles file and all basemap metadata options.")
     output = args.directory.absolute()
     if output.exists() or output.is_symlink():
         raise ValueError("Choose a new output directory for this bundle edition.")
@@ -165,6 +230,11 @@ def build(args):
             raise ValueError("The source extract does not match the pinned SHA-256.")
         artifacts = work / "artifacts"
         artifacts.mkdir()
+        basemap = None
+        if args.basemap is not None:
+            basemap_path = artifacts / BASEMAP_NAME
+            shutil.copyfile(args.basemap, basemap_path)
+            basemap = basemap_asset(basemap_path, basemap_fields, metadata)
         common = [
             "--region", args.region, "--data-version", args.data_version, "--source", args.source,
             "--bounds", *(str(value) for value in args.bounds),
@@ -177,7 +247,7 @@ def build(args):
             sys.executable, SCRIPTS / "build-regional-routing-pack.py", source, artifacts / ASSETS["routing"],
             *common, *routing_options,
         ], check=True)
-        manifest = bundle_manifest(artifacts, metadata)
+        manifest = bundle_manifest(artifacts, metadata, basemap)
         (artifacts / "manifest.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8",
         )
@@ -189,9 +259,15 @@ def verify(directory):
     actual = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     metadata = {key: actual[key] for key in ("region", "dataVersion", "source", "sourceSHA256", "bounds",
                                              "artifactBaseURL")}
-    if bundle_manifest(directory, metadata) != actual:
+    validate_metadata(metadata)
+    basemap = None
+    if actual["schemaVersion"] == 2:
+        basemap = basemap_asset(directory / BASEMAP_NAME, actual["assets"]["basemap"], metadata)
+    elif actual["schemaVersion"] != 1:
+        raise ValueError("Unsupported regional bundle manifest version.")
+    if bundle_manifest(directory, metadata, basemap) != actual:
         raise ValueError("The catalog manifest does not match the regional artifacts.")
-    print(f"Verified {directory / 'manifest.json'} and both artifacts.")
+    print(f"Verified {directory / 'manifest.json'} and all artifacts.")
 
 
 def main():
@@ -207,6 +283,15 @@ def main():
     builder.add_argument("--artifact-base-url", required=True, help="HTTPS directory URL where artifacts will be hosted")
     builder.add_argument("--bounds", nargs=4, type=float, required=True, metavar=("WEST", "SOUTH", "EAST", "NORTH"))
     builder.add_argument("--architecture", choices=("amd64", "arm64"))
+    basemap = builder.add_argument_group("optional basemap and its required publisher metadata")
+    basemap.add_argument("--basemap", type=Path, help="Locally available PMTiles v3 MVT archive")
+    basemap.add_argument("--basemap-edition", help="Publisher's date or stable revision for this map")
+    basemap.add_argument("--basemap-source", help="HTTPS source for this basemap edition")
+    basemap.add_argument("--basemap-license", help="Identifier for this basemap's license")
+    basemap.add_argument("--basemap-license-url", help="HTTPS URL for this basemap's license terms")
+    basemap.add_argument("--basemap-attribution", help="Publisher's required attribution")
+    basemap.add_argument("--basemap-byte-count", type=int, help="Pinned byte count for the PMTiles file")
+    basemap.add_argument("--basemap-sha256", help="Pinned SHA-256 for the PMTiles file")
     verifier = commands.add_parser("verify")
     verifier.add_argument("directory", type=Path)
     args = parser.parse_args()
