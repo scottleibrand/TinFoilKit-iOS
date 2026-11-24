@@ -4,7 +4,9 @@ The goal is desktop feature parity for Tinfoil Kit on iOS. [PLAN.md](PLAN.md) tr
 
 ## Start here
 
-Fetch `origin`, check `origin/develop` and `origin/main`, and review any commits newer than this handoff. The last feature verified before this handoff was native Offline Chat, merged in PR #7. Use a fresh `codex/` feature branch from the current `origin/develop` for work awaiting Apple tests. Keep each feature in its own commits so it can move to `develop` after verification. Push the feature branch for the Mac session to retrieve. Open and merge one tested feature at a time through a `develop` → `main` PR.
+Fetch `origin`, check `origin/develop` and `origin/main`, and review any commits newer than this handoff. Both branches were synced at `391b4b9` after [pack download recovery](https://github.com/scottleibrand/TinFoilKit-iOS/pull/8). The loopback fixture recovered from two consecutive connection drops, 53 simulator unit tests passed, and the signed build was installed on the paired iPhone. Physical background transfer interruption remains a device check.
+
+Use a fresh `codex/` feature branch from the current `origin/develop` for work awaiting Apple tests. Keep each feature in its own commits so it can move to `develop` after verification. Push the feature branch for the Mac session to retrieve. Open and merge one tested feature at a time through a `develop` → `main` PR.
 
 The upstream desktop checkout and generated build inputs are ignored. For parity review, clone [the desktop repository](https://github.com/tudor-city-ventures/tinfoil-kit) into `upstream/tinfoil-kit` and check out `64179271bcebffc5d76f1e3d13d2592e0089b6b1`. Reuse the documented interfaces and behavior without copying copyleft code. Keep original code MIT and track dependencies, models and dataset rights in [THIRD-PARTY.md](THIRD-PARTY.md).
 
@@ -24,7 +26,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 Tests/RoutingPackFixture/test_routing_pack.py
 git diff --check
 ```
 
-The place index builder also uses `osmium==4.2.0`. The existing Swift place, Nearby and download runners target a Mac. Portable Swift code can be compiled with Linux Swift when its imports and test harness allow it. Compiling a pure component does not validate app integration. If tools are unavailable, record the exact command and blocker in the feature branch or PR description.
+The place index builder also uses `osmium==4.2.0`. The existing Swift place, Nearby and download runners target a Mac. Portable Swift code can be compiled with Linux Swift when its imports and test harness allow it. App integration requires the Xcode checks below. If tools are unavailable, record the exact command and blocker in the feature branch or PR description.
 
 Public web snapshots must have verified rights, provenance and no personal context before automatic exchange. Files imports and saved questions and answers require explicit consent for the exact items and recipient. Preserve those boundaries in fixtures. Keep credentials, private files, excerpts from real Ask history, device identifiers and generated outputs out of the branch.
 
