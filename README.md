@@ -34,7 +34,7 @@ In **Household → Share on local network**, select the household details to sha
 
 Use Print the Essentials in Household for a printable copy of your household information and selected pages from installed references. Install a regional place index to include the nearest services to your saved home.
 
-To build a regional address and service index, install `osmium==4.2.0` and run `python Scripts/build-regional-place-index.py region.osm.pbf region.sqlite --region "Region name" --source https://provider.example/region.osm.pbf`, using the actual source URL. Import the resulting SQLite file from Map. It works with any basemap and includes its own OpenStreetMap attribution.
+To build a regional address and service index, install `osmium==4.2.0` and run `python Scripts/build-regional-place-index.py region.osm.pbf region.sqlite --region "Region name" --source https://provider.example/region.osm.pbf`, using the actual source URL. Import the resulting SQLite file from Map. Address search and nearby services use all installed regional indexes, regardless of the active basemap. Open **Map → + → Installed place data** to review or remove an index and see its source and attribution.
 
 Import a compatible `.tfkroute` graph from Map to plan offline walks and drives and follow individual route steps. Build a graph from a regional OSM extract with `python Scripts/build-regional-routing-pack.py --help`. Routing packs are separate from basemap tiles and place indexes. [Routing engine and graph formats](Scripts/routing/README.md)
 

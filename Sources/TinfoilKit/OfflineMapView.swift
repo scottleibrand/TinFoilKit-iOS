@@ -7,7 +7,7 @@ struct OfflineMapView: View {
     @ObservedObject var household: HouseholdStore
     @State private var storage = MapStorage()
     @State private var regionStorage = RegionalPlaceStorage()
-    @State private var region: RegionalPlaceStorage.Installed?
+    @State private var placeRegions: [RegionalPlaceStorage.Installed] = []
     @State private var routeStorage = RegionalRouteStore()
     @State private var routingRegion: RegionalRouteStore.Installed?
     @StateObject private var location = MapLocation()
@@ -32,6 +32,7 @@ struct OfflineMapView: View {
     @State private var pointActions: HouseholdPlace?
     @State private var editingPin: HouseholdPlace?
     @State private var showingBasemaps = false
+    @State private var showingPlaceRegions = false
 
     private var savedPlaces: [HouseholdPlace] {
         (household.snapshot.home.map { [$0] } ?? []) + household.snapshot.pins
@@ -110,6 +111,9 @@ struct OfflineMapView: View {
                     setMap(selected)
                 }
             }
+            .sheet(isPresented: $showingPlaceRegions) {
+                InstalledPlaceDataView(storage: regionStorage, regions: $placeRegions)
+            }
             .onChange(of: location.fix?.timestamp) {
                 if let fix = location.fix {
                     marker = MapMarker(coordinate: fix.coordinate, title: "Current position")
@@ -137,7 +141,7 @@ struct OfflineMapView: View {
                 guard style == nil else { return }
                 do {
                     setMap(try await storage.current())
-                    region = try await regionStorage.current()
+                    placeRegions = try await regionStorage.installedIndexes()
                 }
                 catch { errorMessage = error.localizedDescription }
                 do { routingRegion = try await routeStorage.current() }
@@ -182,8 +186,8 @@ struct OfflineMapView: View {
                         }
                         Text(mapTitle)
                             .font(.footnote.weight(.semibold))
-                        if let region {
-                            Link("Place data · \(region.metadata.region)", destination: region.metadata.licenseURL)
+                        if !placeRegions.isEmpty {
+                            Button("Installed place data") { showingPlaceRegions = true }
                                 .font(.caption)
                         }
                         Group {
@@ -256,6 +260,7 @@ struct OfflineMapView: View {
                 ) { handleLocationButton() }
                 Menu {
                     Button("Installed basemaps", systemImage: "map") { showingBasemaps = true }
+                    Button("Installed place data", systemImage: "list.bullet") { showingPlaceRegions = true }
                     Button("Import map tiles", systemImage: "map") { chooseImport(.tiles) }
                     Button("Import regional place data", systemImage: "magnifyingglass") {
                         chooseImport(.places)
@@ -304,8 +309,9 @@ struct OfflineMapView: View {
 
     private var placeSearch: some View {
         MapPlaceSearch(
-            index: placeIndex, region: region,
-            origin: location.fix?.coordinate ?? household.snapshot.home?.coordinate ?? MapPosition(savedPosition)?.coordinate,
+            index: placeIndex, regions: placeRegions,
+            origin: routeOrigin?.coordinate ?? location.fix?.coordinate ?? household.snapshot.home?.coordinate
+                ?? MapPosition(savedPosition)?.coordinate,
             savedPlaces: savedPlaces
         ) { place in
             marker = MapMarker(coordinate: place.coordinate, title: place.name)
@@ -331,7 +337,8 @@ struct OfflineMapView: View {
                 savedPosition = ""
                 setMap(imported)
             case .places:
-                region = try await regionStorage.install(file)
+                _ = try await regionStorage.install(file)
+                placeRegions = try await regionStorage.installedIndexes()
             case .routing:
                 importingRouting = true
                 defer { importingRouting = false }

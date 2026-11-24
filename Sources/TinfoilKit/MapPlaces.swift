@@ -3,7 +3,7 @@ import SQLite3
 import SwiftUI
 
 struct MapPlace: Identifiable, Sendable {
-    let id: Int64
+    let id: String
     let name: String
     let kind: String
     let latitude: Double
@@ -42,7 +42,7 @@ struct MapPlaces {
         var status = sqlite3_step(statement)
         while status == SQLITE_ROW {
             results.append(MapPlace(
-                id: sqlite3_column_int64(statement, 0),
+                id: "bundled:\(sqlite3_column_int64(statement, 0))",
                 name: String(cString: sqlite3_column_text(statement, 1)),
                 kind: String(cString: sqlite3_column_text(statement, 2)),
                 latitude: sqlite3_column_double(statement, 3),
@@ -57,7 +57,7 @@ struct MapPlaces {
 
 struct MapPlaceSearch: View {
     let index: URL?
-    let region: RegionalPlaceStorage.Installed?
+    let regions: [RegionalPlaceStorage.Installed]
     let origin: CLLocationCoordinate2D?
     let savedPlaces: [HouseholdPlace]
     let onSelect: (MapPlace) -> Void
@@ -69,7 +69,7 @@ struct MapPlaceSearch: View {
 
     private var coordinateResult: MapPlace? {
         guard let coordinate = MapCoordinateText.parse(query) else { return nil }
-        return MapPlace(id: -1, name: "Coordinates", kind: MapCoordinateText.decimal(coordinate),
+        return MapPlace(id: "coordinates", name: "Coordinates", kind: MapCoordinateText.decimal(coordinate),
                         latitude: coordinate.latitude, longitude: coordinate.longitude)
     }
 
@@ -92,7 +92,7 @@ struct MapPlaceSearch: View {
                             Section("Saved places") {
                                 ForEach(matchingSavedPlaces) { place in
                                     result(MapPlace(
-                                        id: -1, name: place.name, kind: place.coordinateText,
+                                        id: "saved:\(place.id)", name: place.name, kind: place.coordinateText,
                                         latitude: place.latitude, longitude: place.longitude
                                     ))
                                 }
@@ -115,7 +115,7 @@ struct MapPlaceSearch: View {
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Place or coordinates")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-                if let region, origin != nil {
+                if !regions.isEmpty, origin != nil {
                     ToolbarItem(placement: .primaryAction) {
                         Menu {
                             ForEach(RegionalPlaceIndex.Category.allCases) { item in
@@ -124,7 +124,6 @@ struct MapPlaceSearch: View {
                                     category = item
                                 }
                             }
-                            Link(region.metadata.attribution, destination: region.metadata.licenseURL)
                         } label: {
                             Label("Nearby services", systemImage: "location.magnifyingglass")
                         }
@@ -156,29 +155,30 @@ struct MapPlaceSearch: View {
     }
 
     private func search(_ query: String, category: RegionalPlaceIndex.Category?) async throws -> [MapPlace] {
-        let regio = region?.index
+        let local = RegionalPlaceSearch(regions: regions)
         let origin = self.origin
         let index = self.index
         let task = Task.detached {
-            if let regio, let category, let origin {
-                return try regio.nearest(category, to: origin).map { nearby in
+            if let category, let origin {
+                return try local.nearest(category, to: origin).map { nearby in
                     let distance = Measurement(value: nearby.distanceMeters, unit: UnitLength.meters)
                         .formatted(.measurement(width: .abbreviated, usage: .road))
-                    return Self.mapPlace(nearby.place, detail: distance)
+                    return Self.mapPlace(nearby.match, detail: distance)
                 }
             }
-            if let regio {
-                return try regio.search(query).map { Self.mapPlace($0) }
-            }
+            let matches = try local.search(query, near: origin)
+            if !matches.isEmpty { return matches.map { Self.mapPlace($0) } }
             if let index { return try MapPlaces(index: index).search(query) }
             return []
         }
         return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
 
-    private nonisolated static func mapPlace(_ place: RegionalPlaceIndex.Place, detail: String? = nil) -> MapPlace {
+    private nonisolated static func mapPlace(_ match: RegionalPlaceSearch.Match, detail: String? = nil) -> MapPlace {
+        let place = match.place
         let context = place.address.isEmpty ? place.categoryLabel.capitalized : place.address
-        return MapPlace(id: place.id, name: place.name, kind: [context, detail].compactMap { $0 }.joined(separator: " · "),
+        return MapPlace(id: match.id, name: place.name,
+                        kind: [context, match.region.metadata.region, detail].compactMap { $0 }.joined(separator: " · "),
                         latitude: place.coordinate.latitude, longitude: place.coordinate.longitude)
     }
 

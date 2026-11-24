@@ -41,7 +41,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 
 ### Maps
 
-- **Beta.** The map keeps multiple imported basemaps with coverage and a saved selection. Publish region packs (tiles, places and routing data) in the catalog for direct installation, and let users manage multiple regional place indexes and routing graphs.
+- **Beta.** The map keeps multiple imported basemaps with coverage and a saved selection. Address and service search and household printing use multiple installed place indexes. Publish region packs (tiles, places and routing data) in the catalog for direct installation, and let users manage multiple routing graphs.
 - **Beta.** The tile cache:
   - reveals the areas a user views to the Source Cooperative host, which needs a privacy disclosure and an off switch;
   - downloads over cellular;
@@ -51,7 +51,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 - [Scripts/prepare-map-assets.sh](Scripts/prepare-map-assets.sh) extracts Seattle from the long-lived Source Cooperative basemap. Check the style and regenerate the derived assets when the source's ETag changes.
 - The map style is minimal and hand-written. It has no street names, house numbers or point-of-interest icons, and only English labels. Adopt the Protomaps basemaps style (BSD-3-Clause) with its fonts and icons.
 - Region coverage is a bounding box. Show coverage as the region's actual outline where it isn't rectangular.
-- The regional place index is stored in device backup. Exclude it, as other downloaded data is excluded.
+- Regional place indexes are excluded from device backup.
 - Walking routes show a line and a distance only. There are no step-by-step directions and no driving. This waits on the routing engine choice in milestone 3.
 
 ### Ask
