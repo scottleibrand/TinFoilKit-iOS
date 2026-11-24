@@ -4,7 +4,7 @@ The goal is desktop feature parity for Tinfoil Kit on iOS. [PLAN.md](PLAN.md) tr
 
 ## Start here
 
-Fetch `origin` and check both `origin/develop` and `origin/main`. Both branches were synced at `d6e7caf` after PR #15. Recheck the branch tips and the work below before starting an overlapping change.
+Fetch `origin` and check both `origin/develop` and `origin/main`. Both branches were synced at `c122b2c` after PR #16. Recheck the branch tips and the work below before starting an overlapping change.
 
 Use a fresh `codex/` feature branch from the current `origin/develop` for work awaiting Apple tests. Keep each feature in its own commits so it can move to `develop` after verification. Push the feature branch for the Mac session to retrieve. Open and merge one tested feature at a time through a `develop` → `main` PR.
 
@@ -21,14 +21,18 @@ The upstream desktop checkout and generated build inputs are ignored. For parity
 - Version 2 bundles include a verified basemap with its own edition and publisher credit. The pinned producer built the fixture, the Files UI imported, selected, and removed it, and 65 app unit tests passed. The signed build was installed on the iPhone. [PR #14](https://github.com/scottleibrand/TinFoilKit-iOS/pull/14)
 - Content Packs offers complete English Wikipedia in separate text-only and illustrated downloads. Publisher manifests and range probes confirmed both byte counts and checksums. All 66 app tests, 18 reader tests and the catalog UI test passed. The signed phone build succeeded, with installation pending when the phone is reachable. Full-archive indexing remains a device check. [PR #15](https://github.com/scottleibrand/TinFoilKit-iOS/pull/15)
 
+- Map downloads a regional bundle from a trusted HTTPS manifest and SHA-256. Transfers retain checked partial bytes and the network preference across launches. All 77 app tests passed, including an interrupted HTTPS range request, and the Map relaunch and install test passed. The signed iPhone build succeeded while the phone was unavailable. [PR #16](https://github.com/scottleibrand/TinFoilKit-iOS/pull/16)
+
 ## Cloud branches awaiting integration
 
-- `codex/regional-download-fixture` adds a resumable Python downloader and interrupted-transfer fixture. Compare `codex/ios-regional-download` and `codex/persistent-regional-download` before landing the iOS flow. `codex/regional-data-candidate` documents a candidate production region and its provenance.
+- `codex/regional-download-fixture` adds a resumable Python downloader and interrupted-transfer fixture. Its loopback fixtures passed against a synthetic version 2 bundle. `codex/regional-data-candidate` documents a candidate production region and its provenance.
 - `codex/ask-offline-directions`, `codex/ask-saved-pin-directions`, and `codex/ask-address-directions` touch related Ask and Map paths. Compare their intent handling before combining the changes. `codex/offline-ask-retrieval-fixture` adds coverage for retrieval across installed PDF archives.
 - `codex/nearby-public-admission` adds catalog and storage admission checks. `codex/nearby-public-resume` and `codex/nearby-public-transfer-recovery` overlap on worksheet download resume. Review their shared transfer paths and verify the combined behavior.
 - `codex/map-range-validation` adds validation for remote PMTiles range responses. `codex/desktop-starter-packs` and `codex/catalog-audit` carry the same climate pack byte count correction. Verify any publisher metadata before integrating it.
 - `codex/optional-health-library` adds an individual WikiMed download. `codex/print-essentials-edition-audit` tracks exact printable editions and page ranges. `codex/archive-directory-paths` addresses resource paths ending in a slash.
-- `codex/household-share-link-controls` adds link rotation and a locally rendered QR code. `codex/household-share-public-worksheet` adds the verified worksheet to the household browser share. Review the access controls and expiration on a second device.
+- `codex/household-share-link-controls` adds link rotation and a locally rendered QR code. `codex/household-share-public-worksheet` adds the verified worksheet to the household browser share. `codex/household-guest-search` adds browser search. Review the access controls and expiration on a second device.
+
+- `codex/offline-home-readiness` expands offline readiness reporting for saved Home. Review it with the latest regional map coverage behavior.
 
 ## Work that can move in the cloud
 
@@ -55,6 +59,6 @@ Public web snapshots must have verified rights, provenance and no personal conte
 
 - Prepare the linked reader, maps and routing assets and run XcodeGen using the [README](README.md#build-locally). Run the app and library tests on explicit simulators with isolated DerivedData and synthetic fixtures. Build both profiles when packaging changes.
 - For downloads, run `python3 Tests/PackDownloadFixture/test_resume.py` on macOS. Test the app with an interrupted background pack transfer on the phone, reconnect on the same allowed network, and confirm the publisher is asked for the remaining bytes and the final checksum passes. Cover pause, relaunch, longer outages and cellular consent. Map tiles already saved should survive an interruption.
-- For regional packages, add an in-app catalog download flow that hands completed files to the verified importer. Exercise verification, cancellation and recovery with fixtures, then test addresses, services, and walking and driving routes after an iPhone cold launch in airplane mode. For Ask, verify external map handoff in airplane mode and the real on-device model on an eligible phone.
+- For regional packages, publish a checked edition and surface it in a built-in catalog backed by the verified downloader. Exercise interrupted HTTPS with the simulator fixture in README.md. Test addresses, services, and walking and driving routes after an iPhone cold launch in airplane mode. For Ask, verify external map handoff in airplane mode and the real on-device model on an eligible phone.
 - For Nearby, use two iPhones with Wi-Fi enabled and no access point, then repeat on a LAN without internet. Check permission, storage limits, progress after interruption, notification behavior, and consent on real devices. The cloud cannot verify iOS suspension, direct peer discovery or Wi-Fi Aware.
 - Run each PR’s signed standard iPhone build alongside simulator testing in separate DerivedData directories. Install on the paired iPhone when reachable, and report any remaining device checks before merging. The requested TestFlight upload is a separate one-time lightweight release.
