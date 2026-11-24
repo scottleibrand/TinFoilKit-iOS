@@ -14,6 +14,28 @@ private final class Fractions: @unchecked Sendable {
 }
 
 final class ZIMArchiveTests: XCTestCase {
+    func testImportedArchiveVerificationDetectsCorruption() async throws {
+        let directory = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "climate", withExtension: "zim"))
+        let library = InstalledLibrary(directory: directory)
+        let imported = try await library.importArchive(from: fixture)
+        try await library.verifyArchive(imported)
+
+        let installed = await library.fileURL(for: imported.id)
+        var bytes = try Data(contentsOf: installed)
+        bytes[bytes.count - 1] ^= 1
+        try bytes.write(to: installed, options: .atomic)
+        XCTAssertGreaterThan(try ZIMArchive(fileURL: installed).entryCount, 0)
+
+        do {
+            try await library.verifyArchive(imported)
+            XCTFail("Expected verification to reject a damaged checksum")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "The ZIM archive does not match its embedded checksum.")
+        }
+    }
+
     func testDamagedManifestDoesNotHideOtherArchives() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

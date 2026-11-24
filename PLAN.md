@@ -28,7 +28,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 - The reader loads each resource fully into memory and refuses anything over 32 MiB, so large PDFs and videos fail. The scheme handler doesn't support byte ranges, so audio and video won't play. Stream large resources and answer range requests.
 - JavaScript is off for every archive, which breaks interactive content such as collapsible sections. Decide per pack, and keep the network block in place.
 - The PDF document list only appears for catalog packs marked as PDF collections. An imported PDF collection opens its main page instead. Listing the documents also scans every entry in the archive.
-- Verifying an imported archive only checks that it opens. Check the ZIM file's built-in MD5 checksum.
+- Library can verify the embedded ZIM checksum of imported files and the publisher SHA-256 checksum of catalog packs. Verify both on a device.
 - The reader has back and forward controls and find within articles and PDFs. Reading history and bookmarks persist, including PDF page and article section links.
 
 ### Content packs

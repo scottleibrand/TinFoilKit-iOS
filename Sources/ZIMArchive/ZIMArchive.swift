@@ -47,6 +47,14 @@ public final class ZIMArchive {
         tfk_archive_entry_count(archive)
     }
 
+    func verifyEmbeddedChecksum() throws {
+        try Task.checkCancellation()
+        if let error = tfk_archive_verify_checksum(archive) {
+            throw Self.readError(error, fallback: "The ZIM checksum could not be verified.")
+        }
+        try Task.checkCancellation()
+    }
+
     public func mainArticle() throws -> Resource {
         var error: UnsafeMutablePointer<CChar>?
         guard let resource = tfk_archive_main(archive, &error) else {

@@ -111,6 +111,15 @@ final class LibraryAndMapsTests: XCTestCase {
         app.terminate()
         app.launch()
         XCTAssertTrue(fixture.waitForExistence(timeout: 10))
+        fixture.press(forDuration: 1)
+        let verify = app.buttons["Verify checksum"]
+        XCTAssertTrue(verify.waitForExistence(timeout: 5))
+        verify.tap()
+        let verified = app.alerts["Checksum verified"]
+        XCTAssertTrue(verified.waitForExistence(timeout: 10))
+        XCTAssertTrue(verified.staticTexts.containing(NSPredicate(format: "label CONTAINS 'embedded ZIM checksum'")).firstMatch.exists)
+        verified.buttons["OK"].tap()
+
         let search = app.searchFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()

@@ -13,6 +13,8 @@ typedef struct TFKPDFEntry TFKPDFEntry;
 TFKArchive *tfk_archive_open(const char *file, char **error);
 void tfk_archive_close(TFKArchive *archive);
 uint32_t tfk_archive_entry_count(const TFKArchive *archive);
+/* Returns null on success or an owned error string. */
+char *tfk_archive_verify_checksum(const TFKArchive *archive);
 char *tfk_archive_title(const TFKArchive *archive);
 TFKResource *tfk_archive_main(const TFKArchive *archive, char **error);
 TFKResource *tfk_archive_resource(const TFKArchive *archive, const char *path, char **error);

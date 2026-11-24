@@ -316,12 +316,10 @@ private struct LibraryView: View {
                         }
                         .disabled(verifyingID == archive.id)
                     }
-                    if archive.pack != nil {
-                        Button("Verify checksum", systemImage: "checkmark.shield") {
-                            Task { await verify(archive) }
-                        }
-                        .disabled(verifyingID != nil)
+                    Button("Verify checksum", systemImage: "checkmark.shield") {
+                        Task { await verify(archive) }
                     }
+                    .disabled(verifyingID != nil || packs.isRepairing(archive))
                     if packs.canRepair(archive) {
                         Button("Repair archive", systemImage: "arrow.clockwise") {
                             do { try packs.repair(archive) }
@@ -372,7 +370,11 @@ private struct LibraryView: View {
         defer { verifyingID = nil }
         do {
             try await library.verifyArchive(archive)
-            verificationMessage = "\(archive.title) matches the publisher’s SHA-256 checksum."
+            verificationMessage = if archive.pack != nil {
+                "\(archive.title) matches the publisher’s SHA-256 checksum."
+            } else {
+                "\(archive.title) matches its embedded ZIM checksum."
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

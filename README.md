@@ -4,7 +4,7 @@ Read ZIM archives and view regional maps on an iPhone without an internet connec
 
 Download packs individually over Wi-Fi or choose Download Essentials or Download All to get current editions in bulk. Filter by language in Content Packs to find English and Spanish editions. The Extended Library includes a larger English Wikipedia selection and iFixit guides.
 
-Press and hold an installed archive in Library to verify its publisher checksum, repair it, update it when a newer edition is listed, or remove it. Repair replaces a same-edition copy after checksum verification. An update keeps the earlier edition and its index available until the new one is verified and searchable.
+Press and hold an installed archive in Library to verify its checksum or remove it. Catalog packs use the publisher’s SHA-256 checksum. Files imports use the ZIM’s embedded checksum to check for corruption. Catalog packs also support repair and updates. Repair replaces a same-edition copy after checksum verification. An update keeps the earlier edition and its index available until the new one is verified and searchable.
 
 Library and Ask can search article text and PDF pages as indexes build. Results from PDFs open to the matching page. Ask can stream a cited answer on devices with Apple Intelligence, and you can turn its on-device model off from the options menu.
 

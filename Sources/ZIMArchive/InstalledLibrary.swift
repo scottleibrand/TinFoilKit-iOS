@@ -256,6 +256,7 @@ public actor InstalledLibrary {
             }
             let archive = try ZIMArchive(fileURL: file)
             guard archive.entryCount > 0 else { throw ImportError.emptyArchive }
+            if entry.pack == nil { try archive.verifyEmbeddedChecksum() }
         }
         try await withTaskCancellationHandler {
             try await verification.value
