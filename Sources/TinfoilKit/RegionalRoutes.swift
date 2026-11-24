@@ -18,9 +18,15 @@ struct RoutingPack: Codable, Equatable, Sendable {
         }
 
         func contains(_ point: MapRoute.Point) -> Bool {
-            guard (south...north).contains(point.latitude) else { return false }
+            guard (south...north).contains(point.latitude), (-180...180).contains(point.longitude) else { return false }
             if west < east { return (west...east).contains(point.longitude) }
             return point.longitude >= west || point.longitude <= east
+        }
+
+        var area: Double {
+            let longitudeWidth = west < east ? east - west : 360 - west + east
+            let radians = Double.pi / 180
+            return longitudeWidth * (sin(north * radians) - sin(south * radians))
         }
     }
 
@@ -58,37 +64,55 @@ struct RoutingPack: Codable, Equatable, Sendable {
 }
 
 actor RegionalRouteStore {
-    struct Installed: Equatable, Sendable {
+    struct Installed: Identifiable, Equatable, Sendable {
         let id: UUID
         let pack: RoutingPack
     }
 
+    private static let maximumManifestBytes = 65_536
+    private static let importLock = NSLock()
     private let directory: URL
-    private var engine: RouteEngine?
-    private var active: Installed?
-    private var selection: URL { directory.appendingPathComponent("current") }
+    private var loadedEngine: (id: UUID, engine: RouteEngine)?
+    private var graphs: URL { directory.appendingPathComponent("Installed", isDirectory: true) }
+    private var legacySelection: URL { directory.appendingPathComponent("current") }
 
     init(directory: URL = URL.applicationSupportDirectory.appendingPathComponent("RoutingGraphs", isDirectory: true)) {
         self.directory = directory
     }
 
     func current() throws -> Installed? {
-        if let active { return active }
-        guard FileManager.default.fileExists(atPath: selection.path) else { return nil }
-        guard let id = UUID(uuidString: try String(contentsOf: selection, encoding: .utf8)) else {
-            throw RouteError.invalidPack
+        try installedPacks().max { lhs, rhs in
+            let a = installDate(lhs.id)
+            let b = installDate(rhs.id)
+            return a == b ? lhs.id.uuidString < rhs.id.uuidString : a < b
         }
-        let folder = installedFolder(id)
-        let bytes = try Data(contentsOf: folder.appendingPathComponent("manifest.json"))
-        let pack = try JSONDecoder().decode(RoutingPack.self, from: bytes)
-        try pack.validate()
-        let graph = folder.appendingPathComponent("tiles.tar")
-        guard try Int64(graph.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) == pack.graphByteCount else {
-            throw RouteError.invalidPack
+    }
+
+    func installedPacks() throws -> [Installed] {
+        var packs: [Installed] = []
+        if let legacy = legacyID(), let pack = try? readPack(legacy) { packs.append(pack) }
+        let files = FileManager.default
+        if files.fileExists(atPath: graphs.path) {
+            let folders = try files.contentsOfDirectory(at: graphs, includingPropertiesForKeys: nil)
+            for folder in folders {
+                try Task.checkCancellation()
+                guard let id = UUID(uuidString: folder.lastPathComponent), !packs.contains(where: { $0.id == id }),
+                      let pack = try? readPack(id) else { continue }
+                packs.append(pack)
+            }
         }
-        let installed = Installed(id: id, pack: pack)
-        active = installed
-        return installed
+        return packs.sorted { lhs, rhs in
+            let order = lhs.pack.region.localizedStandardCompare(rhs.pack.region)
+            return order == .orderedSame ? lhs.id.uuidString < rhs.id.uuidString : order == .orderedAscending
+        }
+    }
+
+    func remove(_ id: Installed.ID) throws {
+        try Self.importLock.withLock {
+            guard try installedPacks().contains(where: { $0.id == id }) else { return }
+            if loadedEngine?.id == id { loadedEngine = nil }
+            try FileManager.default.removeItem(at: installedFolder(id))
+        }
     }
 
     func install(_ source: URL) throws -> Installed {
@@ -108,52 +132,140 @@ actor RegionalRouteStore {
 
     func route(_ installed: Installed, from origin: MapRoute.Point, to destination: MapRoute.Point,
                mode: MapTravelMode) throws -> MapRoute {
-        guard try current() == installed, installed.pack.bounds.contains(origin),
-              installed.pack.bounds.contains(destination) else { throw RouteError.outsideRegion }
-        try Task.checkCancellation()
-        if engine == nil {
-            engine = try RouteEngine(folder: installedFolder(installed.id))
+        guard try readPack(installed.id) == installed, covers(installed, origin, destination) else {
+            throw RouteError.outsideRegion
         }
-        guard let engine else { throw RouteError.engineUnavailable }
+        return try calculate(using: installed.id, from: origin, to: destination, mode: mode)
+    }
+
+    func route(from origin: MapRoute.Point, to destination: MapRoute.Point, mode: MapTravelMode) throws -> MapRoute {
+        try Task.checkCancellation()
+        let candidates = try installedPacks().filter { covers($0, origin, destination) }.sorted { lhs, rhs in
+            let a = lhs.pack.bounds.area
+            let b = rhs.pack.bounds.area
+            if a != b { return a < b }
+            let aDate = installDate(lhs.id)
+            let bDate = installDate(rhs.id)
+            return aDate == bDate ? lhs.id.uuidString < rhs.id.uuidString : aDate > bDate
+        }
+        guard !candidates.isEmpty else { throw RouteError.outsideRegion }
+        var failure: Error?
+        for candidate in candidates {
+            do { return try calculate(using: candidate.id, from: origin, to: destination, mode: mode) }
+            catch is CancellationError { throw CancellationError() }
+            catch {
+                try Task.checkCancellation()
+                if case RouteError.noRoute = error { failure = error }
+                else if failure == nil { failure = error }
+            }
+        }
+        throw failure ?? RouteError.noRoute
+    }
+
+    private func covers(_ installed: Installed, _ origin: MapRoute.Point, _ destination: MapRoute.Point) -> Bool {
+        installed.pack.bounds.contains(origin) && installed.pack.bounds.contains(destination)
+    }
+
+    private func calculate(using id: UUID, from origin: MapRoute.Point, to destination: MapRoute.Point,
+                           mode: MapTravelMode) throws -> MapRoute {
+        try Task.checkCancellation()
+        if loadedEngine?.id != id {
+            loadedEngine = nil
+            loadedEngine = (id, try RouteEngine(folder: installedFolder(id)))
+        }
+        guard let engine = loadedEngine?.engine else { throw RouteError.engineUnavailable }
         let route = try engine.route(from: origin, to: destination, mode: mode)
         try Task.checkCancellation()
         return route
     }
 
     private func installedFolder(_ id: UUID) -> URL {
-        directory.appendingPathComponent(id.uuidString, isDirectory: true)
+        if legacyID() == id { return directory.appendingPathComponent(id.uuidString, isDirectory: true) }
+        return graphs.appendingPathComponent(id.uuidString, isDirectory: true)
+    }
+
+    private func legacyID() -> UUID? {
+        guard let handle = try? FileHandle(forReadingFrom: legacySelection) else { return nil }
+        defer { try? handle.close() }
+        guard let bytes = try? handle.read(upToCount: 37), bytes.count == 36,
+              let value = String(data: bytes, encoding: .utf8) else { return nil }
+        return UUID(uuidString: value)
+    }
+
+    private func installDate(_ id: UUID) -> Date {
+        (try? installedFolder(id).resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+    }
+
+    private func readPack(_ id: UUID) throws -> Installed {
+        let folder = installedFolder(id)
+        let folderValues = try folder.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard folderValues.isDirectory == true, folderValues.isSymbolicLink != true else { throw RouteError.invalidPack }
+        let manifest = folder.appendingPathComponent("manifest.json")
+        let manifestValues = try manifest.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard manifestValues.isRegularFile == true, manifestValues.isSymbolicLink != true else {
+            throw RouteError.invalidPack
+        }
+        let handle = try FileHandle(forReadingFrom: manifest)
+        defer { try? handle.close() }
+        guard let bytes = try handle.read(upToCount: Self.maximumManifestBytes + 1),
+              bytes.count <= Self.maximumManifestBytes else { throw RouteError.invalidPack }
+        let pack = try JSONDecoder().decode(RoutingPack.self, from: bytes)
+        try pack.validate()
+        let graph = folder.appendingPathComponent("tiles.tar")
+        let graphValues = try graph.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+        guard graphValues.isRegularFile == true, graphValues.isSymbolicLink != true,
+              Int64(graphValues.fileSize ?? 0) == pack.graphByteCount else { throw RouteError.invalidPack }
+        return Installed(id: id, pack: pack)
     }
 
     private func importFile(_ source: URL) throws -> Installed {
+        try Self.importLock.withLock { try importLocked(source) }
+    }
+
+    private func importLocked(_ source: URL) throws -> Installed {
+        try Task.checkCancellation()
         let (pack, manifest, input) = try Self.openPack(source)
         defer { try? input.close() }
         let files = FileManager.default
-        try files.createDirectory(at: directory, withIntermediateDirectories: true)
+        try files.createDirectory(at: graphs, withIntermediateDirectories: true)
+        try removeInterruptedImports()
         var root = directory
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try root.setResourceValues(values)
+        if let existing = try installedPacks().first(where: { $0.pack == pack }) {
+            try Self.consumeGraph(from: input, pack: pack)
+            return existing
+        }
         if let available = try root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             .volumeAvailableCapacityForImportantUsage, available < pack.graphByteCount {
             throw RouteError.storage
         }
 
         let id = UUID()
-        let folder = installedFolder(id)
-        try files.createDirectory(at: folder, withIntermediateDirectories: false)
-        var committed = false
-        defer { if !committed { try? files.removeItem(at: folder) } }
-        try Self.writeGraph(from: input, pack: pack, to: folder.appendingPathComponent("tiles.tar"))
-        try manifest.write(to: folder.appendingPathComponent("manifest.json"), options: .atomic)
-        let candidate = try RouteEngine(folder: folder)
-        let oldID = (try? String(contentsOf: selection, encoding: .utf8)).flatMap(UUID.init(uuidString:))
-        try Data(id.uuidString.utf8).write(to: selection, options: .atomic)
-        committed = true
-        let installed = Installed(id: id, pack: pack)
-        engine = candidate
-        active = installed
-        if let oldID { try? files.removeItem(at: installedFolder(oldID)) }
-        return installed
+        let staging = graphs.appendingPathComponent(id.uuidString).appendingPathExtension("partial")
+        try files.createDirectory(at: staging, withIntermediateDirectories: false)
+        defer { try? files.removeItem(at: staging) }
+        try Self.consumeGraph(from: input, pack: pack, writingTo: staging.appendingPathComponent("tiles.tar"))
+        try manifest.write(to: staging.appendingPathComponent("manifest.json"), options: .atomic)
+        loadedEngine = nil
+        _ = try RouteEngine(folder: staging)
+        // The probe writes absolute staging paths. A route opens a fresh config after publication.
+        try? files.removeItem(at: staging.appendingPathComponent("engine.json"))
+        try Task.checkCancellation()
+        try files.moveItem(at: staging, to: installedFolder(id))
+        return Installed(id: id, pack: pack)
+    }
+
+    private func removeInterruptedImports() throws {
+        let files = FileManager.default
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey]
+        for folder in try files.contentsOfDirectory(at: graphs, includingPropertiesForKeys: Array(keys)) {
+            guard folder.pathExtension == "partial", UUID(uuidString: folder.deletingPathExtension().lastPathComponent) != nil,
+                  let values = try? folder.resourceValues(forKeys: keys), values.isDirectory == true,
+                  values.isSymbolicLink != true else { continue }
+            try? files.removeItem(at: folder)
+        }
     }
 
     private static func openPack(_ source: URL) throws -> (RoutingPack, Data, FileHandle) {
@@ -166,7 +278,7 @@ actor RegionalRouteStore {
             guard let header = try input.read(upToCount: 12), header.count == 12,
                   header.prefix(8) == Data("TFKROUTE".utf8) else { throw RouteError.invalidPack }
             let length = Int(header.dropFirst(8).withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }.littleEndian)
-            guard (1...65_536).contains(length), let data = try input.read(upToCount: length), data.count == length,
+            guard (1...maximumManifestBytes).contains(length), let data = try input.read(upToCount: length), data.count == length,
                   let pack = try? JSONDecoder().decode(RoutingPack.self, from: data),
                   Int64(fileSize - 12 - length) == pack.graphByteCount else { throw RouteError.invalidPack }
             try pack.validate()
@@ -177,21 +289,27 @@ actor RegionalRouteStore {
         }
     }
 
-    private static func writeGraph(from input: FileHandle, pack: RoutingPack, to file: URL) throws {
-        guard FileManager.default.createFile(atPath: file.path, contents: nil) else { throw RouteError.storage }
-        let output = try FileHandle(forWritingTo: file)
-        defer { try? output.close() }
+    private static func consumeGraph(from input: FileHandle, pack: RoutingPack, writingTo file: URL? = nil) throws {
+        let output: FileHandle?
+        if let file {
+            guard FileManager.default.createFile(atPath: file.path, contents: nil) else { throw RouteError.storage }
+            output = try FileHandle(forWritingTo: file)
+        } else {
+            output = nil
+        }
+        defer { try? output?.close() }
         var count = Int64(0)
         var sha256 = SHA256()
         while let chunk = try input.read(upToCount: 1024 * 1024), !chunk.isEmpty {
             try Task.checkCancellation()
             count += Int64(chunk.count)
             guard count <= pack.graphByteCount else { throw RouteError.invalidPack }
-            try output.write(contentsOf: chunk)
+            try output?.write(contentsOf: chunk)
             sha256.update(data: chunk)
         }
         let digest = sha256.finalize().map { String(format: "%02x", $0) }.joined()
         guard count == pack.graphByteCount, digest == pack.graphSHA256 else { throw RouteError.invalidPack }
-        try output.synchronize()
+        try Task.checkCancellation()
+        try output?.synchronize()
     }
 }

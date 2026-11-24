@@ -38,8 +38,8 @@ enum RouteError: LocalizedError {
         case .incompatiblePack: "This routing pack was built for a different version of the routing engine."
         case .storage: "There isn’t enough free storage to install this routing pack."
         case .engineUnavailable: "The offline routing engine could not open this graph."
-        case .outsideRegion: "Choose two locations inside the installed routing region."
-        case .noRoute: "No route was found between these locations in the installed region."
+        case .outsideRegion: "Choose two locations covered by the same installed routing pack."
+        case .noRoute: "No offline route was found between these locations."
         case .invalidResponse: "The offline routing engine returned an invalid route."
         }
     }

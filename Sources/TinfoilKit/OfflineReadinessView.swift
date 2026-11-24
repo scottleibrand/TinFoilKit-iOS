@@ -7,7 +7,7 @@ struct OfflineReadinessView: View {
     @State private var availableBytes: Int64?
     @State private var map: Result<OfflineMap?, Error>?
     @State private var places: Result<[RegionalPlaceStorage.Installed]?, Error>?
-    @State private var routing: Result<RegionalRouteStore.Installed?, Error>?
+    @State private var routing: Result<[RegionalRouteStore.Installed]?, Error>?
 
     var body: some View {
         List {
@@ -104,14 +104,16 @@ struct OfflineReadinessView: View {
                     Link("\(metadata.attribution) · \(metadata.license)", destination: metadata.licenseURL)
                 }
             }
-            coverageRow("Walking and driving", state: routing, missing: routingStatus) { active in
-                let pack = active.pack
-                Text(pack.region)
-                Text("Data edition \(pack.dataVersion)")
-                let bounds = pack.bounds
-                coverageBounds(west: bounds.west, south: bounds.south, east: bounds.east, north: bounds.north)
-                Link("Data source", destination: pack.source)
-                Link("\(pack.attribution) · \(pack.license)", destination: pack.licenseURL)
+            coverageRow("Walking and driving", state: routing, missing: routingStatus) { packs in
+                ForEach(packs) { installed in
+                    let pack = installed.pack
+                    Text(pack.region)
+                    Text("Data edition \(pack.dataVersion)")
+                    let bounds = pack.bounds
+                    coverageBounds(west: bounds.west, south: bounds.south, east: bounds.east, north: bounds.north)
+                    Link("Data source", destination: pack.source)
+                    Link("\(pack.attribution) · \(pack.license)", destination: pack.licenseURL)
+                }
             }
         }
     }
@@ -169,7 +171,10 @@ struct OfflineReadinessView: View {
             places = .success(indexes.isEmpty ? nil : indexes)
         }
         catch { places = .failure(error) }
-        do { routing = .success(try await RegionalRouteStore().current()) }
+        do {
+            let packs = try await RegionalRouteStore().installedPacks()
+            routing = .success(packs.isEmpty ? nil : packs)
+        }
         catch { routing = .failure(error) }
         await indexing.refresh()
     }

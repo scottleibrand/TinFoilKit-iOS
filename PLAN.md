@@ -41,7 +41,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 
 ### Maps
 
-- **Beta.** The map keeps multiple imported basemaps with coverage and a saved selection. Address and service search and household printing use multiple installed place indexes. Publish region packs (tiles, places and routing data) in the catalog for direct installation, and let users manage multiple routing graphs.
+- **Beta.** The map keeps multiple imported basemaps, place indexes, and offline routing graphs. Address and service search and household printing use the installed place indexes. Routes use a graph that covers both endpoints. Publish region packs with tiles, places and routing data in the catalog for direct installation.
 - **Beta.** The tile cache:
   - reveals the areas a user views to the Source Cooperative host, which needs a privacy disclosure and an off switch;
   - downloads over cellular;
