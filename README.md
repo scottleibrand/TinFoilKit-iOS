@@ -1,14 +1,18 @@
 # Tinfoil Kit for iOS
 
+Tinfoil Kit puts a reference library, maps, and your household’s emergency notes on your iPhone. Download what you need while you’re connected, then look up a repair, check a map, or find your family’s meeting point when cell service is down or you’re traveling out of coverage.
+
+[Build it from source](#build-locally) to set up a kit for the places you go and the people you plan with. Start with a few guides and a local map, then try them in airplane mode so you know what you’ll have when you need it.
+
 This app is based on the original desktop Tinfoil Kit by Travis Bloom and Tudor City Ventures. [Desktop repository](https://github.com/tudor-city-ventures/tinfoil-kit) · [Official website](https://tinfoilkit.com/)
 
-Read ZIM archives and view maps on an iPhone without an internet connection. The app includes full-text search for installed articles, a downloadable Essentials catalog, and local place search where regional data is installed. Large archives index in batches and resume after interruption when storage is available.
+## Using the app
 
 Download packs individually over Wi-Fi or choose Download Essentials or Download All to get current editions in bulk. Filter by language in Content Packs to find English and Spanish editions. The Extended Library includes a larger English Wikipedia selection and iFixit guides.
 
 Press and hold an installed archive in Library to verify its checksum or remove it. Catalog packs use the publisher’s SHA-256 checksum. Files imports use the ZIM’s embedded checksum to check for corruption. Catalog packs also support repair and updates. Repair replaces a same-edition copy after checksum verification. An update keeps the earlier edition and its index available until the new one is verified and searchable.
 
-Library and Ask can search article text and PDF pages as indexes build. Results from PDFs open to the matching page. Ask can stream a cited answer on devices with Apple Intelligence, and you can turn its on-device model off from the options menu.
+Library and Ask can search article text and PDF pages as indexes build. Indexing resumes after an interruption when storage is available. Results from PDFs open to the matching page. Ask can stream a cited answer on devices with Apple Intelligence, and you can turn its on-device model off from the options menu.
 
 In an open article, use the archive back and forward buttons to retrace followed links, and **Find on page** to search the current article. In a PDF, use **Find in document** to jump between matches. Both reader searches work offline.
 
