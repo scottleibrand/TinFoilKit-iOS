@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 
 struct OfflineMapView: View {
     @ObservedObject var household: HouseholdStore
+    @Binding var pendingPlace: MapPlace?
+    @Environment(\.openURL) private var openURL
     @State private var storage = MapStorage()
     @State private var regionStorage = RegionalPlaceStorage()
     @State private var placeRegions: [RegionalPlaceStorage.Installed] = []
@@ -87,6 +89,9 @@ struct OfflineMapView: View {
                 Button("Copy degrees, minutes and seconds") {
                     UIPasteboard.general.string = MapCoordinateText.degreesMinutesSeconds(place.coordinate)
                 }
+                if let destination = MapCoordinateText.googleMapsURL(place.coordinate) {
+                    Button("Open in Google Maps") { openURL(destination) }
+                }
                 if let origin = location.fix?.coordinate ?? household.snapshot.home?.coordinate {
                     if supportsOfflineRoute(from: origin, to: place.coordinate) {
                         Button("Drive here") { routeHere(place, from: origin, mode: .driving) }
@@ -123,13 +128,22 @@ struct OfflineMapView: View {
                 MapDownloadsView(exploration: exploration)
             }
             .onChange(of: location.fix?.timestamp) {
-                if let fix = location.fix {
+                if let fix = location.fix, selectedPlace == nil || location.following {
                     marker = MapMarker(coordinate: fix.coordinate, title: "Current position")
                 }
             }
             .onAppear {
                 location.setVisible(true, centerInitially: savedPosition.isEmpty)
                 exploration.setVisible(true)
+            }
+            .task(id: pendingPlace?.id) {
+                if let place = pendingPlace {
+                    pendingPlace = nil
+                    if location.following { location.toggleFollowing() }
+                    routeRequest = nil
+                    route = nil
+                    show(place)
+                }
             }
             .onDisappear {
                 location.setVisible(false)
@@ -235,6 +249,9 @@ struct OfflineMapView: View {
                             }
                         } else if let selectedPlace {
                             Text(selectedPlace.name)
+                            if let destination = MapCoordinateText.googleMapsURL(selectedPlace.coordinate) {
+                                Link("Open in Google Maps", destination: destination)
+                            }
                             if supportsOfflineRoute(from: selectedPlace.coordinate) || walkingIndex != nil {
                                 Button("Start walk here") { findDestination(from: selectedPlace, mode: .walking) }
                             }
@@ -330,8 +347,7 @@ struct OfflineMapView: View {
                 ?? MapPosition(savedPosition)?.coordinate,
             savedPlaces: savedPlaces
         ) { place in
-            marker = MapMarker(coordinate: place.coordinate, title: place.name)
-            selectedPlace = place
+            show(place)
             if let origin = routeOrigin {
                 routeOrigin = nil
                 startRoute(from: origin.coordinate, to: place.coordinate, mode: routeMode)
@@ -371,6 +387,7 @@ struct OfflineMapView: View {
     }
 
     private func handleLocationButton() {
+        selectedPlace = nil
         if locationIsOffscreen, let fix = location.fix {
             marker = MapMarker(coordinate: fix.coordinate, title: "Current position")
             if !location.following { location.toggleFollowing() }
@@ -384,13 +401,19 @@ struct OfflineMapView: View {
         marker = MapMarker(coordinate: place.coordinate, title: place.name)
     }
 
+    private func show(_ place: MapPlace) {
+        marker = MapMarker(coordinate: place.coordinate, title: place.name)
+        selectedPlace = place
+    }
+
     private func setMap(_ map: OfflineMap?) {
         let initialMarker = style == nil ? marker : nil
+        let initialSelection = style == nil ? selectedPlace : nil
         self.map = map
         style = OfflineMapStyle(seed: map, downloadedTiles: ExploredMapTiles.directory)
         viewport = nil
         marker = initialMarker
-        selectedPlace = nil
+        selectedPlace = initialSelection
         route = nil
         routeRequest = nil
     }

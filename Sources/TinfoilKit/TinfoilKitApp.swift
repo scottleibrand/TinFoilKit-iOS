@@ -14,18 +14,31 @@ struct TinfoilKitApp: App {
     @StateObject private var readingShelf = ReadingShelf()
     @AppStorage("hasSeenOfflineStarterGuide") private var hasSeenOfflineStarterGuide = false
     @State private var showingOfflineStarterGuide = false
+    @State private var selectedTab: Tab = .library
+    @State private var pendingMapPlace: MapPlace?
+
+    private enum Tab: Hashable {
+        case library, map, ask, household
+    }
 
     var body: some Scene {
         WindowGroup {
-            TabView {
+            TabView(selection: $selectedTab) {
                 LibraryView(library: .standard, packs: packs, indexing: indexing)
                     .tabItem { Label("Library", systemImage: "books.vertical") }
-                OfflineMapView(household: household)
+                    .tag(Tab.library)
+                OfflineMapView(household: household, pendingPlace: $pendingMapPlace)
                     .tabItem { Label("Map", systemImage: "map") }
-                AskLibraryView(library: .standard, indexing: indexing)
+                    .tag(Tab.map)
+                AskLibraryView(library: .standard, indexing: indexing, household: household) { place in
+                    pendingMapPlace = place
+                    selectedTab = .map
+                }
                     .tabItem { Label("Ask", systemImage: "questionmark.bubble") }
+                    .tag(Tab.ask)
                 HouseholdView(household: household)
                     .tabItem { Label("Household", systemImage: "house") }
+                    .tag(Tab.household)
             }
             .task { await packs.restore() }
             .task(id: packs.installedRevision) { await indexing.refresh() }
