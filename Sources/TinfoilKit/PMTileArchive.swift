@@ -39,6 +39,7 @@ actor PMTileArchive {
     private var snapshot: Task<Snapshot, Error>?
     private var leaves: [UInt64: Task<[Entry], Error>] = [:]
     private var etag: String?
+    private var archiveLength: UInt64?
     private let session: URLSession
     private static let cellularSession = makeSession(allowsCellular: true)
     private static let nonCellularSession = makeSession(allowsCellular: false)
@@ -53,9 +54,9 @@ actor PMTileArchive {
         return URLSession(configuration: config)
     }
 
-    init(url: URL, allowsCellular: Bool = true) {
+    init(url: URL, allowsCellular: Bool = true, session: URLSession? = nil) {
         self.url = url
-        session = allowsCellular ? Self.cellularSession : Self.nonCellularSession
+        self.session = session ?? (allowsCellular ? Self.cellularSession : Self.nonCellularSession)
     }
 
     func contains(_ tile: MapTile) async throws -> Bool {
@@ -79,6 +80,7 @@ actor PMTileArchive {
             self.snapshot = nil
             leaves.removeAll()
             etag = nil
+            archiveLength = nil
             throw ArchiveError.changed
         }
     }
@@ -113,6 +115,7 @@ actor PMTileArchive {
             snapshot = nil
             leaves.removeAll()
             etag = nil
+            archiveLength = nil
             throw ArchiveError.changed
         }
     }
@@ -168,13 +171,18 @@ actor PMTileArchive {
         guard let response = reply as? HTTPURLResponse else { throw ArchiveError.invalid }
         if response.statusCode == 412 { throw ArchiveError.changed }
         guard response.statusCode == 206,
-              response.value(forHTTPHeaderField: "Content-Range")?.hasPrefix("bytes \(offset)-\(end)/") == true else {
+              let range = PMTileContentRange(response.value(forHTTPHeaderField: "Content-Range"),
+                                             start: offset, end: end) else {
             throw ArchiveError.invalid
+        }
+        if let archiveLength, let current = range.archiveLength, archiveLength != current {
+            throw ArchiveError.changed
         }
         if let current = response.value(forHTTPHeaderField: "ETag") {
             if let etag, etag != current { throw ArchiveError.changed }
             etag = current
         }
+        if let current = range.archiveLength { archiveLength = current }
         var data = Data(capacity: count)
         for try await byte in body {
             guard data.count < count else { throw ArchiveError.invalid }
@@ -302,5 +310,5 @@ actor PMTileArchive {
         var offset: UInt64 = 0
     }
 
-    private enum ArchiveError: Error { case invalid, changed }
+    enum ArchiveError: Error { case invalid, changed }
 }
