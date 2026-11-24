@@ -51,6 +51,22 @@ struct PackDownloadAttempt: Sendable {
             return nil
         }
     }
+
+    func retryDelay(for response: HTTPURLResponse) -> TimeInterval? {
+        guard Self.delays.indices.contains(retryCount),
+              [408, 429, 500, 502, 503, 504].contains(response.statusCode) else { return nil }
+        guard let retryAfter = response.value(forHTTPHeaderField: "Retry-After") else {
+            return Self.delays[retryCount]
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+        guard let requested = Int(retryAfter).map(TimeInterval.init)
+                ?? formatter.date(from: retryAfter)?.timeIntervalSinceNow,
+              requested <= 3600 else { return nil }
+        return max(Self.delays[retryCount], requested)
+    }
 }
 
 @MainActor
@@ -142,11 +158,11 @@ final class PackDownloads: ObservableObject {
         }
     }
 
-    func start(_ pack: PublishedPack, network: PackDownloadNetwork = .wifiOnly) {
+    func start(_ pack: PublishedPack, network: PackDownloadNetwork? = nil) {
         guard !restoring, canStart(pack) else { return }
         downloadAllError = nil
         do {
-            try enqueue([pack], network: network)
+            try enqueue([pack], network: network ?? transfer.resumeNetwork(pack.editionKey))
         } catch {
             statuses[pack.editionKey] = .failed(error.localizedDescription)
         }
@@ -154,6 +170,10 @@ final class PackDownloads: ObservableObject {
 
     func allowsCellular(for pack: PublishedPack) -> Bool {
         tasks[pack.editionKey]?.network == .cellularAllowed
+    }
+
+    func resumesOnCellular(for pack: PublishedPack) -> Bool {
+        transfer.resumeNetwork(pack.editionKey) == .cellularAllowed
     }
 
     func startAll() {
@@ -165,12 +185,12 @@ final class PackDownloads: ObservableObject {
     }
 
     private func sizeEstimate(for packs: [PublishedPack]) -> Int64 {
-        packs.filter(canStart).reduce(0) { $0 + $1.sizeEstimate }
+        packs.filter(canStartOnWiFi).reduce(0) { $0 + $1.sizeEstimate }
     }
 
     private func startBatch(_ packs: [PublishedPack]) {
         guard !restoring else { return }
-        let eligible = packs.filter(canStart)
+        let eligible = packs.filter(canStartOnWiFi)
         guard !eligible.isEmpty else { return }
         downloadAllError = nil
         do {
@@ -299,6 +319,10 @@ final class PackDownloads: ObservableObject {
         case nil, .paused, .failed: return true
         case .downloading, .retrying, .pausing, .verifying, .installed: return false
         }
+    }
+
+    private func canStartOnWiFi(_ pack: PublishedPack) -> Bool {
+        canStart(pack) && !resumesOnCellular(for: pack)
     }
 
     private func enqueue(_ packs: [PublishedPack], network: PackDownloadNetwork = .wifiOnly) throws {
@@ -443,7 +467,7 @@ final class PackDownloads: ObservableObject {
     }
 }
 
-private final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     struct Ticket: Sendable {
         let attempt: PackDownloadAttempt
         let network: PackDownloadNetwork
@@ -494,7 +518,18 @@ private final class PackTransfer: NSObject, URLSessionDownloadDelegate, @uncheck
     }
 
     func hasResume(_ key: String) -> Bool {
-        PackDownloadNetwork.allCases.contains { FileManager.default.fileExists(atPath: resumeURL(key, network: $0).path) }
+        PackDownloadNetwork.allCases.contains { hasResume(key, network: $0) }
+    }
+
+    private func hasResume(_ key: String, network: PackDownloadNetwork) -> Bool {
+        FileManager.default.fileExists(atPath: resumeURL(key, network: network).path)
+    }
+
+    func resumeNetwork(_ key: String) -> PackDownloadNetwork {
+        if hasResume(key, network: .cellularAllowed), !hasResume(key, network: .wifiOnly) {
+            return .cellularAllowed
+        }
+        return .wifiOnly
     }
 
     func clearResume(_ key: String) {
@@ -511,8 +546,13 @@ private final class PackTransfer: NSObject, URLSessionDownloadDelegate, @uncheck
         _ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL
     ) {
         guard let ticket = Ticket(session: session, task: downloadTask) else { return }
-        guard let response = downloadTask.response as? HTTPURLResponse, (200...299).contains(response.statusCode) else {
+        guard let response = downloadTask.response as? HTTPURLResponse else {
             post(.failed(ticket, "The publisher did not return the archive.", retryAfter: nil))
+            return
+        }
+        guard (200...299).contains(response.statusCode) else {
+            post(.failed(ticket, "The publisher did not return the archive (HTTP \(response.statusCode)).",
+                         retryAfter: ticket.attempt.retryDelay(for: response)))
             return
         }
         do {
@@ -539,10 +579,10 @@ private final class PackTransfer: NSObject, URLSessionDownloadDelegate, @uncheck
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let ticket = Ticket(session: session, task: task), let error = error as NSError? else { return }
+        guard error.code != NSURLErrorCancelled || error.domain != NSURLErrorDomain else { return }
         if let data = error.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
             try? saveResume(data, key: ticket.key, network: ticket.network)
         }
-        guard error.code != NSURLErrorCancelled || error.domain != NSURLErrorDomain else { return }
         post(.failed(ticket, error.localizedDescription, retryAfter: ticket.attempt.retryDelay(for: error)))
     }
 

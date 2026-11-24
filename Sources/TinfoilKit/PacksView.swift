@@ -34,7 +34,7 @@ struct PacksView: View {
                         .foregroundStyle(.secondary)
                 }
             } footer: {
-                Text("Bulk downloads use Wi-Fi and include the current editions.")
+                Text("Bulk downloads use Wi-Fi and include the current editions. Resume cellular transfers individually.")
             }
             if let error = PackCatalog.loadError {
                 Text(error).foregroundStyle(.secondary)
@@ -119,11 +119,16 @@ struct PacksView: View {
     }
 
     private func downloadControls(_ title: String, pack: PublishedPack) -> some View {
-        HStack {
-            Button(title) { downloads.start(pack) }
+        let resumesOnCellular = downloads.resumesOnCellular(for: pack)
+        return HStack {
+            Button(resumesOnCellular ? "\(title) · cellular allowed" : title) { downloads.start(pack) }
             Menu {
-                Button("Allow cellular data…", systemImage: "antenna.radiowaves.left.and.right") {
-                    cellularPack = pack
+                if resumesOnCellular {
+                    Button("Start over on Wi-Fi", systemImage: "wifi") { downloads.start(pack, network: .wifiOnly) }
+                } else {
+                    Button("Allow cellular data…", systemImage: "antenna.radiowaves.left.and.right") {
+                        cellularPack = pack
+                    }
                 }
             } label: {
                 Image(systemName: "ellipsis.circle").accessibilityLabel("Download options")
