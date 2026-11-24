@@ -28,6 +28,22 @@ final class NearbyServiceQuestionTests: XCTestCase {
         }
     }
 
+    func testExplicitDirectionsMatchOnlyNearbyServicesFromHome() {
+        XCTAssertEqual(NearbyServiceQuestion.parseDirections("How do I get to the nearest hospital?"), .hospital)
+        XCTAssertEqual(NearbyServiceQuestion.parseDirections(" DIRECTIONS from home to the closest pharmacy. "), .pharmacy)
+        XCTAssertEqual(NearbyServiceQuestion.parseDirections("Directions to nearest gas station"), .gas)
+        for question in [
+            "Directions to the nearest hospital near me",
+            "Directions to the nearest hospital with an emergency room",
+            "Directions from work to the nearest hospital",
+            "Directions from home to 350 Fifth Avenue",
+            "Directions to a pharmacy",
+            "Where is the closest pharmacy?"
+        ] {
+            XCTAssertNil(NearbyServiceQuestion.parseDirections(question), question)
+        }
+    }
+
     func testNearbyServiceCategoriesMatchPlaceIndex() {
         XCTAssertEqual(Set(NearbyServiceQuestion.allCases.map(\.rawValue)),
                        Set(RegionalPlaceIndex.Category.allCases.map(\.rawValue)))

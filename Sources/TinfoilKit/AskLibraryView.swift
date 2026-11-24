@@ -5,7 +5,7 @@ struct AskLibraryView: View {
     let library: InstalledLibrary
     @ObservedObject var indexing: LibraryIndexing
     @ObservedObject var household: HouseholdStore
-    let openMap: (MapPlace?) -> Void
+    let openMap: (MapOpenRequest?) -> Void
     @AppStorage("askUsesOnDeviceModel") private var useModel = true
     @FocusState private var questionFocused: Bool
     @FocusState private var serviceAreaFocused: Bool
@@ -26,7 +26,7 @@ struct AskLibraryView: View {
     @State private var cited: AskEvidence?
     @State private var onlineSheet: OnlineSheet?
     @State private var fallbackQuestion: String?
-    @State private var nearbyResult: RegionalPlaceSearch.Nearby?
+    @State private var nearbyResult: NearbyAnswer?
     @State private var needsMapSetup = false
 
     private var currentQuestion: String { question.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -209,11 +209,13 @@ struct AskLibraryView: View {
         }
     }
 
-    private func nearbyAnswer(_ result: RegionalPlaceSearch.Nearby) -> some View {
-        let match = result.match
+    private func nearbyAnswer(_ result: NearbyAnswer) -> some View {
+        let match = result.nearby.match
         let place = match.place
         let metadata = match.region.metadata
-        let distance = Measurement(value: result.distanceMeters, unit: UnitLength.meters)
+        let destinationPlace = MapPlace(id: match.id, name: place.name, kind: place.categoryLabel,
+                                        latitude: place.coordinate.latitude, longitude: place.coordinate.longitude)
+        let distance = Measurement(value: result.nearby.distanceMeters, unit: UnitLength.meters)
             .formatted(.measurement(width: .abbreviated, usage: .road))
         return Section {
             VStack(alignment: .leading, spacing: 5) {
@@ -222,9 +224,16 @@ struct AskLibraryView: View {
                 Text("\(distance) straight-line distance from Home")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
+            if let origin = result.routeOrigin {
+                Button("Walk from Home", systemImage: "figure.walk") {
+                    openMap(MapOpenRequest(place: destinationPlace, route: .init(origin: origin, mode: .walking)))
+                }
+                Button("Drive from Home", systemImage: "car") {
+                    openMap(MapOpenRequest(place: destinationPlace, route: .init(origin: origin, mode: .driving)))
+                }
+            }
             Button("Show on map", systemImage: "map") {
-                openMap(MapPlace(id: match.id, name: place.name, kind: place.categoryLabel,
-                                 latitude: place.coordinate.latitude, longitude: place.coordinate.longitude))
+                openMap(MapOpenRequest(place: destinationPlace))
             }
             if let destination = MapCoordinateText.googleMapsURL(place.coordinate) {
                 Link(destination: destination) {
@@ -260,15 +269,16 @@ struct AskLibraryView: View {
         message = nil
         nearbyResult = nil
         needsMapSetup = false
-        let nearbyCategory = mode == .ask ? NearbyServiceQuestion.parse(question)
-            .flatMap { RegionalPlaceIndex.Category(rawValue: $0.rawValue) } : nil
+        let directions = mode == .ask ? NearbyServiceQuestion.parseDirections(question) : nil
+        let service = mode == .ask ? (directions ?? NearbyServiceQuestion.parse(question)) : nil
+        let nearbyCategory = service.flatMap { RegionalPlaceIndex.Category(rawValue: $0.rawValue) }
         switch (mode, nearbyCategory) {
         case (.answerFromPassages, _): progress = "Reading the matching passages"
         case (_, .some): progress = "Searching installed place data"
         default: progress = "Searching the library"
         }
         request = Request(question: question, mode: mode, useModel: modelEnabled, waterContext: waterContext,
-                          nearbyCategory: nearbyCategory)
+                          nearbyCategory: nearbyCategory, wantsDirections: directions != nil)
     }
 
     private func stop() {
@@ -384,7 +394,7 @@ struct AskLibraryView: View {
                 message = "No matching service near Home was found in the installed place data."
                 fallbackQuestion = request.question
             case .match(let nearby):
-                nearbyResult = nearby
+                nearbyResult = NearbyAnswer(nearby: nearby, routeOrigin: request.wantsDirections ? home : nil)
             }
         } catch {
             guard self.request?.id == request.id, !Task.isCancelled else { return }
@@ -455,6 +465,12 @@ struct AskLibraryView: View {
         let useModel: Bool
         let waterContext: WaterOutageContext?
         let nearbyCategory: RegionalPlaceIndex.Category?
+        let wantsDirections: Bool
+    }
+
+    private struct NearbyAnswer {
+        let nearby: RegionalPlaceSearch.Nearby
+        let routeOrigin: HouseholdPlace?
     }
 
     private struct OnlineSheet: Identifiable {
