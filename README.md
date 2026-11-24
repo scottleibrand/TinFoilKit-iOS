@@ -28,7 +28,7 @@ To make a graph available for installation from the app bundle, place its `.tfkr
 
 Open **Offline readiness** from the Library toolbar to check storage, installed content, indexing progress, model availability, and map coverage before a trip.
 
-Open **Library → Find nearby** to discover devices with Nearby open. Enable **Sync public references** on both devices to automatically receive and relay the verified household check-in worksheet. The standard build supplies the original worksheet. The lightweight build can receive it and keep it for offline reading. [Nearby sharing plan](DISASTER-SHARING.md)
+Open **Library → Find nearby** to see nearby devices. Enable **Sync public references** on both devices to automatically receive and relay the verified household check-in worksheet while using any part of the app. The standard build supplies the worksheet, and the lightweight build can receive it for offline reading. Switching apps pauses discovery and lets an active transfer finish if iOS grants it time. [Nearby sharing plan](DISASTER-SHARING.md) · [Apple background execution](https://developer.apple.com/documentation/uikit/extending-your-app-s-background-execution-time)
 
 ## Build locally
 
@@ -73,6 +73,6 @@ The local ZIP measures this build. Use App Store Connect device-specific size re
 
 Run the `ZIMArchive` scheme on a dedicated simulator for library and search tests. For the `TinfoilKit` UI test scheme, install the debug app in a dedicated simulator and copy `.build/fixtures/climate.zim` into its Documents folder as `Climate Test.zim`. The test uses the Files picker to import it on a fresh install.
 
-Run `bash Tests/NearbyPublicFixture/run.sh` on a Mac with local networking access to exercise discovery, opt-in, and relay between independent processes.
+Run `bash Tests/NearbyPublicFixture/run.sh` on a Mac with local networking access to exercise discovery, opt-in, relay, and completion of existing transfers after discovery stops.
 
 Project source code is under the [MIT license](LICENSE). See the [third-party notices](THIRD-PARTY.md) for dependency and content terms and the [implementation plan](PLAN.md) for milestones and release criteria.

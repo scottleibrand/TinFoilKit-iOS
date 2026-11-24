@@ -2,7 +2,7 @@ import Combine
 import Foundation
 import Network
 
-/// A foreground-only discovery session. Bonjour carries only a rotating random identifier.
+/// A foreground discovery session. Bonjour carries only a rotating random identifier.
 @MainActor
 final class NearbyDiscovery: ObservableObject {
     enum State: Equatable {
@@ -28,6 +28,8 @@ final class NearbyDiscovery: ObservableObject {
     @Published private(set) var peers: [Peer] = []
     @Published private(set) var publicReferenceText: String?
     var isRunning: Bool { browser != nil }
+    var hasActivePublicTransfer: Bool { publicTransfer?.hasActiveTransfers == true }
+    var activityDidChange: ((Bool) -> Void)?
 
     private let publicReference: NearbyPublicReference
     private var publicSyncEnabled = false
@@ -103,8 +105,14 @@ final class NearbyDiscovery: ObservableObject {
         self.listener = listener
         self.browser = browser
         if publicSyncEnabled {
-            publicTransfer = NearbyPublicTransfer(reference: publicReference) { [weak self] bytes in
-                self?.publicReferenceText = String(data: bytes, encoding: .utf8)
+            if let publicTransfer {
+                publicTransfer.resume()
+            } else {
+                let transfer = NearbyPublicTransfer(reference: publicReference) { [weak self] bytes in
+                    self?.publicReferenceText = String(data: bytes, encoding: .utf8)
+                }
+                transfer.activityDidChange = { [weak self] active in self?.activityDidChange?(active) }
+                publicTransfer = transfer
             }
         }
         localID = id
@@ -123,6 +131,16 @@ final class NearbyDiscovery: ObservableObject {
 
     func stop() {
         end(.idle)
+    }
+
+    func finishTransfersWithoutDiscovery() {
+        guard let publicTransfer, publicTransfer.hasActiveTransfers else {
+            stop()
+            return
+        }
+        closeDiscovery()
+        state = .idle
+        publicTransfer.beginDraining()
     }
 
     func rotate() {
@@ -250,11 +268,17 @@ final class NearbyDiscovery: ObservableObject {
     }
 
     private func end(_ nextState: State) {
+        closeDiscovery()
+        let transfer = publicTransfer
+        publicTransfer = nil
+        transfer?.stop()
+        state = nextState
+    }
+
+    private func closeDiscovery() {
         generation = UUID()
         rotation?.cancel()
         rotation = nil
-        publicTransfer?.stop()
-        publicTransfer = nil
         browser?.cancel()
         listener?.cancel()
         browser = nil
@@ -263,7 +287,6 @@ final class NearbyDiscovery: ObservableObject {
         waiting.removeAll()
         localID = nil
         peers.removeAll()
-        state = nextState
     }
 
     private enum Phase: Hashable { case listener, advertisement, browser }

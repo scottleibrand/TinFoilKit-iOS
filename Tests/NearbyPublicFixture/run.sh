@@ -25,3 +25,9 @@ wait "$sender" 2>/dev/null || true
 sender=$!
 "$output/verify" receive "$output/third" -
 echo "Verified opt-in public transfer, offline persistence, and automatic relay."
+kill "$sender"
+wait "$sender" 2>/dev/null || true
+
+"$output/verify" serve-draining "$output/third" - &
+sender=$!
+"$output/verify" receive-draining "$output/fourth" -

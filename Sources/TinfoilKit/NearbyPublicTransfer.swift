@@ -7,7 +7,12 @@ final class NearbyPublicTransfer {
     private struct ActiveConnection {
         let connection: NWConnection
         let timeout: Task<Void, Never>
+        var phase = ConnectionPhase.preparing
+        var isTransferring: Bool { phase == .transferring }
     }
+
+    private enum ConnectionPhase { case preparing, readingRequest, transferring }
+    private enum Lifecycle { case running, draining, stopped }
 
     private static let request = Data(("TFK-PUBLIC-1 " + NearbyPublicReference.id).utf8)
     private let reference: NearbyPublicReference
@@ -17,7 +22,12 @@ final class NearbyPublicTransfer {
     private var targets: [String: NWEndpoint] = [:]
     private var attempted: [String: ContinuousClock.Instant] = [:]
     private var retry: Task<Void, Never>?
-    private var stopped = false
+    private var lifecycle = Lifecycle.running
+
+    var activityDidChange: ((Bool) -> Void)?
+    var hasActiveTransfers: Bool {
+        outbound?.active.isTransferring == true || inbound.values.contains(where: \.isTransferring)
+    }
 
     init(reference: NearbyPublicReference, didReceive: @escaping (Data) -> Void) {
         self.reference = reference
@@ -35,13 +45,14 @@ final class NearbyPublicTransfer {
     }
 
     func updateTargets(_ next: [String: NWEndpoint]) {
+        guard lifecycle == .running else { return }
         targets = next
         attempted = attempted.filter { targets[$0.key] != nil }
         fetchNext()
     }
 
     func accept(_ connection: NWConnection) {
-        guard !stopped, inbound.count < 4, let body = reference.loadVerified() else {
+        guard lifecycle == .running, inbound.count < 4, let body = reference.loadVerified() else {
             connection.cancel()
             return
         }
@@ -61,18 +72,39 @@ final class NearbyPublicTransfer {
         connection.start(queue: .main)
     }
 
+    /// Let only negotiated public transfers finish, using their original deadlines.
+    func beginDraining() {
+        guard lifecycle == .running else { return }
+        lifecycle = .draining
+        discardNewWork()
+        if let outbound, !outbound.active.isTransferring { finishOutbound(outbound.id) }
+        let pending = inbound.filter { !$0.value.isTransferring }
+        for id in pending.keys { finishInbound(id) }
+    }
+
+    func resume() {
+        guard lifecycle == .draining else { return }
+        lifecycle = .running
+    }
+
     func stop() {
-        stopped = true
-        retry?.cancel()
-        retry = nil
+        lifecycle = .stopped
+        discardNewWork()
         if let outbound { finishOutbound(outbound.id) }
         for id in Array(inbound.keys) { finishInbound(id) }
+    }
+
+    private func discardNewWork() {
+        retry?.cancel()
+        retry = nil
+        targets.removeAll()
+        attempted.removeAll()
     }
 
     private func fetchNext() {
         retry?.cancel()
         retry = nil
-        guard !stopped, outbound == nil, !targets.isEmpty,
+        guard lifecycle == .running, outbound == nil, !targets.isEmpty,
               reference.loadVerified() == nil, reference.canReceive() else { return }
         let now = ContinuousClock.now
         let minimumInterval: Duration = .seconds(30)
@@ -104,24 +136,33 @@ final class NearbyPublicTransfer {
     }
 
     private func readRequest(_ id: UUID, body: Data) {
-        guard let connection = inbound[id]?.connection else { return }
+        guard lifecycle == .running, let active = inbound[id], active.phase == .preparing else { return }
+        inbound[id]?.phase = .readingRequest
+        let connection = active.connection
         connection.receive(minimumIncompleteLength: Self.request.count, maximumLength: Self.request.count) {
             [weak self] request, _, _, error in
             DispatchQueue.main.async {
-                guard self?.inbound[id] != nil else { return }
+                guard let self, self.inbound[id]?.phase == .readingRequest else { return }
                 guard error == nil, request == Self.request else {
-                    self?.finishInbound(id)
+                    self.finishInbound(id)
                     return
                 }
+                let previouslyActive = self.hasActiveTransfers
+                self.inbound[id]?.phase = .transferring
+                self.notifyActivity(previouslyActive: previouslyActive)
+                guard self.inbound[id] != nil else { return }
                 connection.send(content: body, contentContext: .finalMessage, isComplete: true,
                                 completion: .contentProcessed { [weak self] error in
-                    if error != nil {
-                        DispatchQueue.main.async { self?.finishInbound(id) }
-                        return
-                    }
-                    // Keep the TLS connection alive until the peer finishes or the deadline expires.
-                    connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { [weak self] _, _, _, _ in
-                        DispatchQueue.main.async { self?.finishInbound(id) }
+                    DispatchQueue.main.async {
+                        guard let self, self.inbound[id] != nil else { return }
+                        if error != nil {
+                            self.finishInbound(id)
+                            return
+                        }
+                        // Keep the TLS connection alive until the peer finishes or the deadline expires.
+                        connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { [weak self] _, _, _, _ in
+                            DispatchQueue.main.async { self?.finishInbound(id) }
+                        }
                     }
                 })
             }
@@ -129,6 +170,11 @@ final class NearbyPublicTransfer {
     }
 
     private func sendRequest(_ id: UUID) {
+        guard lifecycle == .running, let pending = outbound,
+              pending.id == id, !pending.active.isTransferring else { return }
+        let previouslyActive = hasActiveTransfers
+        outbound?.active.phase = .transferring
+        notifyActivity(previouslyActive: previouslyActive)
         guard let outbound, outbound.id == id else { return }
         let connection = outbound.active.connection
         connection.send(content: Self.request, completion: .contentProcessed { [weak self] error in
@@ -168,16 +214,25 @@ final class NearbyPublicTransfer {
     }
 
     private func finishInbound(_ id: UUID) {
+        let previouslyActive = hasActiveTransfers
         guard let active = inbound.removeValue(forKey: id) else { return }
         active.timeout.cancel()
         active.connection.cancel()
+        notifyActivity(previouslyActive: previouslyActive)
     }
 
     private func finishOutbound(_ id: UUID) {
         guard let current = outbound, current.id == id else { return }
+        let previouslyActive = hasActiveTransfers
         outbound = nil
         current.active.timeout.cancel()
         current.active.connection.cancel()
+        notifyActivity(previouslyActive: previouslyActive)
         fetchNext()
+    }
+
+    private func notifyActivity(previouslyActive: Bool) {
+        let active = hasActiveTransfers
+        if previouslyActive != active { activityDidChange?(active) }
     }
 }

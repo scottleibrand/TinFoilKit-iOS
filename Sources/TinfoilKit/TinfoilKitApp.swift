@@ -5,9 +5,11 @@ import ZIMArchive
 @main
 struct TinfoilKitApp: App {
     @UIApplicationDelegateAdaptor(DownloadAppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var packs = PackDownloads.shared
     @StateObject private var indexing = LibraryIndexing(library: .standard)
     @StateObject private var household = HouseholdStore()
+    @StateObject private var nearby = NearbyLifecycle()
     @AppStorage("hasSeenOfflineStarterGuide") private var hasSeenOfflineStarterGuide = false
     @State private var showingOfflineStarterGuide = false
 
@@ -49,6 +51,9 @@ struct TinfoilKitApp: App {
                     packs.archiveRemoved(archive)
                 }
             }
+            .onChange(of: scenePhase, initial: true) { nearby.updatePhase(scenePhase) }
+            .environmentObject(nearby)
+            .environmentObject(nearby.discovery)
         }
     }
 }

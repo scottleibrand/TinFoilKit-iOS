@@ -2,11 +2,10 @@ import SwiftUI
 import UIKit
 
 struct NearbyView: View {
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
-    @StateObject private var discovery = NearbyDiscovery()
-    @State private var screenIsOpen = false
-    @AppStorage("nearbyPublicSyncEnabled") private var publicSyncEnabled = false
+    @EnvironmentObject private var nearby: NearbyLifecycle
+    @EnvironmentObject private var discovery: NearbyDiscovery
+    @State private var screenID = UUID()
 
     var body: some View {
         List {
@@ -18,7 +17,7 @@ struct NearbyView: View {
                 }
                 discoveryStatus
             } footer: {
-                Text("Keep this screen open on both devices. Match the code shown on the other device to its entry below.")
+                Text("Match the code shown on the other device to its entry below.")
             }
 
             if !discovery.peers.isEmpty {
@@ -33,7 +32,10 @@ struct NearbyView: View {
                 }
             }
             Section {
-                Toggle("Sync public references", isOn: $publicSyncEnabled)
+                Toggle("Sync public references", isOn: Binding(
+                    get: { nearby.publicSyncEnabled },
+                    set: { nearby.setPublicSyncEnabled($0) }
+                ))
                 if let text = discovery.publicReferenceText {
                     NavigationLink(NearbyPublicReference.title) {
                         ScrollView {
@@ -44,30 +46,13 @@ struct NearbyView: View {
                     }
                 }
             } footer: {
-                Text("Tinfoil Kit exchanges verified public references automatically while Nearby is open on both devices.")
+                Text("Tinfoil Kit syncs verified public references while you use the app. An active transfer can finish if you switch apps.")
             }
         }
         .navigationTitle("Nearby")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            screenIsOpen = true
-            if scenePhase == .active { discovery.start(publicSync: publicSyncEnabled) }
-        }
-        .onDisappear {
-            screenIsOpen = false
-            discovery.stop()
-        }
-        .onChange(of: scenePhase) {
-            guard screenIsOpen else { return }
-            if scenePhase == .active {
-                discovery.start(publicSync: publicSyncEnabled)
-            } else if scenePhase == .background {
-                discovery.stop()
-            }
-        }
-        .onChange(of: publicSyncEnabled) {
-            if screenIsOpen, scenePhase == .active { discovery.start(publicSync: publicSyncEnabled) }
-        }
+        .onAppear { nearby.setNearbyScreen(screenID, visible: true) }
+        .onDisappear { nearby.setNearbyScreen(screenID, visible: false) }
     }
 
     @ViewBuilder

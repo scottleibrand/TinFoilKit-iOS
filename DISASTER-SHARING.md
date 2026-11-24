@@ -40,7 +40,7 @@ Keep provider credentials, private household data, and unpublished location or r
 
 The lightweight profile and bundled starter guide are implemented. The first local iPhone release build measured 9,426,954 bytes in a ZIP and excluded regional map archives, place indexes and routing packs. App Store download size and offline first launch on a fresh phone still need verification.
 
-The first foreground public-sync item is an original MIT-licensed household check-in worksheet. It is packaged with the standard build and pinned by exact byte count and SHA-256 in both profiles. Nearby can receive it over TLS when public sync is enabled and store it atomically for offline reading and relay.
+The first public-sync item is an original MIT-licensed household check-in worksheet. It is packaged with the standard build and pinned by exact byte count and SHA-256 in both profiles. With public sync enabled, discovery runs across the foreground app. Going to the background stops discovery. If iOS granted execution time, an established transfer can finish before its deadline. Discovery during future system-granted background runs and the notification fallback remain open. [Apple background execution](https://developer.apple.com/documentation/uikit/extending-your-app-s-background-execution-time)
 
 | Slice | Deliverable | Acceptance |
 | --- | --- | --- |
