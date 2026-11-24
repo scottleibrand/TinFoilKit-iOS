@@ -28,6 +28,7 @@ struct AskLibraryView: View {
     @State private var fallbackQuestion: String?
     @State private var nearbyResult: NearbyAnswer?
     @State private var needsMapSetup = false
+    @State private var savedPinRoute: MapOpenRequest?
 
     private var currentQuestion: String { question.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var modelEnabled: Bool { useModel && LibraryAnswer.isAvailable }
@@ -78,6 +79,7 @@ struct AskLibraryView: View {
                 results
             }
             .scrollDismissesKeyboard(.interactively)
+            .onChange(of: question) { savedPinRoute = nil }
             .navigationTitle("Ask")
             .toolbar {
                 if questionFocused || serviceAreaFocused {
@@ -144,6 +146,16 @@ struct AskLibraryView: View {
         }
         if let nearbyResult {
             nearbyAnswer(nearbyResult)
+        }
+        if let savedPinRoute, let route = savedPinRoute.route {
+            Section {
+                Button {
+                    openMap(savedPinRoute)
+                } label: {
+                    Label("\(route.mode.title) to \(savedPinRoute.place.name) from Home",
+                          systemImage: route.mode == .walking ? "figure.walk" : "car")
+                }
+            }
         }
         if !answer.isEmpty {
             Section("Answer") {
@@ -269,6 +281,9 @@ struct AskLibraryView: View {
         message = nil
         nearbyResult = nil
         needsMapSetup = false
+        savedPinRoute = nil
+        if mode == .ask, let pinQuestion = SavedPinRouteQuestion.parse(question),
+           prepareSavedPinRoute(pinQuestion) { return }
         let directions = mode == .ask ? NearbyServiceQuestion.parseDirections(question) : nil
         let service = mode == .ask ? (directions ?? NearbyServiceQuestion.parse(question)) : nil
         let nearbyCategory = service.flatMap { RegionalPlaceIndex.Category(rawValue: $0.rawValue) }
@@ -279,6 +294,27 @@ struct AskLibraryView: View {
         }
         request = Request(question: question, mode: mode, useModel: modelEnabled, waterContext: waterContext,
                           nearbyCategory: nearbyCategory, wantsDirections: directions != nil)
+    }
+
+    private func prepareSavedPinRoute(_ question: SavedPinRouteQuestion) -> Bool {
+        let snapshot = household.snapshot
+        let matches = question.matchingPins(in: snapshot.pins.map(\.name))
+        guard let index = matches.first else { return false }
+        guard matches.count == 1 else {
+            message = "More than one saved pin has that name. Rename one in Household to choose a unique destination."
+            return true
+        }
+        guard let home = snapshot.home else {
+            message = "Press and hold your home location in Map and choose Set as home."
+            needsMapSetup = true
+            return true
+        }
+        let pin = snapshot.pins[index]
+        let destination = MapPlace(id: pin.id.uuidString, name: pin.name, kind: "Saved pin",
+                                   latitude: pin.latitude, longitude: pin.longitude)
+        let mode: MapTravelMode = question.mode == .walking ? .walking : .driving
+        savedPinRoute = MapOpenRequest(place: destination, route: .init(origin: home, mode: mode))
+        return true
     }
 
     private func stop() {
