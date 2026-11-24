@@ -204,6 +204,8 @@ private struct LibraryView: View {
             } actions: {
                 NavigationLink("Offline starter guide") { DisasterStarterView() }
                     .buttonStyle(.borderedProminent)
+                NavigationLink("Find nearby") { NearbyView() }
+                    .buttonStyle(.bordered)
                 Button("Import from Files") { choosingArchive = true }
                     .buttonStyle(.bordered)
                     .disabled(importTask != nil)
@@ -240,6 +242,11 @@ private struct LibraryView: View {
 
     private var archiveList: some View {
         List {
+            NavigationLink {
+                NearbyView()
+            } label: {
+                Label("Find nearby", systemImage: "dot.radiowaves.left.and.right")
+            }
             NavigationLink("Offline starter guide") { DisasterStarterView() }
             if !indexing.damagedArchiveIDs.isEmpty {
                 Section("Damaged archives") {

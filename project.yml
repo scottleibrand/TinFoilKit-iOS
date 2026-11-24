@@ -54,7 +54,9 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         NSLocationWhenInUseUsageDescription: Show your position on an installed offline map.
-        NSLocalNetworkUsageDescription: Share selected household information with devices on your Wi-Fi network.
+        NSLocalNetworkUsageDescription: Find nearby Tinfoil Kit devices and share selected household information on your local network.
+        NSBonjourServices:
+          - _tfk-nearby._tcp
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         UTImportedTypeDeclarations:

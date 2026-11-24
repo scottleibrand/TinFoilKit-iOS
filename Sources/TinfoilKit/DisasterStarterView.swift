@@ -21,6 +21,13 @@ struct DisasterStarterView: View {
             Section("Get local updates") {
                 Text("Follow local emergency alerts and posted instructions. If you lose phone service, listen for updates on a battery-powered radio if one is available.")
             }
+            Section {
+                NavigationLink {
+                    NearbyView()
+                } label: {
+                    Label("Find nearby", systemImage: "dot.radiowaves.left.and.right")
+                }
+            }
             Section("Official sources · online") {
                 Link("FEMA earthquake safety", destination: Self.earthquakeSafety)
                 Link("CDC safety after an earthquake", destination: Self.afterEarthquake)

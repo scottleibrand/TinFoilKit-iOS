@@ -26,6 +26,8 @@ To make a graph available for installation from the app bundle, place its `.tfkr
 
 Open **Offline readiness** from the Library toolbar to check storage, installed content, indexing progress, model availability, and map coverage before a trip.
 
+Open **Library → Find nearby** to discover other Tinfoil Kit devices with Nearby open. Compare the temporary codes shown on the two screens. This build implements discovery. [Nearby sharing plan](DISASTER-SHARING.md)
+
 ## Build locally
 
 Use Xcode, XcodeGen, Rust, Node.js, and Python 3. The first preparation downloads the pinned reader, map and routing dependencies plus a public ZIM test fixture. Generated files and external data are stored in `.build/`.
