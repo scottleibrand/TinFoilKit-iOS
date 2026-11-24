@@ -23,7 +23,12 @@ pub struct TFKResource {
     path: CString,
     title: CString,
     mime: CString,
-    data: Blob,
+    data: ResourceData,
+}
+
+enum ResourceData {
+    Cluster(Blob, usize),
+    DirectPrefix(Vec<u8>),
 }
 
 pub struct TFKEntryMetadata {
@@ -46,11 +51,45 @@ fn read_item(item: Item, legacy: bool) -> Result<TFKResource, String> {
     if item.size().map_err(|error| error.to_string())? > MAX_RESOURCE_BYTES {
         return Err("This archive resource exceeds the 32 MiB reader limit.".into());
     }
+    let blob = item.get_data().map_err(|error| error.to_string())?;
+    let length = blob.size();
+    resource(&item, legacy, ResourceData::Cluster(blob, length))
+}
+
+fn read_item_prefix(item: Item, legacy: bool, maximum: usize) -> Result<Option<TFKResource>, String> {
+    let direct = item
+        .archive()
+        .blob_direct_access(item.cluster_index(), item.blob_index())
+        .map_err(|error| error.to_string())?;
+    let data = if direct.is_direct {
+        let mut bytes = vec![0; direct.size.min(maximum as u64) as usize];
+        let length = item
+            .archive()
+            .read_at(direct.file_offset, &mut bytes)
+            .map_err(|error| error.to_string())?;
+        if length != bytes.len() {
+            return Err("The archive article ended before its declared size.".into());
+        }
+        ResourceData::DirectPrefix(bytes)
+    } else {
+        let blob = match item.get_data() {
+            Ok(blob) => blob,
+            // An unreadable or over-budget compressed cluster must not block other articles.
+            Err(zimru::Error::Decompression(_)) => return Ok(None),
+            Err(error) => return Err(error.to_string()),
+        };
+        let length = blob.size().min(maximum);
+        ResourceData::Cluster(blob, length)
+    };
+    resource(&item, legacy, data).map(Some)
+}
+
+fn resource(item: &Item, legacy: bool, data: ResourceData) -> Result<TFKResource, String> {
     Ok(TFKResource {
-        path: item_path(&item, legacy)?,
+        path: item_path(item, legacy)?,
         title: CString::new(item.title()).map_err(|error| error.to_string())?,
         mime: CString::new(item.mimetype()).map_err(|error| error.to_string())?,
-        data: item.get_data().map_err(|error| error.to_string())?,
+        data,
     })
 }
 
@@ -171,22 +210,48 @@ pub unsafe extern "C" fn tfk_archive_article(
     index: u32,
     error: *mut *mut c_char,
 ) -> *mut TFKResource {
-    let result = (|| {
-        let entry = archive
-            .0
-            .entry_by_url_index(index)
-            .map_err(|error| error.to_string())?;
-        let legacy = !archive.0.header().uses_new_namespaces();
-        let article_namespace = if !legacy { b'C' } else { b'A' };
-        if entry.is_redirect() || entry.namespace() != article_namespace {
-            return Ok(None);
-        }
-        let item = entry.get_item(false).map_err(|error| error.to_string())?;
-        if !item.mimetype().starts_with("text/html") {
-            return Ok(None);
-        }
-        read_item(item, legacy).map(Some)
-    })();
+    return_article(article_resource(archive, index, None), error)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tfk_archive_article_prefix(
+    archive: &TFKArchive,
+    index: u32,
+    maximum_bytes: usize,
+    error: *mut *mut c_char,
+) -> *mut TFKResource {
+    let maximum_bytes = maximum_bytes.min(MAX_RESOURCE_BYTES as usize);
+    return_article(article_resource(archive, index, Some(maximum_bytes)), error)
+}
+
+fn article_resource(
+    archive: &TFKArchive,
+    index: u32,
+    maximum_bytes: Option<usize>,
+) -> Result<Option<TFKResource>, String> {
+    let entry = archive
+        .0
+        .entry_by_url_index(index)
+        .map_err(|error| error.to_string())?;
+    let legacy = !archive.0.header().uses_new_namespaces();
+    let article_namespace = if !legacy { b'C' } else { b'A' };
+    if entry.is_redirect() || entry.namespace() != article_namespace {
+        return Ok(None);
+    }
+    let item = entry.get_item(false).map_err(|error| error.to_string())?;
+    if !item.mimetype().starts_with("text/html") {
+        return Ok(None);
+    }
+    match maximum_bytes {
+        Some(maximum) => read_item_prefix(item, legacy, maximum),
+        None => read_item(item, legacy).map(Some),
+    }
+}
+
+unsafe fn return_article(
+    result: Result<Option<TFKResource>, String>,
+    error: *mut *mut c_char,
+) -> *mut TFKResource {
     match result {
         Ok(None) => ptr::null_mut(),
         Ok(Some(resource)) => Box::into_raw(Box::new(resource)),
@@ -317,8 +382,12 @@ pub unsafe extern "C" fn tfk_resource_bytes(
     resource: &TFKResource,
     length: &mut usize,
 ) -> *const u8 {
-    *length = resource.data.size();
-    resource.data.data().as_ptr()
+    let data = match &resource.data {
+        ResourceData::Cluster(blob, length) => &blob.data()[..*length],
+        ResourceData::DirectPrefix(bytes) => bytes,
+    };
+    *length = data.len();
+    data.as_ptr()
 }
 
 #[no_mangle]
