@@ -30,6 +30,18 @@ struct RegionalPlaceSearch: Sendable {
         return match.map(InstalledLookup.match) ?? .noMatch
     }
 
+    static func addressesInstalled(matching question: HomeRouteQuestion, from home: HouseholdPlace,
+                                   storage: RegionalPlaceStorage) async throws -> [Match]? {
+        let regions = try await storage.installedIndexes()
+        guard !regions.isEmpty else { return nil }
+        let lookup = Task.detached {
+            try RegionalPlaceSearch(regions: regions)
+                .search(question.destination, near: home.coordinate, limit: 100)
+                .filter { question.matchesAddress($0.place.address) }
+        }
+        return try await withTaskCancellationHandler { try await lookup.value } onCancel: { lookup.cancel() }
+    }
+
     func search(_ query: String, near origin: CLLocationCoordinate2D?, limit: Int = 40) throws -> [Match] {
         guard limit > 0 else { return [] }
         let ordered = regions.enumerated().sorted { lhs, rhs in
