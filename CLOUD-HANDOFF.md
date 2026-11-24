@@ -4,7 +4,7 @@ The goal is desktop feature parity for Tinfoil Kit on iOS. [PLAN.md](PLAN.md) tr
 
 ## Start here
 
-Fetch `origin` and check both `origin/develop` and `origin/main`. Both branches were synced at `b14cb76` after PR #12. Recheck the branch tips and the work below before starting an overlapping change.
+Fetch `origin` and check both `origin/develop` and `origin/main`. Both branches were synced at `16df59b` after PR #13. Recheck the branch tips and the work below before starting an overlapping change.
 
 Use a fresh `codex/` feature branch from the current `origin/develop` for work awaiting Apple tests. Keep each feature in its own commits so it can move to `develop` after verification. Push the feature branch for the Mac session to retrieve. Open and merge one tested feature at a time through a `develop` → `main` PR.
 
@@ -17,10 +17,11 @@ The upstream desktop checkout and generated build inputs are ignored. For parity
 - The regional bundle builder produces a place index and routing pack from one pinned extract. The Valhalla ARM64 producer fixture passed, including rejection of corrupt artifacts and incompatible routing metadata. [PR #10](https://github.com/scottleibrand/TinFoilKit-iOS/pull/10)
 - Map imports a version 1 regional bundle from Files and manages both assets as a single edition. The native Files import and removal test and 62 app unit tests passed. The signed iPhone build was installed. Basemaps are still imported separately. [PR #11](https://github.com/scottleibrand/TinFoilKit-iOS/pull/11)
 - Both app profiles include the app and ZIMArchive privacy manifests required for distribution. All 62 simulator unit tests passed and the signed standard build was installed on the iPhone. The one-time TestFlight upload still needs a confirmed App Store Connect team and signing access on the Mac. [PR #12](https://github.com/scottleibrand/TinFoilKit-iOS/pull/12)
+- Both profiles now supply version `1.0.0` and build `1` through shared build settings. The signed app's packaged version fields were verified and the build was installed on the iPhone. [PR #13](https://github.com/scottleibrand/TinFoilKit-iOS/pull/13)
 
 ## Cloud branches awaiting integration
 
-- `codex/regional-bundle-basemap` adds basemap packaging to the producer. Extend the landed iOS importer to adopt the new manifest and all three assets together.
+- `codex/regional-bundle-basemap` adds basemap packaging to the producer. Review it alongside `codex/import-regional-basemap`, which contains candidate iOS importer changes. Verify the full three-asset flow on iOS before integrating.
 - `codex/ask-offline-directions` and `codex/ask-saved-pin-directions` touch related Ask and Map paths. Compare their intent handling before combining the changes.
 - `codex/nearby-public-admission` adds catalog and storage admission checks. `codex/nearby-public-resume` and `codex/nearby-public-transfer-recovery` overlap on worksheet download resume. Review their shared transfer paths and verify the combined behavior.
 - `codex/map-range-validation` adds validation for remote PMTiles range responses. `codex/desktop-starter-packs` and `codex/catalog-audit` carry the same climate pack byte count correction. Verify any publisher metadata before integrating it.
