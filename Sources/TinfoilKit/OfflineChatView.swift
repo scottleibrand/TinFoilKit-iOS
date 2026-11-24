@@ -1,4 +1,7 @@
+import CoreGraphics
 import FoundationModels
+import ImageIO
+import PhotosUI
 import SwiftUI
 
 struct OfflineChatView: View {
@@ -36,9 +39,21 @@ private struct OfflineConversation: View {
     @State private var status: String?
     @State private var confirmingReset = false
     @State private var contextFull = false
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var photo: CGImage?
 
     private static let maximumPromptLength = 1_500
     private var prompt: String { draft.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private var supportsPhotos: Bool {
+        if #available(iOS 27, *) { return SystemLanguageModel.default.capabilities.contains(.vision) }
+        return false
+    }
+
+    private var canSend: Bool {
+        response == nil && selectedPhoto == nil && !contextFull && !prompt.isEmpty &&
+            prompt.count <= Self.maximumPromptLength
+    }
 
     var body: some View {
         ScrollViewReader { scroll in
@@ -51,6 +66,13 @@ private struct OfflineConversation: View {
                     ForEach(messages) { message in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(message.isUser ? "You" : "Offline model").font(.subheadline.weight(.semibold))
+                            if let photo = message.photo {
+                                Image(decorative: photo, scale: 1)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxHeight: 200, alignment: .leading)
+                                    .accessibilityLabel("Attached photo")
+                            }
                             if message.text.isEmpty {
                                 ProgressView("Preparing reply")
                             } else {
@@ -71,7 +93,7 @@ private struct OfflineConversation: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("New chat", systemImage: "plus.bubble") { confirmingReset = true }
-                    .disabled(messages.isEmpty || response != nil)
+                    .disabled(messages.isEmpty || response != nil || selectedPhoto != nil)
             }
         }
         .alert("Start a new chat?", isPresented: $confirmingReset) {
@@ -79,6 +101,9 @@ private struct OfflineConversation: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The current conversation will be cleared.")
+        }
+        .task(id: selectedPhoto) {
+            if let item = selectedPhoto { await loadPhoto(item) }
         }
         .onDisappear { response?.cancel() }
     }
@@ -88,7 +113,31 @@ private struct OfflineConversation: View {
             if prompt.count > Self.maximumPromptLength {
                 Text("Shorten your message to 1,500 characters.").font(.footnote).foregroundStyle(.secondary)
             }
+            if selectedPhoto != nil {
+                ProgressView("Preparing photo")
+            } else if let photo {
+                HStack(spacing: 8) {
+                    Image(decorative: photo, scale: 1)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 52, height: 52)
+                        .accessibilityHidden(true)
+                    Text("Photo attached")
+                    Spacer()
+                    Button("Remove photo", systemImage: "xmark.circle") { self.photo = nil }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.plain)
+                }
+            }
             HStack(alignment: .bottom) {
+                if supportsPhotos {
+                    PhotosPicker(selection: $selectedPhoto, matching: .images, preferredItemEncoding: .current) {
+                        Label(photo == nil ? "Attach photo" : "Replace photo", systemImage: "photo")
+                            .labelStyle(.iconOnly)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(response != nil || contextFull || selectedPhoto != nil)
+                }
                 TextField("Message", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .textFieldStyle(.roundedBorder)
@@ -97,7 +146,7 @@ private struct OfflineConversation: View {
                     Button("Stop", systemImage: "stop.circle") { response.cancel() }
                 } else {
                     Button("Send", systemImage: "arrow.up.circle.fill") { send() }
-                        .disabled(contextFull || prompt.isEmpty || prompt.count > Self.maximumPromptLength)
+                        .disabled(!canSend)
                 }
             }
             .buttonStyle(.borderedProminent)
@@ -107,24 +156,67 @@ private struct OfflineConversation: View {
     }
 
     private func send() {
+        guard canSend else { return }
         let text = prompt
-        guard response == nil, !contextFull, !text.isEmpty, text.count <= Self.maximumPromptLength else { return }
+        let photo = self.photo
+        self.photo = nil
         draft = ""
         composing = false
         status = nil
-        messages.append(Message(isUser: true, text: text))
+        messages.append(Message(isUser: true, text: text, photo: photo))
         let reply = messages.count
         messages.append(Message(isUser: false, text: ""))
-        response = Task { await respond(to: text, at: reply) }
+        response = Task { await respond(to: text, photo: photo, at: reply) }
     }
 
-    private func respond(to prompt: String, at reply: Int) async {
+    private func loadPhoto(_ item: PhotosPickerItem) async {
+        defer { if selectedPhoto == item { selectedPhoto = nil } }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else {
+                if selectedPhoto == item { status = "This photo could not be opened." }
+                return
+            }
+            try Task.checkCancellation()
+            let thumbnail = await Task.detached(priority: .userInitiated) {
+                guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil as CGImage? }
+                let options: [CFString: Any] = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 2048
+                ]
+                return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+            }.value
+            try Task.checkCancellation()
+            guard selectedPhoto == item else { return }
+            if let thumbnail {
+                photo = thumbnail
+                status = nil
+            } else {
+                status = "This photo could not be opened."
+            }
+        } catch is CancellationError {
+        } catch {
+            if selectedPhoto == item { status = "This photo could not be loaded. Try a photo available on this phone." }
+        }
+    }
+
+    private func respond(to prompt: String, photo: CGImage?, at reply: Int) async {
         defer {
             if messages[reply].text.isEmpty { messages.remove(at: reply) }
             response = nil
         }
         do {
-            for try await update in session.streamResponse(to: prompt, options: .init(maximumResponseTokens: 500)) {
+            let options = GenerationOptions(maximumResponseTokens: 500)
+            let stream: LanguageModelSession.ResponseStream<String>
+            if #available(iOS 27, *), let photo {
+                stream = session.streamResponse(options: options) {
+                    prompt
+                    Attachment(photo)
+                }
+            } else {
+                stream = session.streamResponse(to: prompt, options: options)
+            }
+            for try await update in stream {
                 try Task.checkCancellation()
                 messages[reply].text = update.content
             }
@@ -149,6 +241,8 @@ private struct OfflineConversation: View {
         session = Self.makeSession()
         messages.removeAll()
         draft = ""
+        photo = nil
+        selectedPhoto = nil
         status = nil
         contextFull = false
     }
@@ -169,5 +263,6 @@ private struct OfflineConversation: View {
         let id = UUID()
         let isUser: Bool
         var text: String
+        var photo: CGImage? = nil
     }
 }
