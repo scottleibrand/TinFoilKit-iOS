@@ -200,6 +200,7 @@ def main():
             "license": "MIT", "licenseURL": "https://opensource.org/license/mit",
             "attribution": "Tinfoil Kit synthetic basemap fixture",
         })
+        verify_download(ui_bundle, work / "downloaded-bundle-v2")
         if args.ui_bundle is not None:
             shutil.copytree(ui_bundle, args.ui_bundle)
     print("Regional bundle fixture passed.")

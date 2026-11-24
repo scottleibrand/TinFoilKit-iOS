@@ -104,13 +104,13 @@ def verify_download(bundle, output):
         corrupt_assets.clear()
 
         install()
-        assert attempts[-1] == ("routing.tfkroute", 0)
+        assert [start for name, start in attempts if name == "routing.tfkroute"] == [0, 512, 512, 0]
         assert attempts.count(("places.sqlite", 0)) == 1
         assert sorted(file.name for file in output.iterdir()) == sorted(file.name for file in bundle.iterdir())
         for file in output.iterdir():
             assert file.read_bytes() == (bundle / file.name).read_bytes()
 
-        restarted = output.with_name("restarted-bundle")
+        restarted = output.with_name(f"{output.name}-restarted")
         staging = restarted.with_name(f".{restarted.name}.{manifest_digest}.partial")
         staging.mkdir()
         places = (bundle / "places.sqlite").read_bytes()
