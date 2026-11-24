@@ -56,18 +56,22 @@ actor ExploredMapTiles {
 
     let directory: URL
     private let source: PMTileArchive
+    private let nonCellularSource: PMTileArchive
     private var prepared = false
+    private var generation = 0
 
     init(directory: URL, source: URL) {
         self.directory = directory
         self.source = PMTileArchive(url: source)
+        nonCellularSource = PMTileArchive(url: source, allowsCellular: false)
     }
 
     enum Outcome: Equatable, Sendable {
         case available, saved, missing
     }
 
-    func save(_ tile: MapTile, seed: PMTileArchive?, download: Bool) async -> Outcome {
+    func save(_ tile: MapTile, seed: PMTileArchive?, download: Bool, allowsCellular: Bool = true) async -> Outcome {
+        let generation = self.generation
         let file = directory
             .appendingPathComponent(String(tile.zoom), isDirectory: true)
             .appendingPathComponent(String(tile.x), isDirectory: true)
@@ -75,9 +79,11 @@ actor ExploredMapTiles {
         let files = FileManager.default
         if files.fileExists(atPath: file.path) { return .available }
         if let seed, (try? await seed.contains(tile)) == true { return .available }
-        guard download, !Task.isCancelled else { return .missing }
+        guard download, generation == self.generation, !Task.isCancelled else { return .missing }
         do {
-            let bytes = try await source.vectorTile(tile) ?? Data()
+            let archive = allowsCellular ? source : nonCellularSource
+            let bytes = try await archive.vectorTile(tile) ?? Data()
+            guard generation == self.generation, !Task.isCancelled else { return .missing }
             if !prepared {
                 try files.createDirectory(at: directory, withIntermediateDirectories: true)
                 var folder = directory
@@ -93,32 +99,88 @@ actor ExploredMapTiles {
             return .missing
         }
     }
+
+    func savedBytes() throws -> Int64 {
+        let files = FileManager.default
+        guard files.fileExists(atPath: directory.path) else { return 0 }
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileAllocatedSizeKey, .fileSizeKey]
+        guard let entries = files.enumerator(at: directory, includingPropertiesForKeys: Array(keys)) else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        var total: Int64 = 0
+        for case let file as URL in entries where file.pathExtension == "pbf" {
+            try Task.checkCancellation()
+            let info = try file.resourceValues(forKeys: keys)
+            if info.isRegularFile == true { total += Int64(info.fileAllocatedSize ?? info.fileSize ?? 0) }
+        }
+        return total
+    }
+
+    func clearSavedTiles() throws {
+        generation += 1
+        prepared = false
+        if FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.removeItem(at: directory)
+        }
+    }
+
+    func cancelPendingDownloads() async {
+        await source.cancelPendingReads()
+        await nonCellularSource.cancelPendingReads()
+    }
+}
+
+enum MapDownloadPolicy: String, CaseIterable, Identifiable {
+    case off, wifiOnly, wifiAndCellular
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .off: "Off"
+        case .wifiOnly: "Wi-Fi only"
+        case .wifiAndCellular: "Wi-Fi and cellular"
+        }
+    }
+
+    func permitsDownloads(online: Bool, wifi: Bool) -> Bool {
+        online && (self == .wifiAndCellular || (self == .wifiOnly && wifi))
+    }
 }
 
 @MainActor
 final class MapExploration: ObservableObject {
     @Published private(set) var status: Status?
     @Published private(set) var revision = 0
+    @Published private(set) var policy: MapDownloadPolicy
 
     enum Status: Equatable {
-        case saving, saved, incomplete
+        case saving, saved, incomplete, unavailable
     }
 
     private let tiles = ExploredMapTiles.shared
     private let network = NWPathMonitor()
-    private var online = true
+    private let defaults: UserDefaults
+    private static let policyKey = "mapDownloadPolicy"
+    private var online = false
+    private var wifi = false
+    private var visible = false
     private var current: Request?
     private var job: Task<Void, Never>?
     private var refresh: Task<Void, Never>?
     private var seed: PMTileArchive?
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        policy = defaults.string(forKey: Self.policyKey).flatMap(MapDownloadPolicy.init(rawValue:)) ?? .wifiAndCellular
         network.pathUpdateHandler = { [weak self] path in
             let online = path.status == .satisfied
+            let wifi = path.usesInterfaceType(.wifi)
             Task { @MainActor in
-                guard let self, self.online != online else { return }
+                guard let self, self.online != online || self.wifi != wifi else { return }
                 self.online = online
-                if let request = self.current { self.run(request) }
+                self.wifi = wifi
+                self.retry()
             }
         }
         network.start(queue: DispatchQueue(label: "org.tinfoilkit.ios.map-network"))
@@ -142,6 +204,37 @@ final class MapExploration: ObservableObject {
         if let current { run(current) }
     }
 
+    func setVisible(_ visible: Bool) {
+        self.visible = visible
+        if visible { retry() }
+        else { stopDownloads() }
+    }
+
+    func setPolicy(_ preference: MapDownloadPolicy) {
+        guard policy != preference else { return }
+        policy = preference
+        defaults.set(preference.rawValue, forKey: Self.policyKey)
+        stopDownloads()
+        retry()
+    }
+
+    func savedBytes() async throws -> Int64 { try await tiles.savedBytes() }
+
+    func clearSavedTiles() async throws {
+        setPolicy(.off)
+        stopDownloads()
+        defer { retry() }
+        try await tiles.clearSavedTiles()
+        refresh?.cancel()
+        refresh = nil
+        revision += 1
+    }
+
+    private func stopDownloads() {
+        job?.cancel()
+        Task { [tiles] in await tiles.cancelPendingDownloads() }
+    }
+
     private func tileSaved() {
         // Coalesce nearby completions without waiting on the slowest download.
         guard refresh == nil else { return }
@@ -155,13 +248,15 @@ final class MapExploration: ObservableObject {
 
     private func run(_ request: Request) {
         job?.cancel()
-        let online = self.online
-        status = online ? .saving : nil
+        guard visible else { return }
+        let download = policy.permitsDownloads(online: online, wifi: wifi)
+        let allowsCellular = policy == .wifiAndCellular
+        status = download ? .saving : nil
         job = Task { [weak self, tiles, seed] in
             do { try await Task.sleep(for: .milliseconds(300)) }
             catch { return }
             var missing = false
-            var mayDownload = online
+            var mayDownload = download
             // Limit parallel requests while giving visible tiles priority over adjacent zoom levels.
             for start in stride(from: 0, to: request.tiles.count, by: 4) {
                 guard !Task.isCancelled else { return }
@@ -169,7 +264,9 @@ final class MapExploration: ObservableObject {
                 let fetchMissingTiles = mayDownload
                 let outcomes = await withTaskGroup(of: ExploredMapTiles.Outcome.self, returning: [ExploredMapTiles.Outcome].self) { group in
                     for tile in request.tiles[start..<end] {
-                        group.addTask { await tiles.save(tile, seed: seed, download: fetchMissingTiles) }
+                        group.addTask {
+                            await tiles.save(tile, seed: seed, download: fetchMissingTiles, allowsCellular: allowsCellular)
+                        }
                     }
                     var outcomes: [ExploredMapTiles.Outcome] = []
                     for await outcome in group {
@@ -183,7 +280,7 @@ final class MapExploration: ObservableObject {
                 if outcomes.allSatisfy({ $0 == .missing }) { mayDownload = false }
             }
             guard !Task.isCancelled else { return }
-            self?.status = missing ? .incomplete : .saved
+            self?.status = missing ? (download ? .incomplete : .unavailable) : .saved
         }
     }
 

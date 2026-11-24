@@ -24,6 +24,8 @@ After finding an article or PDF in your browser, copy its link and paste it into
 
 The Map tab saves tiles as you pan, zoom, or follow your location. Saved tiles stay in the app’s durable storage and remain available across launches. Basemap tiles use the Protomaps archive hosted by Source Cooperative. Library indexing continues while you use the Map tab. [Protomaps OpenStreetMap data](https://source.coop/protomaps/openstreetmap)
 
+Open **Map → + → Map downloads** to limit automatic downloads to Wi-Fi or turn them off. The tile provider receives requests for the areas you view. You can check how much space saved tiles use or clear them. Clearing turns automatic downloads off and leaves bundled and imported maps available.
+
 Use **Map → + → Import map tiles** to add a regional PMTiles basemap from Files. **Installed basemaps** shows each map’s coverage and lets you switch between regions offline. Swipe an imported basemap to remove it.
 
 In Map, press and hold a location to copy its coordinates, set it as home, or save a named pin. Map search accepts saved place names and coordinates in decimal or degrees, minutes, and seconds. The Household tab keeps notes, home, and pins on the device.
