@@ -53,10 +53,12 @@ Valhalla Mobile packages Valhalla and its dependencies. [Scripts/routing/README.
 ## Downloaded by the app
 
 - **Map tiles:** the app's tile cache reads the same Protomaps v4 basemap, with the same OpenStreetMap attribution and license.
-- **Content packs:** downloaded from Kiwix and its official mirrors when a user chooses them. Each pack lists its own attribution and terms in Content Packs. In summary:
+- **Content packs:** downloaded from Kiwix and its official mirrors when a user chooses them. Content Packs shows each archive’s attribution and links to license terms where available. In summary:
   - Wikipedia packs and Appropedia: CC BY-SA. Images carry their own licenses.
   - iFixit: CC BY-NC-SA 3.0, which prohibits commercial use.
-  - The water and field medicine libraries: collections of documents under their authors' individual terms.
+  - ZIM Git collections of water, field medicine, post-disaster resources, food preparation and knots: the included documents retain their authors' individual terms. These are direct user downloads from Kiwix's open-access catalog. [Kiwix catalog FAQ](https://get.kiwix.org/en/solutions/catalog/)
+  - Military medicine manuals: Kiwix archives the Federation of American Scientists' collection of published reference manuals. Individual documents retain their original terms. [Original collection](https://irp.fas.org/doddir/milmed/index.html) · [Kiwix download metadata](https://download.kiwix.org/zim/zimit/irp.fas.org_en_military-medicine_2026-10.zim.meta4)
+  - Archive sharing is disabled for these collections.
 - **Printable references:** Household prints page ranges from installed packs. They include *Where There Is No Doctor* (Hesperian Health Guides) and Washington State Department of Health guidance, under their publishers' terms.
 
 ## Build and test tools
