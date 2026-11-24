@@ -4,7 +4,7 @@ The goal is desktop feature parity for Tinfoil Kit on iOS. [PLAN.md](PLAN.md) tr
 
 ## Start here
 
-Fetch `origin` and check both `origin/develop` and `origin/main`. Both branches were synced at `b65866d` after PR #11. Recheck the branch tips and the work below before starting an overlapping change.
+Fetch `origin` and check both `origin/develop` and `origin/main`. Both branches were synced at `b14cb76` after PR #12. Recheck the branch tips and the work below before starting an overlapping change.
 
 Use a fresh `codex/` feature branch from the current `origin/develop` for work awaiting Apple tests. Keep each feature in its own commits so it can move to `develop` after verification. Push the feature branch for the Mac session to retrieve. Open and merge one tested feature at a time through a `develop` → `main` PR.
 
@@ -16,12 +16,14 @@ The upstream desktop checkout and generated build inputs are ignored. For parity
 - Ask finds the nearest requested service using saved Home and installed place data. The result opens in Tinfoil Kit Map or passes the destination coordinates to Google Maps. Synthetic lookup and both controls passed in the simulator. Keep the separate `codex/ask-nearby-intent` branch as a reference for wording coverage. [PR #9](https://github.com/scottleibrand/TinFoilKit-iOS/pull/9)
 - The regional bundle builder produces a place index and routing pack from one pinned extract. The Valhalla ARM64 producer fixture passed, including rejection of corrupt artifacts and incompatible routing metadata. [PR #10](https://github.com/scottleibrand/TinFoilKit-iOS/pull/10)
 - Map imports a version 1 regional bundle from Files and manages both assets as a single edition. The native Files import and removal test and 62 app unit tests passed. The signed iPhone build was installed. Basemaps are still imported separately. [PR #11](https://github.com/scottleibrand/TinFoilKit-iOS/pull/11)
+- Both app profiles include the app and ZIMArchive privacy manifests required for distribution. All 62 simulator unit tests passed and the signed standard build was installed on the iPhone. The one-time TestFlight upload still needs a confirmed App Store Connect team and signing access on the Mac. [PR #12](https://github.com/scottleibrand/TinFoilKit-iOS/pull/12)
 
 ## Cloud branches awaiting integration
 
 - `codex/regional-bundle-basemap` adds basemap packaging to the producer. Extend the landed iOS importer to adopt the new manifest and all three assets together.
 - `codex/ask-offline-directions` and `codex/ask-saved-pin-directions` touch related Ask and Map paths. Compare their intent handling before combining the changes.
-- `codex/nearby-public-admission` adds catalog and storage admission checks. `codex/nearby-public-resume` adds resume for the worksheet transfer. Review their shared transfer paths and verify the combined behavior.
+- `codex/nearby-public-admission` adds catalog and storage admission checks. `codex/nearby-public-resume` and `codex/nearby-public-transfer-recovery` overlap on worksheet download resume. Review their shared transfer paths and verify the combined behavior.
+- `codex/map-range-validation` adds validation for remote PMTiles range responses. `codex/desktop-starter-packs` and `codex/catalog-audit` carry the same climate pack byte count correction. Verify any publisher metadata before integrating it.
 
 ## Work that can move in the cloud
 
@@ -50,4 +52,4 @@ Public web snapshots must have verified rights, provenance and no personal conte
 - For downloads, run `python3 Tests/PackDownloadFixture/test_resume.py` on macOS. Test the app with an interrupted background pack transfer on the phone, reconnect on the same allowed network, and confirm the publisher is asked for the remaining bytes and the final checksum passes. Cover pause, relaunch, longer outages and cellular consent. Map tiles already saved should survive an interruption.
 - For regional packages, extend the verified folder import to basemaps and add an in-app catalog download flow. Exercise verification, cancellation and recovery with fixtures, then test addresses, services, and walking and driving routes after an iPhone cold launch in airplane mode. For Ask, verify external map handoff in airplane mode and the real on-device model on an eligible phone.
 - For Nearby, use two iPhones with Wi-Fi enabled and no access point, then repeat on a LAN without internet. Check permission, storage limits, progress after interruption, notification behavior, and consent on real devices. The cloud cannot verify iOS suspension, direct peer discovery or Wi-Fi Aware.
-- Sign and install each completed feature on the paired iPhone when reachable. Report any remaining device checks before merging the tested PR.
+- Run each PR’s signed standard iPhone build alongside simulator testing in separate DerivedData directories. Install on the paired iPhone when reachable, and report any remaining device checks before merging. The requested TestFlight upload is a separate one-time lightweight release.
