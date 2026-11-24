@@ -5,6 +5,8 @@ targets:
   TinfoilKit:
     sources:REPLACE:
       - Sources/TinfoilKit
+      - path: Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
       - path: .build/lightweight/map-assets
         type: folder
         buildPhase: resources
