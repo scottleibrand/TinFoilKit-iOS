@@ -58,6 +58,12 @@ final class HouseholdStore: ObservableObject {
         try save(next)
     }
 
+    func appendGuestNote(_ note: String) throws {
+        let entry = "Guest note\n" + note
+        let existing = snapshot.notes
+        try saveNotes(existing.isEmpty ? entry : existing + "\n\n" + entry)
+    }
+
     func setHome(_ home: HouseholdPlace?) throws {
         guard home?.isValid != false else { throw PlaceError.invalid }
         var next = snapshot

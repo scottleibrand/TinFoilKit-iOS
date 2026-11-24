@@ -2,12 +2,12 @@ import Foundation
 
 @main
 enum VerifyHouseholdSharing {
-    static func main() async throws {
+    @MainActor static func main() async throws {
         let home = HouseholdPlace(name: "Home <north>", latitude: 47.6, longitude: -122.3)
         let page = HouseholdSharePage(snapshot: HouseholdSnapshot(notes: "Meet by A & B\n<gate>", home: home))
         let seed = URL(fileURLWithPath: "Resources/NearbyPublic/household-check-in-v1.txt")
         let worksheet = try String(contentsOf: seed, encoding: .utf8)
-        let publicPage = HouseholdSharePage(snapshot: HouseholdSnapshot(), publicWorksheet: worksheet)
+        let publicPage = HouseholdSharePage(snapshot: HouseholdSnapshot(), publicWorksheet: worksheet, acceptsNotes: true)
         let loopback = HouseholdShareAddress(interface: "lo0", host: "127.0.0.1", address: 0x7f000001, mask: UInt32.max)
 
         let (events, emitter) = AsyncStream<HouseholdShareServer.Event>.makeStream()
@@ -30,8 +30,7 @@ enum VerifyHouseholdSharing {
         precondition((invalidResponse as? HTTPURLResponse)?.statusCode == 404)
         precondition(!String(decoding: invalidBody, as: UTF8.self).contains("Meet"))
 
-        var mutation = URLRequest(url: link)
-        mutation.httpMethod = "POST"
+        let mutation = noteRequest("note=Being+safe", at: link)
         let (_, mutationResponse) = try await browser.data(for: mutation)
         precondition((mutationResponse as? HTTPURLResponse)?.statusCode == 404)
 
@@ -71,6 +70,36 @@ enum VerifyHouseholdSharing {
         precondition(publicHTML.contains("<h2>Public check-in worksheet</h2>"))
         precondition(publicHTML.contains("out-of-area contact"))
         precondition(!publicHTML.contains("<h2>Notes</h2>") && !publicHTML.contains("<h2>Home</h2>"))
+
+        let unmarked = noteRequest("note=Unmarked", at: newLink, marked: false)
+        let (_, unmarkedResponse) = try await browser.data(for: unmarked)
+        precondition((unmarkedResponse as? HTTPURLResponse)?.statusCode == 404)
+        let malformed = noteRequest("note=one&note=two", at: newLink)
+        let (_, malformedResponse) = try await browser.data(for: malformed)
+        precondition((malformedResponse as? HTTPURLResponse)?.statusCode == 400)
+
+        let submission = noteRequest("note=At+the+library", at: newLink)
+        let (_, acceptedResponse) = try await browser.data(for: submission)
+        precondition((acceptedResponse as? HTTPURLResponse)?.statusCode == 202)
+        guard case let .noteProposed(note) = await newIterator.next(), note == "At the library" else {
+            fatalError("No note reached the host")
+        }
+        let (_, busyResponse) = try await browser.data(for: submission)
+        precondition((busyResponse as? HTTPURLResponse)?.statusCode == 409)
+
+        let homeFile = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: homeFile) }
+        let store = HouseholdStore(file: homeFile.appendingPathComponent("household.json"))
+        try store.saveNotes("Host notes edited since sharing began")
+        try store.appendGuestNote(note)
+        precondition(store.snapshot.notes == "Host notes edited since sharing began\n\nGuest note\nAt the library")
+        stoppable.finishNoteReview()
+        let next = noteRequest("note=Second+message", at: newLink)
+        let (_, nextResponse) = try await browser.data(for: next)
+        precondition((nextResponse as? HTTPURLResponse)?.statusCode == 202)
+        guard case .noteProposed("Second message") = await newIterator.next() else {
+            fatalError("The host could not receive another note")
+        }
         stoppable.stop()
         let clock = ContinuousClock()
         let deadline = clock.now + .seconds(2)
@@ -80,10 +109,20 @@ enum VerifyHouseholdSharing {
                 _ = try await browser.data(for: request)
                 try await Task.sleep(for: .milliseconds(50))
             } catch let error as URLError where error.code == .cannotConnectToHost || error.code == .networkConnectionLost {
-                print("Verified private household viewing, withheld fields, read-only requests, expiry, and manual stop.")
+                print("Verified household viewing, withheld fields, opt-in note review, expiry, and manual stop.")
                 return
             }
         }
         fatalError("An explicitly stopped link still worked")
     }
+
+    private static func noteRequest(_ body: String, at url: URL, marked: Bool = true) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = Data(body.utf8)
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        if marked { request.setValue("1", forHTTPHeaderField: "X-Tinfoil-Guest-Note") }
+        return request
+    }
+
 }
