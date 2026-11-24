@@ -5,7 +5,7 @@ scripts="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$scripts/../.." && pwd)"
 output="$root/.build/routing"
 cache="$output/cache"
-mkdir -p "$cache"
+mkdir -p "$cache" "$root/.build/routing-packs"
 scratch="$(mktemp -d "$output/prepare.XXXXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
 
