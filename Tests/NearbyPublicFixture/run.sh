@@ -10,7 +10,7 @@ cleanup() {
 trap cleanup EXIT
 xcrun swiftc -module-cache-path "$output/module-cache" -o "$output/verify" \
     Tests/NearbyPublicFixture/VerifyNearbyPublic.swift \
-    Sources/TinfoilKit/Nearby{Discovery,PublicReference,PublicTLS,PublicTransfer}.swift
+    Sources/TinfoilKit/Nearby{Discovery,PublicManifest,PublicReference,PublicTLS,PublicTransfer}.swift
 seed=Resources/NearbyPublic/household-check-in-v1.txt
 
 

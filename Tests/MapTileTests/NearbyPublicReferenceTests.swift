@@ -23,8 +23,10 @@ final class NearbyPublicReferenceTests: XCTestCase {
         let recipient = NearbyPublicReference(directory: directory, bundledFile: nil, availableCapacity: { _ in .max })
 
         XCTAssertNil(recipient.loadVerified())
-        XCTAssertTrue(recipient.canReceive())
-        try recipient.receiveVerified(bytes)
+        XCTAssertEqual(recipient.admission(), .receive)
+        XCTAssertTrue(try recipient.receiveVerified(bytes))
+        XCTAssertFalse(try recipient.receiveVerified(bytes))
+        XCTAssertEqual(recipient.admission(), .alreadyInstalled)
         XCTAssertEqual(
             NearbyPublicReference(directory: directory, bundledFile: nil).loadVerified(),
             bytes
@@ -39,7 +41,7 @@ final class NearbyPublicReferenceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = NearbyPublicReference(directory: directory, bundledFile: nil, availableCapacity: { _ in 0 })
 
-        XCTAssertFalse(store.canReceive())
+        XCTAssertEqual(store.admission(), .insufficientStorage)
         XCTAssertThrowsError(try store.receiveVerified(data)) { error in
             XCTAssertEqual(error as? NearbyPublicReference.StoreError, .insufficientStorage)
         }
