@@ -5,12 +5,15 @@ actor RegionalPlaceStorage {
         let id: String
         let index: RegionalPlaceIndex
         let metadata: RegionalPlaceIndex.Metadata
+        let bundleID: UUID?
     }
 
     private let directory: URL
+    private let bundleDirectory: URL?
 
-    init(directory: URL = URL.applicationSupportDirectory.appendingPathComponent("RegionalPlaces", isDirectory: true)) {
-        self.directory = directory
+    init(directory: URL? = nil, bundleDirectory: URL? = nil) {
+        self.directory = directory ?? URL.applicationSupportDirectory.appendingPathComponent("RegionalPlaces", isDirectory: true)
+        self.bundleDirectory = bundleDirectory ?? (directory == nil ? RegionalBundleStorage.defaultDirectory : nil)
     }
 
     private static let legacyID = "current.sqlite"
@@ -27,22 +30,30 @@ actor RegionalPlaceStorage {
 
     func installedIndexes() throws -> [Installed] {
         let files = FileManager.default
-        guard files.fileExists(atPath: directory.path) else { return [] }
-        try? excludeFromBackup()
-        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey]
-        return try files.contentsOfDirectory(at: directory, includingPropertiesForKeys: Array(keys))
-            .compactMap { file -> Installed? in
+        var indexes: [Installed] = []
+        if files.fileExists(atPath: directory.path) {
+            try? excludeFromBackup()
+            let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey]
+            for file in try files.contentsOfDirectory(at: directory, includingPropertiesForKeys: Array(keys)) {
                 let id = file.lastPathComponent
                 guard Self.isIndexID(id),
                       let values = try? file.resourceValues(forKeys: keys),
-                      values.isRegularFile == true, values.isSymbolicLink != true else { return nil }
+                      values.isRegularFile == true, values.isSymbolicLink != true else { continue }
                 let index = RegionalPlaceIndex(file: file)
-                guard let metadata = try? index.metadata() else { return nil }
-                return Installed(id: id, index: index, metadata: metadata)
-            }.sorted { lhs, rhs in
-                let comparison = lhs.metadata.region.localizedStandardCompare(rhs.metadata.region)
-                return comparison == .orderedSame ? lhs.id < rhs.id : comparison == .orderedAscending
+                guard let metadata = try? index.metadata() else { continue }
+                indexes.append(Installed(id: id, index: index, metadata: metadata, bundleID: nil))
             }
+        }
+        for edition in try RegionalBundleStorage.editions(in: bundleDirectory) {
+            let index = RegionalPlaceIndex(file: edition.places)
+            let bundle = edition.installed
+            guard let metadata = try? index.metadata(), (try? bundle.manifest.validate(places: metadata)) != nil else { continue }
+            indexes.append(Installed(id: "bundle-\(bundle.id)", index: index, metadata: metadata, bundleID: bundle.id))
+        }
+        return indexes.sorted { lhs, rhs in
+            let comparison = lhs.metadata.region.localizedStandardCompare(rhs.metadata.region)
+            return comparison == .orderedSame ? lhs.id < rhs.id : comparison == .orderedAscending
+        }
     }
 
     func remove(_ id: Installed.ID) throws {
@@ -85,10 +96,7 @@ actor RegionalPlaceStorage {
             try copy(source)
         }
 
-        let candidate = RegionalPlaceIndex(file: staging)
-        let metadata = try candidate.metadata()
-        _ = try candidate.search("TinfoilKitIndexCheck", limit: 1)
-        _ = try candidate.nearest(.hospital, to: .init(latitude: 0, longitude: 0), radiusMeters: 1, limit: 1)
+        let metadata = try Self.validateIndex(at: staging)
         try Task.checkCancellation()
         let id = "\(UUID().uuidString).sqlite"
         let file = directory.appendingPathComponent(id)
@@ -99,7 +107,15 @@ actor RegionalPlaceStorage {
             try? files.removeItem(at: file)
             throw error
         }
-        return Installed(id: id, index: RegionalPlaceIndex(file: file), metadata: metadata)
+        return Installed(id: id, index: RegionalPlaceIndex(file: file), metadata: metadata, bundleID: nil)
+    }
+
+    static func validateIndex(at file: URL) throws -> RegionalPlaceIndex.Metadata {
+        let candidate = RegionalPlaceIndex(file: file)
+        let metadata = try candidate.metadata()
+        _ = try candidate.search("TinfoilKitIndexCheck", limit: 1)
+        _ = try candidate.nearest(.hospital, to: .init(latitude: 0, longitude: 0), radiusMeters: 1, limit: 1)
+        return metadata
     }
 
     private func excludeFromBackup() throws {

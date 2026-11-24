@@ -6,6 +6,8 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     GENERATE_INFOPLIST_FILE: YES
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
 packages:
   SwiftSoup:
     url: https://github.com/scinfu/SwiftSoup.git
@@ -16,6 +18,8 @@ targets:
     platform: iOS
     sources:
       - Sources/TinfoilKit
+      - path: Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
       - path: Resources/NearbyPublic/household-check-in-v1.txt
         buildPhase: resources
       - path: .build/map-assets
@@ -50,6 +54,8 @@ targets:
       path: .build/TinfoilKit-Info.plist
       properties:
         CFBundleDisplayName: Tinfoil Kit
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -110,7 +116,10 @@ targets:
   ZIMArchive:
     type: framework
     platform: iOS
-    sources: [Sources/ZIMArchive]
+    sources:
+      - Sources/ZIMArchive
+      - path: Resources/ZIMArchive/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
       - package: SwiftSoup
       - sdk: libsqlite3.tbd

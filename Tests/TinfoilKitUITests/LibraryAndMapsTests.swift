@@ -176,6 +176,82 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertTrue(route.waitForExistence(timeout: 12))
     }
 
+    func testImportsAndRemovesRegionalBundleFromFiles() throws {
+        try verifyRegionalBundleFromFiles(folderName: "Synthetic Regional Fixture", region: "Routing test fixture")
+    }
+
+    func testImportsAndRemovesRegionalBasemapFromFiles() throws {
+        try verifyRegionalBundleFromFiles(folderName: "Synthetic Regional Map Fixture", region: "Synthetic region",
+                                          attribution: "Tinfoil Kit synthetic basemap fixture")
+    }
+
+    private func verifyRegionalBundleFromFiles(folderName: String, region: String, attribution: String? = nil) throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-mapDownloadPolicy", "off"]
+        app.launch()
+        app.tabBars.buttons["Map"].tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let denyLocation = springboard.alerts.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH 'Don' AND label ENDSWITH 'Allow'")
+        ).firstMatch
+        if denyLocation.waitForExistence(timeout: 3) { denyLocation.tap() }
+        let mapMenu = app.buttons["Import map data"]
+        XCTAssertTrue(mapMenu.waitForExistence(timeout: 10))
+        mapMenu.tap()
+        app.buttons["Import regional bundle"].tap()
+
+        let remotePicker = XCUIApplication(bundleIdentifier: "com.apple.DocumentsApp")
+        let picker = app.buttons["Open"].waitForExistence(timeout: 3) ? app : remotePicker
+        let fixture = picker.staticTexts[folderName].firstMatch
+        if !fixture.waitForExistence(timeout: 3) {
+            let browse = picker.tabBars.buttons["Browse"].firstMatch
+            if browse.exists, !browse.isSelected { browse.tap() }
+            let folder = picker.staticTexts["Tinfoil Kit"].firstMatch
+            if !folder.exists {
+                let local = picker.staticTexts["On My iPhone"].firstMatch
+                if local.waitForExistence(timeout: 3) { local.tap() }
+            }
+            if folder.waitForExistence(timeout: 4) { folder.tap() }
+        }
+        guard fixture.waitForExistence(timeout: 5) else {
+            throw XCTSkip("Copy a synthetic bundle directory named \(folderName) into Documents.")
+        }
+        fixture.tap()
+        let manifest = picker.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'manifest'")).firstMatch
+        if !manifest.waitForExistence(timeout: 3), fixture.exists {
+            fixture.doubleTap()
+        }
+        XCTAssertTrue(manifest.waitForExistence(timeout: 6), "Open the bundle directory before confirming the selection.")
+        let open = picker.buttons["Open"].firstMatch
+        XCTAssertTrue(open.isEnabled)
+        open.tap()
+        let installFinished = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: mapMenu)
+        wait(for: [installFinished], timeout: 15)
+        let error = app.alerts["Map error"]
+        if error.exists {
+            XCTFail(error.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " · "))
+            return
+        }
+        if let attribution {
+            XCTAssertTrue(app.staticTexts[region].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.descendants(matching: .any)[attribution].firstMatch.exists)
+        }
+
+        mapMenu.tap()
+        app.buttons["Installed regional bundles"].tap()
+        XCTAssertTrue(app.navigationBars["Installed regional bundles"].waitForExistence(timeout: 5))
+        let installed = app.staticTexts[region]
+        XCTAssertTrue(installed.waitForExistence(timeout: 5))
+        app.buttons["Remove regional bundle"].tap()
+        app.buttons["Remove \(region)"].tap()
+        let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: installed)
+        wait(for: [removed], timeout: 5)
+        if let attribution {
+            app.buttons["Done"].tap()
+            XCTAssertFalse(app.descendants(matching: .any)[attribution].firstMatch.exists)
+        }
+    }
+
     func testImportsAndFindsArticleAfterRelaunch() {
         let app = XCUIApplication()
         app.launchArguments = ["-askUsesOnDeviceModel", "NO"]
