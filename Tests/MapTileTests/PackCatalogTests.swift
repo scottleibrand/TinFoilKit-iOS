@@ -22,4 +22,17 @@ final class PackCatalogTests: XCTestCase {
         XCTAssertTrue(highlights.isBulkEligible)
         XCTAssertTrue(entries.filter { !$0.isDefault }.allSatisfy { !$0.isBulkEligible })
     }
+
+    func testWikiMedIsCurrentAndIndividualOnly() throws {
+        let catalog = try XCTUnwrap(Bundle.main.url(forResource: "PackCatalog", withExtension: "json"))
+        let entries = try PackCatalog.load(from: catalog)
+        let wikiMed = try XCTUnwrap(entries.first { $0.pack.id == "mdwiki-en-all-maxi" })
+        XCTAssertEqual(wikiMed.pack.sizeEstimate, 2_302_838_768)
+        XCTAssertEqual(wikiMed.section, .extended)
+        XCTAssertEqual(wikiMed.language, .english)
+        XCTAssertTrue(wikiMed.isDefault)
+        XCTAssertFalse(wikiMed.isBulkEligible)
+        XCTAssertFalse(wikiMed.usesPDFDirectory)
+        XCTAssertFalse(wikiMed.allowsArchiveSharing)
+    }
 }
