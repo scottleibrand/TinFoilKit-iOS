@@ -285,25 +285,46 @@ private struct ArchiveWebView: UIViewRepresentable {
                 urlSchemeTask.didFailWithError(URLError(.unsupportedURL))
                 return
             }
+            let request = urlSchemeTask.request
+            let headOnly = request.httpMethod == "HEAD"
+            let rangeHeader = request.httpMethod == "GET" || request.httpMethod == nil
+                ? request.value(forHTTPHeaderField: "Range") : nil
             let id = ObjectIdentifier(urlSchemeTask as AnyObject)
             tasks[id] = Task { @MainActor in
                 defer { tasks[id] = nil }
                 do {
                     let resource = try await reader.resource(at: path)
                     guard !Task.isCancelled else { return }
-                    let response = URLResponse(
-                        url: url,
-                        mimeType: resource.mimeType,
-                        expectedContentLength: resource.data.count,
-                        textEncodingName: nil
-                    )
-                    urlSchemeTask.didReceive(response)
-                    urlSchemeTask.didReceive(resource.data)
+                    let count = resource.data.count
+                    let selection = ArchiveReadRange.parse(rangeHeader, count: count)
+                    switch selection {
+                    case .full:
+                        urlSchemeTask.didReceive(URLResponse(url: url, mimeType: resource.mimeType,
+                            expectedContentLength: count, textEncodingName: nil))
+                        if !headOnly { urlSchemeTask.didReceive(resource.data) }
+                    case .partial(let range):
+                        urlSchemeTask.didReceive(try rangeResponse(url, status: 206, mimeType: resource.mimeType,
+                            length: range.count, contentRange: selection.contentRange(count: count)))
+                        urlSchemeTask.didReceive(Data(resource.data.dropFirst(range.lowerBound).prefix(range.count)))
+                    case .unsatisfiable:
+                        urlSchemeTask.didReceive(try rangeResponse(url, status: 416, mimeType: resource.mimeType,
+                            length: 0, contentRange: selection.contentRange(count: count)))
+                    }
                     urlSchemeTask.didFinish()
                 } catch {
                     if !Task.isCancelled { urlSchemeTask.didFailWithError(error) }
                 }
             }
+        }
+
+        private func rangeResponse(_ url: URL, status: Int, mimeType: String, length: Int,
+                                   contentRange: String?) throws -> HTTPURLResponse {
+            guard let contentRange, let response = HTTPURLResponse(
+                url: url, statusCode: status, httpVersion: "HTTP/1.1",
+                headerFields: ["Accept-Ranges": "bytes", "Content-Range": contentRange,
+                               "Content-Type": mimeType, "Content-Length": String(length)]
+            ) else { throw URLError(.badServerResponse) }
+            return response
         }
 
         func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {
