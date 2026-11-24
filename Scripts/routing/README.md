@@ -35,3 +35,28 @@ The bridge owns an opaque actor. Hold one actor per routing configuration and se
 - Graph packs derived from production OpenStreetMap extracts need their own ODbL attribution and derivative database distribution terms. The synthetic fixture needs no OSM extract. [OpenStreetMap licensing](https://www.openstreetmap.org/copyright)
 
 The upstream Apple zip contains the static libraries and headers. Preparation supplies the notice bundle from upstream sources, including individual copyright notices and Apache notices where applicable.
+
+## Regional catalog bundle
+
+Use the bundle tool to prepare a place index and routing pack from the same pinned extract. It requires Python 3.10 or later, `osmium==4.2.0`, and Docker with the pinned Valhalla image. Use the publisher's exact edition and verified SHA-256. Set the artifact base URL to the intended HTTPS directory for that edition.
+
+```sh
+python Scripts/build-regional-bundle.py build region.osm.pbf .build/region-bundle \
+  --region 'Region name' --data-version YYYY-MM-DD \
+  --source https://publisher.example/region.osm.pbf --source-sha256 "$REGIONAL_EXTRACT_SHA256" \
+  --artifact-base-url https://catalog.example/region/YYYY-MM-DD/ \
+  --bounds WEST SOUTH EAST NORTH
+python Scripts/build-regional-bundle.py verify .build/region-bundle
+```
+
+The output directory contains `places.sqlite`, `routing.tfkroute` and `manifest.json`. The catalog manifest records the source hash, edition, bounds, attribution, license and the URL, SHA-256 and byte count of each installable artifact. Verification checks the local files against that manifest, including the embedded graph digest and matching place and route metadata. Publish the files and reviewed manifest through a trusted catalog channel. The manifest itself carries no signature. Use a separately sourced basemap and import the two files with the app's existing place and routing import flows.
+
+Production extracts use OpenStreetMap data. Preserve the copyright notice, ODbL terms and source edition when redistributing the files. Verify additional publisher terms before publishing. Keep downloaded extracts, generated indexes and routing graphs out of Git.
+
+Run the end-to-end producer fixture with the same Python and Docker setup.
+
+```sh
+python Tests/RegionalBundleFixture/run.py
+```
+
+The test converts the pinned, original MIT-licensed synthetic network to PBF with an invented pharmacy and address. It uses reserved fixture URLs and exercises the production attribution fields. It checks source pinning, both artifact hashes and rejection of a modified manifest or routing payload. The temporary build stays under the ignored `.build/` directory.
