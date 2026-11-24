@@ -204,10 +204,13 @@ final class LibraryAndMapsTests: XCTestCase {
         let picker = app.buttons["Open"].waitForExistence(timeout: 3) ? app : remotePicker
         let fixture = picker.staticTexts[folderName].firstMatch
         if !fixture.waitForExistence(timeout: 3) {
-            if picker.buttons["Browse"].exists { picker.buttons["Browse"].tap() }
-            let local = picker.staticTexts["On My iPhone"].firstMatch
-            if local.waitForExistence(timeout: 4) { local.tap() }
+            let browse = picker.tabBars.buttons["Browse"].firstMatch
+            if browse.exists, !browse.isSelected { browse.tap() }
             let folder = picker.staticTexts["Tinfoil Kit"].firstMatch
+            if !folder.exists {
+                let local = picker.staticTexts["On My iPhone"].firstMatch
+                if local.waitForExistence(timeout: 3) { local.tap() }
+            }
             if folder.waitForExistence(timeout: 4) { folder.tap() }
         }
         guard fixture.waitForExistence(timeout: 5) else {
