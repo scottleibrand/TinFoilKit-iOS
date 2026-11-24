@@ -43,6 +43,13 @@ final class LibraryAndMapsTests: XCTestCase {
             XCTAssertTrue(label.exists, "Missing content pack: \(title)")
         }
 
+        let downloadOptions = app.buttons["Download options"].firstMatch
+        XCTAssertTrue(downloadOptions.waitForExistence(timeout: 5))
+        downloadOptions.tap()
+        app.buttons["Allow cellular data…"].tap()
+        XCTAssertTrue(app.buttons["Allow cellular data"].waitForExistence(timeout: 5))
+        app.buttons["Cancel"].tap()
+
         app.tabBars.buttons["Map"].tap()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let denyLocation = springboard.alerts.buttons.matching(

@@ -3,6 +3,20 @@ import SwiftUI
 import UIKit
 import ZIMArchive
 
+enum PackDownloadNetwork: String, CaseIterable, Sendable {
+    case wifiOnly = "org.tinfoilkit.ios.publisher-packs"
+    case cellularAllowed = "org.tinfoilkit.ios.publisher-packs.cellular"
+
+    func configuration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.background(withIdentifier: rawValue)
+        configuration.sessionSendsLaunchEvents = true
+        configuration.allowsCellularAccess = self == .cellularAllowed
+        return configuration
+    }
+
+    var resumeExtension: String { self == .wifiOnly ? "resume" : "cellular-resume" }
+}
+
 @MainActor
 final class PackDownloads: ObservableObject {
     static let shared = PackDownloads()
@@ -36,9 +50,9 @@ final class PackDownloads: ObservableObject {
 
     private let library = InstalledLibrary.standard
     private let staging = URL.applicationSupportDirectory.appendingPathComponent("PackDownloads", isDirectory: true)
-    private var tasks: [String: URLSessionDownloadTask] = [:]
+    private var tasks: [String: (task: URLSessionDownloadTask, network: PackDownloadNetwork)] = [:]
     private var restoringStarted = false
-    private var backgroundCompletion: (() -> Void)?
+    private var backgroundCompletions: [PackDownloadNetwork: () -> Void] = [:]
     private lazy var transfer = PackTransfer(directory: staging) { [weak self] event in
         Task { @MainActor in self?.handle(event) }
     }
@@ -56,7 +70,13 @@ final class PackDownloads: ObservableObject {
         guard !restoringStarted else { return }
         restoringStarted = true
         defer { restoring = false }
-        let sessionTasks = await transfer.session.allTasks
+        var sessionTasks: [String: (task: URLSessionDownloadTask, network: PackDownloadNetwork)] = [:]
+        for network in PackDownloadNetwork.allCases {
+            for case let task as URLSessionDownloadTask in await transfer.session(for: network).allTasks {
+                guard let key = task.taskDescription else { continue }
+                sessionTasks[key] = (task, network)
+            }
+        }
         let installed = (try? await library.archives()) ?? []
         for pack in Self.catalog {
             let key = pack.editionKey
@@ -67,14 +87,14 @@ final class PackDownloads: ObservableObject {
                update == nil || current.replacesArchiveID == update {
                 if update != nil { try? FileManager.default.removeItem(at: updateURL(key)) }
                 try? FileManager.default.removeItem(at: transfer.downloadURL(key))
-                try? FileManager.default.removeItem(at: transfer.resumeURL(key))
+                transfer.clearResume(key)
                 statuses[key] = .installed
-            } else if let task = sessionTasks.first(where: { $0.taskDescription == key }) as? URLSessionDownloadTask {
-                tasks[key] = task
+            } else if let active = sessionTasks[key] {
+                tasks[key] = active
                 statuses[key] = .downloading(nil)
             } else if FileManager.default.fileExists(atPath: transfer.downloadURL(key).path) {
                 install(pack)
-            } else if FileManager.default.fileExists(atPath: transfer.resumeURL(key).path) {
+            } else if transfer.hasResume(key) {
                 statuses[key] = .paused
             } else if repair != nil || update != nil {
                 statuses[key] = .failed("The download was interrupted. Retry to continue.")
@@ -82,14 +102,18 @@ final class PackDownloads: ObservableObject {
         }
     }
 
-    func start(_ pack: PublishedPack) {
+    func start(_ pack: PublishedPack, network: PackDownloadNetwork = .wifiOnly) {
         guard !restoring, canStart(pack) else { return }
         downloadAllError = nil
         do {
-            try enqueue([pack])
+            try enqueue([pack], network: network)
         } catch {
             statuses[pack.editionKey] = .failed(error.localizedDescription)
         }
+    }
+
+    func allowsCellular(for pack: PublishedPack) -> Bool {
+        tasks[pack.editionKey]?.network == .cellularAllowed
     }
 
     func startAll() {
@@ -121,7 +145,7 @@ final class PackDownloads: ObservableObject {
         let key = pack.editionKey
         if repairTarget(key) == archive.id {
             try? FileManager.default.removeItem(at: repairURL(key))
-            try? FileManager.default.removeItem(at: transfer.resumeURL(key))
+            transfer.clearResume(key)
             try? FileManager.default.removeItem(at: transfer.downloadURL(key))
             statuses[key] = nil
         } else if case .installed = statuses[key] {
@@ -129,9 +153,9 @@ final class PackDownloads: ObservableObject {
         }
         for replacement in Self.catalog where updateTarget(replacement.editionKey) == archive.id {
             let updateKey = replacement.editionKey
-            tasks.removeValue(forKey: updateKey)?.cancel()
+            tasks.removeValue(forKey: updateKey)?.task.cancel()
             try? FileManager.default.removeItem(at: updateURL(updateKey))
-            try? FileManager.default.removeItem(at: transfer.resumeURL(updateKey))
+            transfer.clearResume(updateKey)
             try? FileManager.default.removeItem(at: transfer.downloadURL(updateKey))
             statuses[updateKey] = nil
         }
@@ -237,7 +261,7 @@ final class PackDownloads: ObservableObject {
         }
     }
 
-    private func enqueue(_ packs: [PublishedPack]) throws {
+    private func enqueue(_ packs: [PublishedPack], network: PackDownloadNetwork = .wifiOnly) throws {
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         var directory = staging
         var values = URLResourceValues()
@@ -249,7 +273,7 @@ final class PackDownloads: ObservableObject {
             let key = pack.editionKey
             switch statuses[key] {
             case .downloading:
-                let received = max(0, tasks[key]?.countOfBytesReceived ?? 0)
+                let received = max(0, tasks[key]?.task.countOfBytesReceived ?? 0)
                 return total + capacityEstimate(for: pack) - min(received, pack.sizeEstimate)
             case .verifying:
                 return total + capacityEstimate(for: pack) - pack.sizeEstimate
@@ -261,16 +285,17 @@ final class PackDownloads: ObservableObject {
         if let bytes = available.volumeAvailableCapacityForImportantUsage, bytes < required {
             throw InsufficientStorage(shortfall: required - bytes)
         }
+        let session = transfer.session(for: network)
         for pack in packs {
             let key = pack.editionKey
             let task: URLSessionDownloadTask
-            if let resume = try? Data(contentsOf: transfer.resumeURL(key)) {
-                task = transfer.session.downloadTask(withResumeData: resume)
+            if let resume = try? Data(contentsOf: transfer.resumeURL(key, network: network)) {
+                task = session.downloadTask(withResumeData: resume)
             } else {
-                task = transfer.session.downloadTask(with: pack.source)
+                task = session.downloadTask(with: pack.source)
             }
             task.taskDescription = key
-            tasks[key] = task
+            tasks[key] = (task, network)
             statuses[key] = .downloading(nil)
             task.resume()
         }
@@ -291,37 +316,48 @@ final class PackDownloads: ObservableObject {
 
     func pause(_ pack: PublishedPack) {
         let key = pack.editionKey
-        guard let task = tasks.removeValue(forKey: key) else { return }
+        guard let active = tasks.removeValue(forKey: key) else { return }
         statuses[key] = .pausing
-        task.cancel { [weak self] resumeData in
+        active.task.cancel { [weak self] resumeData in
             Task { @MainActor in
                 guard let self else { return }
-                if let resumeData { try? self.transfer.saveResume(resumeData, key: key) }
+                if let resumeData { try? self.transfer.saveResume(resumeData, key: key, network: active.network) }
                 if case .pausing = self.statuses[key] { self.statuses[key] = .paused }
             }
         }
     }
 
-    func resumeBackgroundSession(completion: @escaping () -> Void) {
-        backgroundCompletion = completion
-        _ = transfer.session
+    func resumeBackgroundSession(network: PackDownloadNetwork, completion: @escaping () -> Void) {
+        backgroundCompletions[network] = completion
+        _ = transfer.session(for: network)
     }
 
     private func handle(_ event: PackTransfer.Event) {
         switch event {
-        case let .progress(key, fraction):
-            if case .downloading = statuses[key] { statuses[key] = .downloading(fraction) }
-        case let .downloaded(key):
+        case let .progress(ticket, fraction):
+            guard accepts(ticket), case .downloading = statuses[ticket.key] else { return }
+            statuses[ticket.key] = .downloading(fraction)
+        case let .downloaded(ticket):
+            guard accepts(ticket) else { return }
+            let key = ticket.key
             tasks[key] = nil
             if let pack = Self.catalog.first(where: { $0.editionKey == key }) { install(pack) }
-        case let .failed(key, message):
+        case let .failed(ticket, message):
+            guard accepts(ticket) else { return }
+            let key = ticket.key
             tasks[key] = nil
-            if case .pausing = statuses[key] { return }
-            statuses[key] = .failed(message)
-        case .finishedEvents:
-            backgroundCompletion?()
-            backgroundCompletion = nil
+            switch statuses[key] {
+            case .pausing, .paused, .verifying, .installed: break
+            default: statuses[key] = .failed(message)
+            }
+        case let .finishedEvents(network):
+            backgroundCompletions.removeValue(forKey: network)?()
         }
+    }
+
+    private func accepts(_ ticket: PackTransfer.Ticket) -> Bool {
+        guard let active = tasks[ticket.key] else { return true }
+        return active.network == ticket.network && active.task.taskIdentifier == ticket.taskID
     }
 
     private func install(_ pack: PublishedPack) {
@@ -339,12 +375,12 @@ final class PackDownloads: ObservableObject {
                     try? FileManager.default.removeItem(at: updateURL(key))
                 }
                 try? FileManager.default.removeItem(at: file)
-                try? FileManager.default.removeItem(at: transfer.resumeURL(key))
+                transfer.clearResume(key)
                 statuses[key] = .installed
                 installedRevision += 1
             } catch {
                 try? FileManager.default.removeItem(at: file)
-                try? FileManager.default.removeItem(at: transfer.resumeURL(key))
+                transfer.clearResume(key)
                 statuses[key] = .failed(error.localizedDescription)
             }
         }
@@ -352,23 +388,39 @@ final class PackDownloads: ObservableObject {
 }
 
 private final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
-    static let identifier = "org.tinfoilkit.ios.publisher-packs"
+    struct Ticket: Sendable {
+        let key: String
+        let network: PackDownloadNetwork
+        let taskID: Int
+
+        init?(session: URLSession, task: URLSessionTask) {
+            guard let key = task.taskDescription, let identifier = session.configuration.identifier,
+                  let network = PackDownloadNetwork(rawValue: identifier) else { return nil }
+            self.key = key
+            self.network = network
+            taskID = task.taskIdentifier
+        }
+    }
 
     enum Event: Sendable {
-        case progress(String, Double?)
-        case downloaded(String)
-        case failed(String, String)
-        case finishedEvents
+        case progress(Ticket, Double?)
+        case downloaded(Ticket)
+        case failed(Ticket, String)
+        case finishedEvents(PackDownloadNetwork)
     }
 
     private let directory: URL
     private let post: @Sendable (Event) -> Void
-    lazy var session: URLSession = {
-        let configuration = URLSessionConfiguration.background(withIdentifier: Self.identifier)
-        configuration.sessionSendsLaunchEvents = true
-        configuration.allowsCellularAccess = false
-        return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-    }()
+    private lazy var wifi = makeSession(.wifiOnly)
+    private lazy var cellular = makeSession(.cellularAllowed)
+
+    func session(for network: PackDownloadNetwork) -> URLSession {
+        network == .wifiOnly ? wifi : cellular
+    }
+
+    private func makeSession(_ network: PackDownloadNetwork) -> URLSession {
+        URLSession(configuration: network.configuration(), delegate: self, delegateQueue: nil)
+    }
 
     init(directory: URL, post: @escaping @Sendable (Event) -> Void) {
         self.directory = directory
@@ -379,31 +431,41 @@ private final class PackTransfer: NSObject, URLSessionDownloadDelegate, @uncheck
         directory.appendingPathComponent(key).appendingPathExtension("zim")
     }
 
-    func resumeURL(_ key: String) -> URL {
-        directory.appendingPathComponent(key).appendingPathExtension("resume")
+    func resumeURL(_ key: String, network: PackDownloadNetwork) -> URL {
+        directory.appendingPathComponent(key).appendingPathExtension(network.resumeExtension)
     }
 
-    func saveResume(_ data: Data, key: String) throws {
-        try data.write(to: resumeURL(key), options: .atomic)
+    func hasResume(_ key: String) -> Bool {
+        PackDownloadNetwork.allCases.contains { FileManager.default.fileExists(atPath: resumeURL(key, network: $0).path) }
+    }
+
+    func clearResume(_ key: String) {
+        for network in PackDownloadNetwork.allCases {
+            try? FileManager.default.removeItem(at: resumeURL(key, network: network))
+        }
+    }
+
+    func saveResume(_ data: Data, key: String, network: PackDownloadNetwork) throws {
+        try data.write(to: resumeURL(key, network: network), options: .atomic)
     }
 
     func urlSession(
         _ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL
     ) {
-        guard let key = downloadTask.taskDescription else { return }
+        guard let ticket = Ticket(session: session, task: downloadTask) else { return }
         guard let response = downloadTask.response as? HTTPURLResponse, (200...299).contains(response.statusCode) else {
-            post(.failed(key, "The publisher did not return the archive."))
+            post(.failed(ticket, "The publisher did not return the archive."))
             return
         }
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let file = downloadURL(key)
+            let file = downloadURL(ticket.key)
             if !FileManager.default.fileExists(atPath: file.path) {
                 try FileManager.default.moveItem(at: location, to: file)
             }
-            post(.downloaded(key))
+            post(.downloaded(ticket))
         } catch {
-            post(.failed(key, error.localizedDescription))
+            post(.failed(ticket, error.localizedDescription))
         }
     }
 
@@ -411,23 +473,25 @@ private final class PackTransfer: NSObject, URLSessionDownloadDelegate, @uncheck
         _ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
         totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
     ) {
-        guard let key = downloadTask.taskDescription else { return }
+        guard let ticket = Ticket(session: session, task: downloadTask) else { return }
         let fraction = totalBytesExpectedToWrite > 0
             ? min(1, Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)) : nil
-        post(.progress(key, fraction))
+        post(.progress(ticket, fraction))
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let key = task.taskDescription, let error = error as NSError? else { return }
+        guard let ticket = Ticket(session: session, task: task), let error = error as NSError? else { return }
         if let data = error.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
-            try? saveResume(data, key: key)
+            try? saveResume(data, key: ticket.key, network: ticket.network)
         }
         guard error.code != NSURLErrorCancelled || error.domain != NSURLErrorDomain else { return }
-        post(.failed(key, error.localizedDescription))
+        post(.failed(ticket, error.localizedDescription))
     }
 
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
-        post(.finishedEvents)
+        if let identifier = session.configuration.identifier, let network = PackDownloadNetwork(rawValue: identifier) {
+            post(.finishedEvents(network))
+        }
     }
 }
 
@@ -436,7 +500,7 @@ final class DownloadAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
         completionHandler: @escaping () -> Void
     ) {
-        guard identifier == PackTransfer.identifier else { completionHandler(); return }
-        PackDownloads.shared.resumeBackgroundSession(completion: completionHandler)
+        guard let network = PackDownloadNetwork(rawValue: identifier) else { completionHandler(); return }
+        PackDownloads.shared.resumeBackgroundSession(network: network, completion: completionHandler)
     }
 }
