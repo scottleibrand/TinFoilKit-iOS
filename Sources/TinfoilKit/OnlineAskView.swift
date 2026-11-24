@@ -16,6 +16,7 @@ struct OnlineAskView: View {
     @State private var searchEntryPoint: String?
     @State private var status: String?
     @State private var error: String?
+    @State private var showingSavedSources = false
 
     var body: some View {
         NavigationStack {
@@ -34,6 +35,7 @@ struct OnlineAskView: View {
                                 openURL(provider.website)
                             }
                         }
+                        Button("Save a web source", systemImage: "arrow.down.document") { showingSavedSources = true }
                     } header: {
                         Text("Use without an API key")
                     } footer: {
@@ -81,6 +83,9 @@ struct OnlineAskView: View {
             .task { refreshKeys() }
             .task(id: pending) {
                 if let provider = pending { await ask(provider) }
+            }
+            .sheet(isPresented: $showingSavedSources) {
+                SavedWebSourcesView(onChange: onSaved)
             }
             .sheet(item: $editing) { provider in
                 NavigationStack {

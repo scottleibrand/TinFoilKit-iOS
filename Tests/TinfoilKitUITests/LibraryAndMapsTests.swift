@@ -177,5 +177,8 @@ final class LibraryAndMapsTests: XCTestCase {
         for provider in ["ChatGPT", "Claude", "Google Gemini"] {
             XCTAssertTrue(app.buttons["Copy question and open \(provider)"].exists)
         }
+        app.buttons["Save a web source"].tap()
+        XCTAssertTrue(app.navigationBars["Saved web sources"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["Source URL"].exists)
     }
 }

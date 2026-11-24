@@ -107,7 +107,10 @@ enum OnlineSourceArchiver {
                 let contents = decodeText(data, charset: response.textEncodingName)
                 snapshot = mime == "text/plain" ? snapshotText(contents) : try snapshotHTML(contents)
             }
-            return OnlineAskSavedSource(citation: citation, resolvedURL: url, text: snapshot.text, note: snapshot.note)
+            let attributed = citation.title.isEmpty
+                ? OnlineAskCitation(url: citation.url, title: snapshot.title ?? url.absoluteString, excerpt: citation.excerpt)
+                : citation
+            return OnlineAskSavedSource(citation: attributed, resolvedURL: url, text: snapshot.text, note: snapshot.note)
         } catch {
             try Task.checkCancellation()
             return unavailable(citation, resolvedURL: resolvedURL, note: "The publisher’s content could not be saved for offline reading.")
@@ -169,6 +172,7 @@ enum OnlineSourceArchiver {
     struct Snapshot {
         let text: String?
         let note: String?
+        var title: String? = nil
     }
 
     static func snapshotHTML(_ source: String) throws -> Snapshot {
@@ -183,7 +187,10 @@ enum OnlineSourceArchiver {
         try document.select("script, style, noscript, iframe, template, nav, footer, aside, form, [hidden], [aria-hidden=true]").remove()
         let content = try document.select("main, [role=main]").first()
             ?? document.select("article").first() ?? document.body()
-        return snapshotText(try content?.text() ?? "")
+        var snapshot = snapshotText(try content?.text() ?? "")
+        let title = try document.title().trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty { snapshot.title = String(title.prefix(240)) }
+        return snapshot
     }
 
     private static func snapshotPDF(_ data: Data) -> Snapshot {
