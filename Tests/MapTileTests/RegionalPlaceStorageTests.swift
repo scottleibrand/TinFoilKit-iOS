@@ -1,4 +1,5 @@
 import CoreLocation
+import CryptoKit
 import PDFKit
 import SQLite3
 import XCTest
@@ -97,6 +98,107 @@ final class RegionalPlaceStorageTests: XCTestCase {
         let emptyStorage = RegionalPlaceStorage(directory: root.appendingPathComponent("Empty"))
         let empty = try await RegionalPlaceSearch.nearestInstalled(.hospital, from: home, storage: emptyStorage)
         guard case .noPlaceData = empty else { return XCTFail("Expected no installed place data") }
+    }
+
+    func testRegionalBundlePublishesAndRemovesPlaceDataAndRoutesTogether() async throws {
+        let root = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("Source", isDirectory: true)
+        try makeRegionalBundle(at: source)
+        let directory = root.appendingPathComponent("Bundles", isDirectory: true)
+        let placeStore = RegionalPlaceStorage(directory: root.appendingPathComponent("Places"), bundleDirectory: directory)
+        let routeStore = RegionalRouteStore(directory: root.appendingPathComponent("Routes"), bundleDirectory: directory)
+        let storage = RegionalBundleStorage(directory: directory)
+
+        let installed = try await storage.install(source)
+        let reopened = RegionalBundleStorage(directory: directory)
+        let duplicate = try await reopened.install(source)
+        XCTAssertEqual(duplicate.id, installed.id)
+
+        let place = try await placeStore.current()
+        XCTAssertEqual(place?.bundleID, installed.id)
+        XCTAssertEqual(try place?.index.search("hospital").first?.name, "Fixture Hospital")
+        let graph = try await routeStore.current()
+        XCTAssertEqual(graph?.bundleID, installed.id)
+        let east = MapRoute.Point(latitude: 47.50002, longitude: -122.0004)
+        let west = MapRoute.Point(latitude: 47.50003, longitude: -122.0035)
+        let walk = try await routeStore.route(from: east, to: west, mode: .walking)
+        let drive = try await routeStore.route(from: east, to: west, mode: .driving)
+        XCTAssertFalse(walk.steps.isEmpty)
+        XCTAssertGreaterThan(drive.meters, 3 * walk.meters)
+        let selected = try XCTUnwrap(graph)
+        let selectedWalk = try await routeStore.route(selected, from: east, to: west, mode: .walking)
+        XCTAssertEqual(selectedWalk.meters, walk.meters)
+
+        try await placeStore.remove(try XCTUnwrap(place?.id))
+        try await routeStore.remove(installed.id)
+        let stillInstalled = try await reopened.installedBundles()
+        XCTAssertEqual(stillInstalled.map(\.id), [installed.id])
+        try await reopened.remove(installed.id)
+        let indexes = try await placeStore.installedIndexes()
+        let graphs = try await routeStore.installedPacks()
+        XCTAssertTrue(indexes.isEmpty)
+        XCTAssertTrue(graphs.isEmpty)
+    }
+
+    func testInvalidBundleLeavesNoAssetsOrStagingDirectory() async throws {
+        let root = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("Source", isDirectory: true)
+        try makeRegionalBundle(at: source)
+        let routing = source.appendingPathComponent("routing.tfkroute")
+        var bytes = try Data(contentsOf: routing)
+        bytes[bytes.count - 1] ^= 1
+        try bytes.write(to: routing)
+        let directory = root.appendingPathComponent("Bundles", isDirectory: true)
+        let storage = RegionalBundleStorage(directory: directory)
+        do {
+            _ = try await storage.install(source)
+            XCTFail("A modified graph must fail bundle validation")
+        } catch RegionalBundleManifest.Error.invalidArtifact("routing.tfkroute") {}
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    }
+
+    private func makeRegionalBundle(at folder: URL) throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let packURL = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Synthetic", withExtension: "tfkroute"))
+        let packed = try Data(contentsOf: packURL)
+        let length = packed.withUnsafeBytes { Int($0.loadUnaligned(fromByteOffset: 8, as: UInt32.self).littleEndian) }
+        let pack = try JSONDecoder().decode(RoutingPack.self, from: packed[12..<(12 + length)])
+        try packed.write(to: folder.appendingPathComponent("routing.tfkroute"))
+        let places = folder.appendingPathComponent("places.sqlite")
+        try makeIndex(at: places, region: pack.region, longitude: -122.002, name: "Fixture Hospital")
+        try updatePlaceMetadata(at: places, pack: pack)
+
+        let base = try XCTUnwrap(URL(string: "https://example.invalid/bundle/"))
+        func asset(_ name: String, bytes: Data) -> RegionalBundleManifest.Asset {
+            RegionalBundleManifest.Asset(filename: name, url: base.appendingPathComponent(name),
+                                         byteCount: Int64(bytes.count),
+                                         sha256: SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined())
+        }
+        let manifest = RegionalBundleManifest(
+            schemaVersion: 1, region: pack.region, dataVersion: pack.dataVersion, source: pack.source,
+            sourceSHA256: pack.sourceSHA256, bounds: pack.bounds, artifactBaseURL: base, attribution: pack.attribution,
+            license: pack.license, licenseURL: pack.licenseURL,
+            assets: .init(places: asset("places.sqlite", bytes: try Data(contentsOf: places)),
+                          routing: asset("routing.tfkroute", bytes: packed))
+        )
+        try JSONEncoder().encode(manifest).write(to: folder.appendingPathComponent("manifest.json"))
+    }
+
+    private func updatePlaceMetadata(at url: URL, pack: RoutingPack) throws {
+        var db: OpaquePointer?
+        defer { sqlite3_close(db) }
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        let bounds = pack.bounds
+        let sql = """
+            REPLACE INTO metadata VALUES ('source', '\(pack.source.absoluteString)'),
+                ('attribution', '\(pack.attribution)'), ('dataVersion', '\(pack.dataVersion)'),
+                ('bounds', '\(bounds.west),\(bounds.south),\(bounds.east),\(bounds.north)');
+            UPDATE places SET latitude = 47.5;
+            UPDATE place_bounds SET min_latitude = 47.5, max_latitude = 47.5;
+            """
+        XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK)
     }
 
     private func makeIndex(at url: URL, region: String, longitude: Double = 10, name: String? = nil) throws {

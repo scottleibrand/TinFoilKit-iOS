@@ -18,7 +18,11 @@ struct InstalledPlaceDataView: View {
                         if let version = metadata.dataVersion { LabeledContent("Edition", value: version) }
                         Link("Data source", destination: metadata.source)
                         Link("\(metadata.attribution) · \(metadata.license)", destination: metadata.licenseURL)
-                        Button("Remove regional place data", role: .destructive) { pendingRemoval = region }
+                        if region.bundleID == nil {
+                            Button("Remove regional place data", role: .destructive) { pendingRemoval = region }
+                        } else {
+                            Text("Managed in Installed regional bundles.").foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
