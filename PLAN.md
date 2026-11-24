@@ -29,3 +29,18 @@ Build a standalone iPhone app that opens its installed library and maps after a 
 The first beta target is an offline library, pack management, and one regional basemap. Aim for a starter configuration under 10 GB, subject to measuring actual packs and index sizes. Set the minimum OS, representative map region, and device support from dependency and device tests before publishing the beta.
 
 Original iOS work is MIT. Review exact dependency and distribution terms before shipping a GPL component. Use documented interfaces to independently deployed services where compatible, or implement the needed behavior independently. Content and model weights retain their own licenses. [Project licensing rules](AGENTS.md)
+
+## Desktop feature parity
+
+Compare the iOS app to desktop revision `6417927`. Revisit the inventory as each milestone lands, including the desktop portal, command-line setup and maintenance, and the household sharing service. Use native iOS workflows for equivalent outcomes and track any outcome the platform cannot provide. [Desktop design](https://github.com/tudor-city-ventures/tinfoil-kit/blob/64179271bcebffc5d76f1e3d13d2592e0089b6b1/docs/DESIGN.md)
+
+| Milestone | Verify on iOS |
+| --- | --- |
+| Library and content packs | Select a preset, language and edition. Install and search curated packs and larger archives. Check sizes, attribution and available storage. Verify, repair, update and remove packs while keeping valid content available. Exercise full-text search on PDF collections and confirm offline reading after restart. |
+| Household tools | Save home, pins and notes, then restart in airplane mode. Find pins by name, copy decimal and DMS coordinates, and print the household essentials and verified page ranges from the installed editions. |
+| Regional navigation | Install a named region with explicit coverage. Find street addresses and nearby services, search with coordinates, and follow selectable walking and driving steps. Check edge snapping, one-way streets and turn restrictions with offline fixtures. |
+| Ask and local chat | Run conventional search with the model off. Stream answers drawn from retrieved passages with tappable citations. Support an optional downloadable model, uncited chat, and clearly identified map questions with deterministic fallback. |
+| Household sharing | Connect two real devices to a phone-hosted session and verify access rules, interruptions and notes conflicts. Serve only content whose redistribution terms permit it. Document the foreground host lifecycle and test reconnecting. |
+| Setup, help and readiness | Make installed content, source, last refresh, available capabilities and recovery steps visible. Provide offline help and a portable setup workflow for permitted content. |
+
+Use local fixtures and isolated simulator build directories. Check representative production data and install each completed fix or feature on the connected iPhone when available.
