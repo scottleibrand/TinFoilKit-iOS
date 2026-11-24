@@ -34,7 +34,7 @@ struct PacksView: View {
                         .foregroundStyle(.secondary)
                 }
             } footer: {
-                Text("Bulk downloads use Wi-Fi. Download complete English Wikipedia separately and resume cellular transfers individually.")
+                Text("Bulk downloads use Wi-Fi. Download either complete English Wikipedia edition separately and resume cellular transfers individually.")
             }
             if let error = PackCatalog.loadError {
                 Text(error).foregroundStyle(.secondary)

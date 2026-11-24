@@ -133,7 +133,26 @@
     "individualDownloadOnly": true,
     "usesPDFDirectory": false,
     "allowsArchiveSharing": false,
-    "detail": "Search all English Wikipedia articles with images. Download this archive separately.",
+    "detail": "Full articles with images. Download separately and allow extra space for the search index.",
+    "termsURL": "https://en.wikipedia.org/wiki/Wikipedia:Copyrights"
+  },
+  {
+    "pack": {
+      "id": "wikipedia-en-all-nopic",
+      "title": "Complete English Wikipedia (text only)",
+      "version": "2026-06",
+      "source": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_nopic_2026-06.zim",
+      "sha256": "441a56d9e05b2d98f8ae9acb7986a513ed47904d73852c92dc6b7d50baa122e5",
+      "sizeEstimate": 52690706555,
+      "attribution": "Wikipedia contributors · CC BY-SA · Packaged by Kiwix"
+    },
+    "section": "extended",
+    "language": "en",
+    "isDefault": true,
+    "individualDownloadOnly": true,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false,
+    "detail": "Full articles without images. Download separately and allow extra space for the search index.",
     "termsURL": "https://en.wikipedia.org/wiki/Wikipedia:Copyrights"
   },
   {

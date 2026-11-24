@@ -147,6 +147,19 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertTrue(app.buttons["Clear saved tiles"].exists)
     }
 
+    func testCompleteWikipediaEditionsAreListedInContentPacks() {
+        let app = XCUIApplication()
+        app.launch()
+        let contentPacks = app.buttons["Content packs"]
+        XCTAssertTrue(contentPacks.waitForExistence(timeout: 10))
+        contentPacks.tap()
+        for title in ["Complete English Wikipedia", "Complete English Wikipedia (text only)"] {
+            let label = app.staticTexts[title].firstMatch
+            for _ in 0..<8 where !label.exists { app.swipeUp(velocity: .fast) }
+            XCTAssertTrue(label.exists, "Expected \(title) in the Extended library.")
+        }
+    }
+
     func testSeattleWalkingPreview() throws {
         let app = XCUIApplication()
         app.launch()
