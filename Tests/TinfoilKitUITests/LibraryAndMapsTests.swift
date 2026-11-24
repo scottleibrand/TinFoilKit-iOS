@@ -5,6 +5,21 @@ final class LibraryAndMapsTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testOfflineChatOpensFromAskOptions() {
+        let app = XCUIApplication()
+        app.launch()
+        app.tabBars.buttons["Ask"].tap()
+        let options = app.buttons["Ask options"]
+        XCTAssertTrue(options.waitForExistence(timeout: 10))
+        options.tap()
+        app.buttons["Offline Chat"].tap()
+        XCTAssertTrue(app.navigationBars["Offline Chat"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["On-device model unavailable"].exists ||
+                      app.descendants(matching: .any)["Message"].firstMatch.exists)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.navigationBars["Ask"].exists)
+    }
+
     func testWaterOutageAsksForTheServiceArea() {
         let app = XCUIApplication()
         app.launchArguments = ["-askUsesOnDeviceModel", "NO"]

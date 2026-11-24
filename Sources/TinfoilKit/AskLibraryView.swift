@@ -19,6 +19,7 @@ struct AskLibraryView: View {
     @State private var savedAnswers: [OnlineAskSavedAnswer] = []
     @State private var savedWebSources: [OnlineAskSavedSource] = []
     @State private var showingSavedSources = false
+    @State private var showingOfflineChat = false
     @State private var evidence: [AskEvidence] = []
     @State private var cited: AskEvidence?
     @State private var onlineSheet: OnlineSheet?
@@ -86,10 +87,15 @@ struct AskLibraryView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
+                        Button("Offline Chat", systemImage: "bubble.left.and.bubble.right") {
+                            questionFocused = false
+                            serviceAreaFocused = false
+                            showingOfflineChat = true
+                        }
                         Button("Online providers", systemImage: "key") { onlineSheet = OnlineSheet(question: nil) }
                         Button("Saved web sources", systemImage: "doc.text") { showingSavedSources = true }
                         if LibraryAnswer.isAvailable {
-                            Toggle("Use on-device model", isOn: $useModel)
+                            Toggle("Use on-device model in Ask", isOn: $useModel)
                         }
                     } label: {
                         Label("Ask options", systemImage: "ellipsis.circle")
@@ -112,6 +118,7 @@ struct AskLibraryView: View {
                     Task { await refreshSavedContent(for: currentQuestion) }
                 }
             }
+            .sheet(isPresented: $showingOfflineChat) { OfflineChatView() }
             .sheet(item: $cited) { reference in
                 NavigationStack {
                     evidenceDestination(reference)
