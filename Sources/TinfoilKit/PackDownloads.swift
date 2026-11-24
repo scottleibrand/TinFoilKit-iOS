@@ -76,9 +76,9 @@ final class PackDownloads: ObservableObject {
     typealias CatalogEntry = PackCatalog.Entry
 
     static let catalog = PackCatalog.entries.map(\.pack)
-    private static let defaultPacks = PackCatalog.entries.filter(\.isDefault).map(\.pack)
+    private static let defaultPacks = PackCatalog.entries.filter(\.isBulkEligible).map(\.pack)
     private static let essentials = PackCatalog.entries.filter {
-        $0.section == .essentials && $0.isDefault
+        $0.section == .essentials && $0.isBulkEligible
     }.map(\.pack)
 
     static func allowsArchiveSharing(_ pack: PublishedPack) -> Bool {

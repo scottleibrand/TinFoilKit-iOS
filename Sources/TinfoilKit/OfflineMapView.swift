@@ -41,6 +41,7 @@ struct OfflineMapView: View {
     @State private var showingPlaceRegions = false
     @State private var showingRoutingPacks = false
     @State private var showingRegionalBundles = false
+    @State private var downloadingRegionalBundle = false
     @State private var showingMapDownloads = false
 
     private var savedPlaces: [HouseholdPlace] {
@@ -131,6 +132,12 @@ struct OfflineMapView: View {
             }
             .sheet(isPresented: $showingRegionalBundles) {
                 InstalledRegionalBundlesView(storage: bundleStorage) { try await regionalBundlesChanged() }
+            }
+            .sheet(isPresented: $downloadingRegionalBundle) {
+                RegionalBundleDownloadView(storage: bundleStorage) { installed in
+                    do { try await regionalBundleInstalled(installed) }
+                    catch { errorMessage = error.localizedDescription }
+                }
             }
             .sheet(isPresented: $showingMapDownloads) {
                 MapDownloadsView(exploration: exploration)
@@ -295,6 +302,7 @@ struct OfflineMapView: View {
                         Button("Import map") { chooseImport(.tiles) }
                             .buttonStyle(.borderedProminent)
                         Button("Import regional bundle") { chooseImport(.bundle) }
+                        Button("Download regional bundle") { downloadingRegionalBundle = true }
                         Button("Installed regional bundles") { showingRegionalBundles = true }
                     } else {
                         importProgress
@@ -320,6 +328,8 @@ struct OfflineMapView: View {
                     Button("Installed regional bundles", systemImage: "square.stack") { showingRegionalBundles = true }
                     Button("Import map tiles", systemImage: "map") { chooseImport(.tiles) }
                     Button("Import regional bundle", systemImage: "folder") { chooseImport(.bundle) }
+                    Button("Download regional bundle", systemImage: "arrow.down") { downloadingRegionalBundle = true }
+                        .disabled(importTask != nil)
                     Button("Import regional place data", systemImage: "magnifyingglass") {
                         chooseImport(.places)
                     }
@@ -431,10 +441,7 @@ struct OfflineMapView: View {
                 route = nil
             case .bundle:
                 let installed = try await bundleStorage.install(file)
-                try await Task {
-                    let basemapID = installed.manifest.assets.basemap.map { _ in OfflineMap.regionalID(installed.id) }
-                    try await regionalBundlesChanged(selecting: basemapID)
-                }.value
+                try await Task { try await regionalBundleInstalled(installed) }.value
             }
         } catch is CancellationError {
         } catch {
@@ -442,6 +449,11 @@ struct OfflineMapView: View {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func regionalBundleInstalled(_ installed: RegionalBundleStorage.Installed) async throws {
+        let basemapID = installed.manifest.assets.basemap.map { _ in OfflineMap.regionalID(installed.id) }
+        try await regionalBundlesChanged(selecting: basemapID)
     }
 
     private func regionalBundlesChanged(selecting basemapID: OfflineMap.ID? = nil) async throws {

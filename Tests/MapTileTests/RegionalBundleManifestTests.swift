@@ -8,6 +8,8 @@ final class RegionalBundleManifestTests: XCTestCase {
         XCTAssertEqual(manifest.assets.places.filename, "places.sqlite")
         XCTAssertEqual(manifest.assets.routing.byteCount, 6)
         XCTAssertNil(manifest.assets.basemap)
+        XCTAssertEqual(manifest.assets.downloadFiles.map(\.filename), ["places.sqlite", "routing.tfkroute"])
+        XCTAssertEqual(manifest.assets.downloadByteCount, 10)
 
         let bounds = manifest.bounds
         let places = RegionalPlaceIndex.Metadata(
@@ -50,6 +52,8 @@ final class RegionalBundleManifestTests: XCTestCase {
             """)
         let manifest = try readFixture(json: versionTwo)
         let basemap = try XCTUnwrap(manifest.assets.basemap)
+        XCTAssertEqual(manifest.assets.downloadFiles.map(\.filename), ["places.sqlite", "routing.tfkroute", "basemap.pmtiles"])
+        XCTAssertEqual(manifest.assets.downloadByteCount, 169)
         XCTAssertEqual(basemap.dataVersion, "map-edition")
         XCTAssertEqual(basemap.license, "MIT")
         XCTAssertEqual(basemap.source.host, "maps.example.invalid")

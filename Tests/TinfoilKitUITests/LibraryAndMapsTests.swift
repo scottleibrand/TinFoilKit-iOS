@@ -147,6 +147,19 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertTrue(app.buttons["Clear saved tiles"].exists)
     }
 
+    func testCompleteWikipediaEditionsAreListedInContentPacks() {
+        let app = XCUIApplication()
+        app.launch()
+        let contentPacks = app.buttons["Content packs"]
+        XCTAssertTrue(contentPacks.waitForExistence(timeout: 10))
+        contentPacks.tap()
+        for title in ["Complete English Wikipedia", "Complete English Wikipedia (text only)"] {
+            let label = app.staticTexts[title].firstMatch
+            for _ in 0..<8 where !label.exists { app.swipeUp(velocity: .fast) }
+            XCTAssertTrue(label.exists, "Expected \(title) in the Extended library.")
+        }
+    }
+
     func testSeattleWalkingPreview() throws {
         let app = XCUIApplication()
         app.launch()
@@ -183,6 +196,45 @@ final class LibraryAndMapsTests: XCTestCase {
     func testImportsAndRemovesRegionalBasemapFromFiles() throws {
         try verifyRegionalBundleFromFiles(folderName: "Synthetic Regional Map Fixture", region: "Synthetic region",
                                           attribution: "Tinfoil Kit synthetic basemap fixture")
+    }
+
+    func testRestoresAndInstallsPendingRegionalDownload() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-mapDownloadPolicy", "off"]
+        app.launch()
+        app.tabBars.buttons["Map"].tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let denyLocation = springboard.alerts.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH 'Don' AND label ENDSWITH 'Allow'")
+        ).firstMatch
+        if denyLocation.waitForExistence(timeout: 3) { denyLocation.tap() }
+        let mapMenu = app.buttons["Import map data"]
+        XCTAssertTrue(mapMenu.waitForExistence(timeout: 10))
+        mapMenu.tap()
+        app.buttons["Download regional bundle"].tap()
+        let resume = app.buttons["Resume download"]
+        guard resume.waitForExistence(timeout: 6) else {
+            if app.textFields["HTTPS manifest URL"].exists {
+                throw XCTSkip("Seed a completed synthetic pending regional download before running this test.")
+            }
+            XCTFail("Expected the saved download to be available for resuming.")
+            return
+        }
+        let network = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@ OR value == %@", "Wi-Fi only", "Wi-Fi only")
+        ).firstMatch
+        XCTAssertTrue(network.exists)
+        resume.tap()
+        let credit = app.descendants(matching: .any)["Tinfoil Kit synthetic basemap fixture"].firstMatch
+        XCTAssertTrue(credit.waitForExistence(timeout: 15))
+        mapMenu.tap()
+        app.buttons["Installed regional bundles"].tap()
+        let region = app.staticTexts["Synthetic region"]
+        XCTAssertTrue(region.waitForExistence(timeout: 5))
+        app.buttons["Remove regional bundle"].tap()
+        app.buttons["Remove Synthetic region"].tap()
+        let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: region)
+        wait(for: [removed], timeout: 5)
     }
 
     private func verifyRegionalBundleFromFiles(folderName: String, region: String, attribution: String? = nil) throws {

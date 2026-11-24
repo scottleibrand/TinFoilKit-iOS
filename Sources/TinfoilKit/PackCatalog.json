@@ -119,6 +119,44 @@
   },
   {
     "pack": {
+      "id": "wikipedia-en-all-maxi",
+      "title": "Complete English Wikipedia",
+      "version": "2026-08",
+      "source": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-08.zim",
+      "sha256": "34162d18b9f96f494eac48a73a309c72e0bc95d85f76be405d0f5de795854aa6",
+      "sizeEstimate": 127418087648,
+      "attribution": "Wikipedia contributors · CC BY-SA · Packaged by Kiwix"
+    },
+    "section": "extended",
+    "language": "en",
+    "isDefault": true,
+    "individualDownloadOnly": true,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false,
+    "detail": "Full articles with images. Download separately and allow extra space for the search index.",
+    "termsURL": "https://en.wikipedia.org/wiki/Wikipedia:Copyrights"
+  },
+  {
+    "pack": {
+      "id": "wikipedia-en-all-nopic",
+      "title": "Complete English Wikipedia (text only)",
+      "version": "2026-06",
+      "source": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_nopic_2026-06.zim",
+      "sha256": "441a56d9e05b2d98f8ae9acb7986a513ed47904d73852c92dc6b7d50baa122e5",
+      "sizeEstimate": 52690706555,
+      "attribution": "Wikipedia contributors · CC BY-SA · Packaged by Kiwix"
+    },
+    "section": "extended",
+    "language": "en",
+    "isDefault": true,
+    "individualDownloadOnly": true,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false,
+    "detail": "Full articles without images. Download separately and allow extra space for the search index.",
+    "termsURL": "https://en.wikipedia.org/wiki/Wikipedia:Copyrights"
+  },
+  {
+    "pack": {
       "id": "ifixit-en-all",
       "title": "iFixit Repair Guides",
       "version": "2025-12",
