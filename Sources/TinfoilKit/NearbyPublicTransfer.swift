@@ -106,7 +106,7 @@ final class NearbyPublicTransfer {
         retry?.cancel()
         retry = nil
         guard lifecycle == .running, outbound == nil, !targets.isEmpty,
-              reference.loadVerified() == nil, reference.canReceive() else { return }
+              reference.admission() == .receive else { return }
         let now = ContinuousClock.now
         let minimumInterval: Duration = .seconds(30)
         if let peer = targets.keys.sorted().first(where: { attempted[$0].map { now - $0 >= minimumInterval } ?? true }),
@@ -194,8 +194,7 @@ final class NearbyPublicTransfer {
                 guard let self, self.outbound?.id == id else { return }
                 if error == nil, let bytes {
                     do {
-                        try self.reference.receiveVerified(bytes)
-                        self.didReceive(bytes)
+                        if try self.reference.receiveVerified(bytes) { self.didReceive(bytes) }
                     } catch {
                         // Invalid or no-longer-admissible bytes must never be published.
                     }
