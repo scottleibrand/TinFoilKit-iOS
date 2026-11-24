@@ -27,6 +27,27 @@ final class LibraryPassagesTests: XCTestCase {
         XCTAssertGreaterThan(directScore, titledScore)
     }
 
+    func testLocalOutageRequiresTheNamedAreaAndQuotesExactSupport() throws {
+        let question = "How long will Woodinville’s water supply keep working if the region loses power?"
+        let context = try XCTUnwrap(WaterOutageContext(question: question))
+        XCTAssertEqual(context.serviceArea, "Woodinville")
+        XCTAssertTrue(context.scopedQueries.contains("woodinville water power"))
+        let example = "During a power outage, the East Reservoir can maintain water pressure for 2 hours."
+        XCTAssertEqual(context.supportedQuote(in: example, title: "Woodinville test fixture"), example)
+        XCTAssertNil(context.supportedQuote(in: example, title: "Other town test fixture"))
+        XCTAssertNil(context.supportedQuote(in: "Before a power outage, store water for 3 days.",
+                                            title: "Woodinville test fixture"))
+        XCTAssertFalse(context.relates(example, title: "Oldwoodinville Heights"))
+    }
+
+    func testLocalOutageCanUseManuallyEnteredServiceArea() throws {
+        XCTAssertNil(WaterOutageContext(question: outageQuestion)?.serviceArea)
+        let context = try XCTUnwrap(WaterOutageContext(question: outageQuestion, serviceArea: "North Water District"))
+        XCTAssertTrue(context.searchQuestion(outageQuestion).hasPrefix("North Water District"))
+        XCTAssertTrue(context.relates("The North Water District published a notice.", title: "Notice"))
+        XCTAssertFalse(context.relates("The South Water District published a notice.", title: "Notice"))
+    }
+
     func testAnOutageQuestionWithoutServiceIntentKeepsOrdinarySearch() throws {
         let intent = LibraryPassages.SearchIntent("How much drinking water should I store for a blackout?")
         XCTAssertFalse(intent.isWaterServiceOutage)

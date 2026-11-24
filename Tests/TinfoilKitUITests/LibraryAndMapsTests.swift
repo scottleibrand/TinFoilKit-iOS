@@ -5,6 +5,22 @@ final class LibraryAndMapsTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testWaterOutageAsksForTheServiceArea() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-askUsesOnDeviceModel", "NO"]
+        app.launch()
+        app.tabBars.buttons["Ask"].tap()
+        let question = app.descendants(matching: .any)["ask-question"].firstMatch
+        XCTAssertTrue(question.waitForExistence(timeout: 10))
+        question.tap()
+        question.typeText("How long does our water supply work in a power outage?")
+        XCTAssertTrue(app.textFields["Water utility or service area"].exists)
+        app.buttons["ask-dismiss-keyboard"].tap()
+        app.buttons["ask-submit"].tap()
+        XCTAssertTrue(app.staticTexts["Enter your water utility or service area to look for a local estimate."]
+            .waitForExistence(timeout: 25))
+    }
+
     func testHouseholdNotesSurviveSwitchingTabsAndRelaunch() {
         let app = XCUIApplication()
         let tab = app.tabBars.buttons["Household"]

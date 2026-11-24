@@ -6,7 +6,9 @@ struct AskLibraryView: View {
     @ObservedObject var indexing: LibraryIndexing
     @AppStorage("askUsesOnDeviceModel") private var useModel = true
     @FocusState private var questionFocused: Bool
+    @FocusState private var serviceAreaFocused: Bool
     @State private var question = ""
+    @State private var waterServiceArea = ""
     @State private var request: Request?
     @State private var searchedQuestion: String?
     @State private var sources: [SummarySource] = []
@@ -24,6 +26,9 @@ struct AskLibraryView: View {
 
     private var currentQuestion: String { question.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var modelEnabled: Bool { useModel && LibraryAnswer.isAvailable }
+    private var waterContext: WaterOutageContext? {
+        WaterOutageContext(question: currentQuestion, serviceArea: waterServiceArea)
+    }
 
     var body: some View {
         NavigationStack {
@@ -34,6 +39,12 @@ struct AskLibraryView: View {
                         .accessibilityIdentifier("ask-question")
                         .focused($questionFocused)
                         .disabled(request != nil)
+                    if let context = WaterOutageContext(question: currentQuestion), context.serviceArea == nil {
+                        TextField("Water utility or service area", text: $waterServiceArea)
+                            .textInputAutocapitalization(.words)
+                            .focused($serviceAreaFocused)
+                            .disabled(request != nil)
+                    }
                     HStack {
                         Button("Ask", systemImage: "sparkles") { start(.ask) }
                             .buttonStyle(.borderedProminent)
@@ -64,9 +75,12 @@ struct AskLibraryView: View {
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Ask")
             .toolbar {
-                if questionFocused {
+                if questionFocused || serviceAreaFocused {
                     ToolbarItem(placement: .primaryAction) {
-                        Button("Done") { questionFocused = false }
+                        Button("Done") {
+                            questionFocused = false
+                            serviceAreaFocused = false
+                        }
                             .accessibilityIdentifier("ask-dismiss-keyboard")
                     }
                 }
@@ -150,7 +164,7 @@ struct AskLibraryView: View {
         }
         if !evidence.isEmpty {
             Section("Matching passages") {
-                if request == nil, answer.isEmpty, modelEnabled, searchedQuestion == currentQuestion {
+                if request == nil, answer.isEmpty, modelEnabled, searchedQuestion == currentQuestion, waterContext == nil {
                     Button("Answer from these passages", systemImage: "sparkles") { start(.answerFromPassages) }
                 }
                 ForEach(Array(evidence.enumerated()), id: \.element.id) { index, reference in
@@ -180,6 +194,7 @@ struct AskLibraryView: View {
         let question = currentQuestion
         guard !question.isEmpty, request == nil else { return }
         questionFocused = false
+        serviceAreaFocused = false
         if mode != .answerFromPassages {
             sources = []
             savedAnswers = []
@@ -192,7 +207,7 @@ struct AskLibraryView: View {
         fallbackQuestion = nil
         message = nil
         progress = mode == .answerFromPassages ? "Reading the matching passages" : "Searching the library"
-        request = Request(question: question, mode: mode, useModel: modelEnabled)
+        request = Request(question: question, mode: mode, useModel: modelEnabled, waterContext: waterContext)
     }
 
     private func stop() {
@@ -212,9 +227,9 @@ struct AskLibraryView: View {
         }
         do {
             if request.mode != .answerFromPassages {
-                await refreshSavedContent(for: request.question)
+                await refreshSavedContent(for: request.question, waterContext: request.waterContext)
                 var found = try await LibraryPassages.search(
-                    question: request.question, archives: indexing.archives, library: library
+                    question: request.question, waterContext: request.waterContext, archives: indexing.archives, library: library
                 )
                 let retryUntil = ContinuousClock.now + .seconds(12)
                 while found.sources.isEmpty, savedAnswers.isEmpty, savedWebSources.isEmpty,
@@ -224,11 +239,11 @@ struct AskLibraryView: View {
                     progress = "Waiting for matching articles to finish indexing"
                     try await Task.sleep(for: .seconds(3))
                     found = try await LibraryPassages.search(
-                        question: request.question, archives: indexing.archives, library: library
+                        question: request.question, waterContext: request.waterContext, archives: indexing.archives, library: library
                     )
                 }
                 if found.sources.isEmpty, savedAnswers.isEmpty, savedWebSources.isEmpty, !indexing.hasPendingIndexes,
-                   request.mode == .ask, request.useModel {
+                   request.mode == .ask, request.useModel, request.waterContext == nil {
                     progress = "Checking related search terms"
                     let queries = (try? await LibraryAnswer.suggestedQueries(for: request.question)) ?? []
                     try Task.checkCancellation()
@@ -244,7 +259,11 @@ struct AskLibraryView: View {
                 sources = found.sources
                 searchedQuestion = request.question
                 unreadableArchives = found.unreadableArchives
-                updateEvidence(for: request.question)
+                updateEvidence(for: request.question, waterContext: request.waterContext)
+            }
+            if let context = request.waterContext, request.mode != .search {
+                explainWaterOutage(context, question: request.question)
+                return
             }
             guard !evidence.isEmpty else {
                 message = indexing.hasPendingIndexes
@@ -282,21 +301,43 @@ struct AskLibraryView: View {
         }
     }
 
-    private func refreshSavedContent(for question: String) async {
+    private func explainWaterOutage(_ context: WaterOutageContext, question: String) {
+        guard let area = context.serviceArea else {
+            message = "Enter your water utility or service area to look for a local estimate."
+            fallbackQuestion = question
+            return
+        }
+        for (index, reference) in evidence.prefix(6).enumerated() where reference.isReference {
+            if let quote = context.supportedQuote(in: reference.excerpt, title: reference.title) {
+                answer = "A saved reference for \(area) says “\(quote)” [\(index + 1)]"
+                message = "Check the source for the facilities and outage conditions it covers."
+                return
+            }
+        }
+        message = "The saved references don’t establish how long water service in \(area) would continue during a power outage."
+        fallbackQuestion = question
+    }
+
+    private func refreshSavedContent(for question: String, waterContext requested: WaterOutageContext? = nil) async {
+        let context = requested ?? waterContext
         let answers = (try? await OnlineAskCache.shared.search(question)) ?? []
-        let webSources = (try? await OnlineAskCache.shared.searchWebSources(question)) ?? []
+        let webSources = (try? await OnlineAskCache.shared.searchWebSources(context?.searchQuestion(question) ?? question)) ?? []
         guard !Task.isCancelled, currentQuestion == question else { return }
         savedAnswers = answers
         savedWebSources = webSources
         if request == nil, answer.isEmpty, searchedQuestion == question {
-            updateEvidence(for: question)
-            if !evidence.isEmpty { message = nil }
+            updateEvidence(for: question, waterContext: context)
+            if context == nil, !evidence.isEmpty { message = nil }
         }
     }
 
-    private func updateEvidence(for question: String) {
-        evidence = AskEvidence.combine(sources, savedAnswers: savedAnswers, savedWebSources: savedWebSources,
-                                       question: question)
+    private func updateEvidence(for question: String, waterContext: WaterOutageContext?) {
+        let matches = AskEvidence.combine(sources, savedAnswers: savedAnswers, savedWebSources: savedWebSources,
+                                          question: waterContext?.searchQuestion(question) ?? question)
+        guard let waterContext else { evidence = matches; return }
+        let scoped = matches.filter { $0.isReference && waterContext.relates($0.excerpt, title: $0.title) }
+        let ids = Set(scoped.map(\.id))
+        evidence = scoped + matches.filter { !ids.contains($0.id) }
     }
 
     @ViewBuilder
@@ -320,6 +361,7 @@ struct AskLibraryView: View {
         let question: String
         let mode: Mode
         let useModel: Bool
+        let waterContext: WaterOutageContext?
     }
 
     private struct OnlineSheet: Identifiable {
@@ -332,6 +374,14 @@ private enum AskEvidence: Identifiable {
     case archive(SummarySource)
     case answer(OnlineAskSavedAnswer, String)
     case web(OnlineAskSavedSource, String)
+
+    var isReference: Bool {
+        switch self {
+        case .archive: true
+        case .web(let source, _): source.text != nil
+        case .answer: false
+        }
+    }
 
     var id: String {
         switch self {
