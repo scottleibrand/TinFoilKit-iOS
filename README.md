@@ -16,6 +16,8 @@ Press and hold an installed archive in Library to verify its checksum or remove 
 
 Library and Ask can search article text and PDF pages as indexes build. Indexing resumes after an interruption when storage is available. Results from PDFs open to the matching page. Ask can stream a cited answer on devices with Apple Intelligence, and you can turn its on-device model off from the options menu.
 
+Open **Ask options → Offline Chat** for a conversation with the model on your phone. It needs Apple Intelligence and iOS 26 or later. The conversation lasts while the chat is open. Use Ask for answers that cite your saved references. [Apple’s on-device models](https://developer.apple.com/foundation-models-framework/)
+
 In an open article, use the archive back and forward buttons to retrace followed links, and **Find on page** to search the current article. In a PDF, use **Find in document** to jump between matches. Both reader searches work offline.
 
 Use **Add bookmark** in an article or PDF, then reopen it under **Library → Reading list**. The list also keeps recent reading and reopens PDFs on the page you were viewing. Clearing recent reading keeps your bookmarks.
