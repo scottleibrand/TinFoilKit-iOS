@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
@@ -70,12 +71,36 @@ def main():
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         expect_failure([*TOOL, "verify", output], "catalog manifest does not match")
         manifest_path.write_text(original, encoding="utf-8")
-        with (output / "routing.tfkroute").open("r+b") as pack:
+        route_path = output / "routing.tfkroute"
+        with route_path.open("r+b") as pack:
             pack.seek(-1, 2)
             last_byte = pack.read(1)
             pack.seek(-1, 2)
             pack.write(bytes([last_byte[0] ^ 1]))
         expect_failure([*TOOL, "verify", output], "routing graph does not match")
+        with route_path.open("r+b") as pack:
+            pack.seek(-1, 2)
+            pack.write(last_byte)
+            pack.seek(8)
+            length, = struct.unpack("<I", pack.read(4))
+            data = pack.read(length)
+            incompatible = data.replace(b'"3.9.2"', b'"0.0.0"')
+            assert incompatible != data
+            pack.seek(12)
+            pack.write(incompatible)
+        expect_failure([*TOOL, "verify", output], "incompatible with the app")
+        with route_path.open("r+b") as pack:
+            pack.seek(12)
+            pack.write(data)
+        place_path = output / "places.sqlite"
+        original_place_path = place_path.rename(work / "original.sqlite")
+        place_path.symlink_to(original_place_path)
+        expect_failure([*TOOL, "verify", output], "places.sqlite to be a regular file")
+        place_path.unlink()
+        original_place_path.rename(place_path)
+        with sqlite3.connect(place_path) as db:
+            db.execute("DROP TABLE place_search")
+        expect_failure([*TOOL, "verify", output], "no such table: place_search")
     print("Regional bundle fixture passed.")
 
 

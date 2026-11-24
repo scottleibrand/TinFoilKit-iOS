@@ -23,6 +23,11 @@ BOUND_KEYS = ("west", "south", "east", "north")
 ATTRIBUTION = "© OpenStreetMap contributors"
 LICENSE = "ODbL-1.0"
 LICENSE_URL = "https://www.openstreetmap.org/copyright"
+ROUTING_COMPATIBILITY = {
+    "engineVersion": "3.9.2",
+    "engineCommit": "a919bb6b64d61d12f79ea5466d5cf599a39714ad",
+    "timeZoneDataVersion": "2025b",
+}
 
 
 def sha256(stream):
@@ -77,6 +82,16 @@ def validate_places(path, metadata):
         count = db.execute("SELECT count(*) FROM places").fetchone()[0]
         if not count or actual.get("placeCount") != str(count):
             raise ValueError("The place count does not match the index.")
+        db.execute("""
+            SELECT p.id, p.title, p.category, p.category_words, p.address, p.latitude, p.longitude
+            FROM place_search JOIN places AS p ON p.id = place_search.rowid
+            WHERE place_search MATCH 'TinfoilKitIndexCheck'
+            ORDER BY bm25(place_search, 4.0, 3.0, 1.0) LIMIT 1
+        """).fetchall()
+        db.execute("""
+            SELECT b.min_latitude, b.max_latitude, b.min_longitude, b.max_longitude
+            FROM place_bounds AS b JOIN places AS p ON p.id = b.id LIMIT 1
+        """).fetchall()
     bounds = tuple(float(value) for value in actual["bounds"].split(","))
     if bounds != tuple(metadata["bounds"][key] for key in BOUND_KEYS):
         raise ValueError("The place index bounds do not match the bundle.")
@@ -96,7 +111,9 @@ def validate_routing(path, metadata):
             raise ValueError("Incomplete routing manifest.")
         actual = json.loads(manifest_bytes)
         graph_bytes = path.stat().st_size - stream.tell()
-        if (actual["schemaVersion"] != 1 or graph_bytes <= 0 or graph_bytes != actual["graphByteCount"]
+        if actual["schemaVersion"] != 1 or any(actual[key] != value for key, value in ROUTING_COMPATIBILITY.items()):
+            raise ValueError("The routing pack is incompatible with the app's routing engine.")
+        if (graph_bytes <= 1024 or graph_bytes % 512 or graph_bytes != actual["graphByteCount"]
                 or sha256(stream) != actual["graphSHA256"]):
             raise ValueError("The routing graph does not match its manifest.")
     for key in ("bounds", "sourceSHA256"):
@@ -112,6 +129,8 @@ def bundle_manifest(directory, metadata):
     for kind, validate in (("places", validate_places), ("routing", validate_routing)):
         name = ASSETS[kind]
         path = directory / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"Expected {name} to be a regular file.")
         actual = validate(path, shared)
         for key in ("region", "dataVersion", "source", "attribution", "license", "licenseURL"):
             if actual[key] != shared[key]:
