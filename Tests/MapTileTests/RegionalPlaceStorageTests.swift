@@ -258,6 +258,37 @@ final class RegionalPlaceStorageTests: XCTestCase {
         }
     }
 
+    func testVerifiedPendingDownloadCanReplaceDamagedEdition() async throws {
+        let root = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pending = root.appendingPathComponent("Pending", isDirectory: true)
+        try makeRegionalBundle(at: pending, basemap: basemapFixture())
+        let directory = root.appendingPathComponent("Bundles", isDirectory: true)
+        let storage = RegionalBundleStorage(directory: directory)
+        let original = try await storage.install(pending)
+        try FileManager.default.removeItem(at: directory.appendingPathComponent(original.id.uuidString)
+            .appendingPathComponent(RegionalBundleManifest.basemapFilename))
+        let damaged = try await storage.installedBundles()
+        XCTAssertFalse(try XCTUnwrap(damaged.first).isUsable)
+
+        let state = RegionalDownloadState(directory: pending)
+        let manifestSize = try XCTUnwrap(RegionalDownloadState.regularSize(state.manifestFile))
+        let hash = try RegionalDownloadState.hash(state.manifestFile, byteCount: manifestSize)
+        let source = try RegionalBundleDownloadSource(url: "https://example.invalid/manifest.json",
+                                                      sha256: RegionalDownloadState.hex(hash))
+        var job = RegionalDownloadState.Job(source: source, cellular: false)
+        job.started = true
+        try state.save(job)
+        let downloader = RegionalBundleDownload(directory: pending)
+        let result = try await downloader.install(in: storage) { _ in }
+        XCTAssertNotEqual(result.id, original.id)
+        XCTAssertTrue(result.isUsable)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pending.path))
+        let maps = MapStorage(directory: root.appendingPathComponent("Maps"), bundledMap: nil, bundleDirectory: directory)
+        let installedMaps = try await maps.installedMaps()
+        XCTAssertEqual(installedMaps.map(\.regionalBundleID), [result.id])
+    }
+
     private func basemapFixture() -> Data {
         var bytes = Data(repeating: 0, count: 127)
         bytes.replaceSubrange(0..<7, with: "PMTiles".utf8)

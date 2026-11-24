@@ -8,7 +8,7 @@ This app is based on the original desktop Tinfoil Kit by Travis Bloom and Tudor 
 
 ## Using the app
 
-Download packs individually over Wi-Fi or choose Download Essentials or Download All to get current editions in bulk. When Wi-Fi is unavailable, open the options beside a pack’s download button to review its size and allow cellular data for that transfer. Filter by language in Content Packs to find English and Spanish editions. The Extended Library includes a larger English Wikipedia selection and iFixit guides.
+Download packs individually over Wi-Fi or choose Download Essentials or Download All to get packs in bulk. When Wi-Fi is unavailable, open the options beside a pack’s download button to review its size and allow cellular data for that transfer. Filter by language in Content Packs to find English and Spanish editions. The Extended Library includes iFixit guides, English Wikipedia highlights, and two individual downloads of complete English Wikipedia. The text-only archive is about 53 GB, and the edition with images is about 127 GB. Indexing needs additional free space. [Text-only publisher manifest](https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_nopic_2026-06.zim.meta4) · [Illustrated publisher manifest](https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-08.zim.meta4)
 
 Pack downloads retry after temporary connection failures and publisher errors. A saved cellular transfer can be resumed from its own row, and the button indicates that cellular data is allowed. Bulk downloads use Wi-Fi. When the publisher supports resuming and iOS still has the partial file, the retry picks up where it left off. Otherwise it starts the file again. [Apple’s download resumption guide](https://developer.apple.com/documentation/foundation/pausing-and-resuming-downloads)
 
@@ -37,6 +37,8 @@ Open **Map → + → Map downloads** to limit automatic downloads to Wi-Fi or tu
 Use **Map → + → Import map tiles** to add a regional PMTiles basemap from Files. **Installed basemaps** shows each map’s coverage and lets you switch between regions offline. Swipe a standalone basemap to remove it.
 
 Use **Map → + → Import regional bundle** and select a folder containing `manifest.json`, `places.sqlite`, and `routing.tfkroute`. A version 2 bundle also contains `basemap.pmtiles`. The app verifies and installs the files together and selects a basemap included in the bundle. Use **Installed regional bundles** to see the editions and sources or remove the bundle. You can still import a basemap separately for a version 1 bundle. [Regional bundle builder](Scripts/routing/README.md#regional-catalog-bundle)
+
+Use **Map → + → Download regional bundle** when you have the manifest's HTTPS URL and a trusted SHA-256 for that manifest. Review the edition, size and terms before downloading. Cellular data is off by default, and a pending job keeps the network setting chosen at review. You can pause and reopen **Download regional bundle** to resume or discard the pending job after relaunch. A publisher with a strong ETag and byte-range support can resume from the last verified checkpoint. The app verifies all files before installing the bundle.
 
 In Map, press and hold a location to copy its coordinates, set it as home, or save a named pin. Map search accepts saved place names and coordinates in decimal or degrees, minutes, and seconds. The Household tab keeps notes, home, and pins on the device.
 
@@ -105,7 +107,11 @@ For the nearby-service Ask UI test, build an index from `Tests/RegionalPlaceInde
 
 For the regional bundle import UI test, copy a valid synthetic bundle folder named `Synthetic Regional Fixture` into the app’s Documents folder on the dedicated simulator. Set the dataset region to `Routing test fixture` when preparing the bundle. The test imports and removes that edition.
 
+To exercise interrupted HTTPS downloads, use a dedicated simulator that trusts a test certificate for `127.0.0.1`. Run `python3 Tests/RegionalDownloadFixture/serve.py BUNDLE CERTIFICATE KEY CONFIGURATION` with the synthetic bundle and its test server certificate and key. Copy the generated configuration into the app’s Documents folder as `RegionalHTTPSFixture.json` and run `MapTileTests/RegionalBundleTransferTests/testResumesInterruptedHTTPSDownload`. Restart the server before each run.
+
 For the version 2 UI test, run `python Tests/RegionalBundleFixture/run.py --ui-bundle ".build/Synthetic Regional Map Fixture"` and copy that folder into the same simulator Documents folder. The test verifies automatic basemap selection, visible publisher credit, and removal.
+
+For the regional download recovery UI test, copy the same version 2 fixture into the test app’s `Library/Application Support/PendingRegionalDownload` directory on the simulator. Write `job.json` alongside the assets with `schemaVersion` set to `1`, `manifestSHA256` set to the SHA-256 of `manifest.json`, `cellular` set to `false`, and `started` set to `true`. The test reopens and installs the completed job without reaching a publisher.
 
 Run `bash Tests/NearbyPublicFixture/run.sh` on a Mac with local networking access to exercise discovery, opt-in, relay, and completion of existing transfers after discovery stops.
 
