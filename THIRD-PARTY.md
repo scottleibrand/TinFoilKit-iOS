@@ -55,6 +55,7 @@ Valhalla Mobile packages Valhalla and its dependencies. [Scripts/routing/README.
 - **Map tiles:** the app's tile cache reads the same Protomaps v4 basemap, with the same OpenStreetMap attribution and license.
 - **Content packs:** downloaded from Kiwix and its official mirrors when a user chooses them. Each pack lists its own attribution and terms in Content Packs. In summary:
   - Wikipedia packs and Appropedia: CC BY-SA. Images carry their own licenses.
+  - WikiMed Medical Encyclopedia: an English MDWiki archive downloaded directly from Kiwix. WikiProjectMed accepts CC BY-SA, CC BY and public-domain text. Media retain their individual terms. Archive sharing is disabled. [Content policy](https://www.mdwiki.org/wiki/Main_Page) · [License terms](https://www.mdwiki.org/wiki/WikiProjectMed:Copyright) · [Edition metadata](https://download.kiwix.org/zim/other/mdwiki_en_all_maxi_2025-11.zim.meta4)
   - iFixit: CC BY-NC-SA 3.0, which prohibits commercial use.
   - The water and field medicine libraries: collections of documents under their authors' individual terms.
 - **Printable references:** Household prints page ranges from installed packs. They include *Where There Is No Doctor* (Hesperian Health Guides) and Washington State Department of Health guidance, under their publishers' terms.
