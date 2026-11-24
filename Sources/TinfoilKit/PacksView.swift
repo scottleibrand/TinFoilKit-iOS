@@ -4,6 +4,7 @@ import ZIMArchive
 struct PacksView: View {
     @ObservedObject var downloads: PackDownloads
     @State private var language: PackCatalog.Language?
+    @State private var cellularPack: PublishedPack?
 
     var body: some View {
         let downloadSize = downloads.downloadAllSizeEstimate
@@ -33,7 +34,7 @@ struct PacksView: View {
                         .foregroundStyle(.secondary)
                 }
             } footer: {
-                Text("Downloads use Wi-Fi. Bulk downloads include the current editions.")
+                Text("Bulk downloads use Wi-Fi and include the current editions.")
             }
             if let error = PackCatalog.loadError {
                 Text(error).foregroundStyle(.secondary)
@@ -56,6 +57,14 @@ struct PacksView: View {
             }
         }
         .navigationTitle("Content packs")
+        .alert("Allow cellular data for this pack?", isPresented: Binding(
+            get: { cellularPack != nil }, set: { if !$0 { cellularPack = nil } }
+        ), presenting: cellularPack) { pack in
+            Button("Allow cellular data") { downloads.start(pack, network: .cellularAllowed) }
+            Button("Cancel", role: .cancel) {}
+        } message: { pack in
+            Text("\(pack.title) is about \(pack.sizeEstimate.formatted(.byteCount(style: .file))). Switching download modes may restart the transfer.")
+        }
     }
 
     private func row(for entry: PackDownloads.CatalogEntry) -> some View {
@@ -83,26 +92,41 @@ struct PacksView: View {
     private func controls(for pack: PublishedPack) -> some View {
         switch downloads.statuses[pack.editionKey] {
         case let .downloading(fraction):
+            let label = downloads.allowsCellular(for: pack) ? "Downloading · cellular allowed" : "Downloading"
             if let fraction {
-                ProgressView(value: fraction) { Text("Downloading") }
+                ProgressView(value: fraction) { Text(label) }
             } else {
-                ProgressView("Downloading")
+                ProgressView(label)
             }
             Button("Pause") { downloads.pause(pack) }
         case .pausing:
             ProgressView("Pausing")
         case .paused:
-            Button("Resume download") { downloads.start(pack) }
+            downloadControls("Resume download", pack: pack)
         case .verifying:
             ProgressView("Verifying archive")
         case .installed:
             Label("Installed", systemImage: "checkmark.circle")
         case let .failed(message):
             Text(message).font(.footnote).foregroundStyle(.secondary)
-            Button("Retry download") { downloads.start(pack) }
+            downloadControls("Retry download", pack: pack)
         case nil:
-            Button("Download") { downloads.start(pack) }
-                .disabled(downloads.restoring)
+            downloadControls("Download", pack: pack)
         }
+    }
+
+    private func downloadControls(_ title: String, pack: PublishedPack) -> some View {
+        HStack {
+            Button(title) { downloads.start(pack) }
+            Menu {
+                Button("Allow cellular data…", systemImage: "antenna.radiowaves.left.and.right") {
+                    cellularPack = pack
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle").accessibilityLabel("Download options")
+            }
+        }
+        .buttonStyle(.borderless)
+        .disabled(downloads.restoring)
     }
 }

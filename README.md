@@ -8,7 +8,7 @@ This app is based on the original desktop Tinfoil Kit by Travis Bloom and Tudor 
 
 ## Using the app
 
-Download packs individually over Wi-Fi or choose Download Essentials or Download All to get current editions in bulk. Filter by language in Content Packs to find English and Spanish editions. The Extended Library includes a larger English Wikipedia selection and iFixit guides.
+Download packs individually over Wi-Fi or choose Download Essentials or Download All to get current editions in bulk. When Wi-Fi is unavailable, open the options beside a pack’s download button to review its size and allow cellular data for that transfer. Filter by language in Content Packs to find English and Spanish editions. The Extended Library includes a larger English Wikipedia selection and iFixit guides.
 
 Press and hold an installed archive in Library to verify its checksum or remove it. Catalog packs use the publisher’s SHA-256 checksum. Files imports use the ZIM’s embedded checksum to check for corruption. Catalog packs also support repair and updates. Repair replaces a same-edition copy after checksum verification. An update keeps the earlier edition and its index available until the new one is verified and searchable.
 
