@@ -22,6 +22,9 @@ TFKResource *tfk_archive_resource(const TFKArchive *archive, const char *path, c
 /* Returns a non-redirect HTML article at a URL-table index. A null result
  * with no error means the entry is outside the searchable article set. */
 TFKResource *tfk_archive_article(const TFKArchive *archive, uint32_t index, char **error);
+/* Returns at most maximum_bytes of an HTML article for indexing. An unreadable
+ * compressed cluster can be skipped with a null result and no error. */
+TFKResource *tfk_archive_article_prefix(const TFKArchive *archive, uint32_t index, size_t maximum_bytes, char **error);
 
 /* Returns a non-redirect PDF entry without reading the PDF bytes. A null
  * result with no error means the entry is not a PDF. */

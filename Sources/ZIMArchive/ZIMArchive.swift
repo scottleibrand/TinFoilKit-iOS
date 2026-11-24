@@ -101,16 +101,21 @@ public final class ZIMArchive {
 
     func article(at index: UInt32, maximumBytes: Int?) throws -> Resource? {
         var error: UnsafeMutablePointer<CChar>?
-        guard let resource = tfk_archive_article(archive, index, &error) else {
+        let resource = if let maximumBytes {
+            tfk_archive_article_prefix(archive, index, max(0, maximumBytes), &error)
+        } else {
+            tfk_archive_article(archive, index, &error)
+        }
+        guard let resource else {
             if let error {
                 throw Self.readError(error, fallback: "The archive article could not be read.")
             }
             return nil
         }
-        return try Self.read(resource, maximumBytes: maximumBytes)
+        return try Self.read(resource)
     }
 
-    private static func read(_ resource: OpaquePointer, maximumBytes: Int? = nil) throws -> Resource {
+    private static func read(_ resource: OpaquePointer) throws -> Resource {
         defer { tfk_resource_close(resource) }
         var count = 0
         guard let bytes = tfk_resource_bytes(resource, &count) else {
@@ -120,7 +125,7 @@ public final class ZIMArchive {
             path: String(cString: tfk_resource_path(resource)),
             title: String(cString: tfk_resource_title(resource)),
             mimeType: String(cString: tfk_resource_mime(resource)),
-            data: Data(bytes: bytes, count: min(count, maximumBytes ?? count))
+            data: Data(bytes: bytes, count: count)
         )
     }
 
