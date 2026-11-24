@@ -65,6 +65,8 @@ Two-artifact bundles use schema version 1. A basemap adds `basemap.pmtiles` and 
 
 Production extracts use OpenStreetMap data. Preserve the copyright notice, ODbL terms and source edition when redistributing the files. Verify additional publisher terms before publishing. Keep downloaded extracts, generated indexes and routing graphs out of Git.
 
+The [Seattle candidate](SEATTLE-CANDIDATE.md) records verified source editions, checksums and the procedure for building a real three-artifact bundle.
+
 Run the end-to-end producer fixture with the same Python and Docker setup.
 
 ```sh
