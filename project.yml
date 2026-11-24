@@ -16,6 +16,8 @@ targets:
     platform: iOS
     sources:
       - Sources/TinfoilKit
+      - path: Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
       - path: Resources/NearbyPublic/household-check-in-v1.txt
         buildPhase: resources
       - path: .build/map-assets
@@ -110,7 +112,10 @@ targets:
   ZIMArchive:
     type: framework
     platform: iOS
-    sources: [Sources/ZIMArchive]
+    sources:
+      - Sources/ZIMArchive
+      - path: Resources/ZIMArchive/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
       - package: SwiftSoup
       - sdk: libsqlite3.tbd
