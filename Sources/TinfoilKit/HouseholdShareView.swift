@@ -9,6 +9,8 @@ struct HouseholdShareView: View {
     @State private var includeNotes = false
     @State private var includeHome = false
     @State private var includePins = false
+    @State private var includeWorksheet = false
+    @State private var publicWorksheet: String?
 
     var body: some View {
         Form {
@@ -16,7 +18,10 @@ struct HouseholdShareView: View {
                 if hasNotes { Toggle("Notes", isOn: $includeNotes).disabled(session.running) }
                 if snapshot.home != nil { Toggle("Home location", isOn: $includeHome).disabled(session.running) }
                 if !snapshot.pins.isEmpty { Toggle("Saved pins", isOn: $includePins).disabled(session.running) }
-                if !hasNotes && snapshot.home == nil && snapshot.pins.isEmpty {
+                if publicWorksheet != nil {
+                    Toggle("Public check-in worksheet", isOn: $includeWorksheet).disabled(session.running)
+                }
+                if !hasNotes && snapshot.home == nil && snapshot.pins.isEmpty && publicWorksheet == nil {
                     Text("Add household information before sharing.").foregroundStyle(.secondary)
                 }
             }
@@ -41,6 +46,11 @@ struct HouseholdShareView: View {
             }
         }
         .navigationTitle("Share on local network")
+        .task {
+            if let bytes = NearbyPublicReference().loadVerified() {
+                publicWorksheet = String(data: bytes, encoding: .utf8)
+            }
+        }
         .onDisappear { session.stop() }
         .onChange(of: scenePhase) {
             if scenePhase == .background { session.stop() }
@@ -55,10 +65,10 @@ struct HouseholdShareView: View {
                 notes: includeNotes ? snapshot.notes : "",
                 home: includeHome ? snapshot.home : nil,
                 pins: includePins ? snapshot.pins : []
-            ))
+            ), publicWorksheet: includeWorksheet ? publicWorksheet : nil)
         }
         .disabled(!((includeNotes && hasNotes) || (includeHome && snapshot.home != nil) ||
-                    (includePins && !snapshot.pins.isEmpty)))
+                    (includePins && !snapshot.pins.isEmpty) || (includeWorksheet && publicWorksheet != nil)))
     }
 }
 
@@ -82,10 +92,10 @@ private final class HouseholdShareSession: ObservableObject {
         }
     }
 
-    func start(_ snapshot: HouseholdSnapshot) {
+    func start(_ snapshot: HouseholdSnapshot, publicWorksheet: String?) {
         guard attempt == nil else { return }
         let id = UUID()
-        let page = HouseholdSharePage(snapshot: snapshot)
+        let page = HouseholdSharePage(snapshot: snapshot, publicWorksheet: publicWorksheet)
         attempt = id
         state = .starting
         // Bound the wait even if path discovery does not report an interface.
