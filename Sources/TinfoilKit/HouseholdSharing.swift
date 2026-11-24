@@ -59,7 +59,9 @@ struct HouseholdShareAddress: Equatable, Sendable {
 }
 
 struct HouseholdSharePage: Sendable {
+    static let basePolicy = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
     let body: Data
+    let contentSecurityPolicy: String
 
     init(snapshot: HouseholdSnapshot, publicWorksheet: String? = nil) {
         var content = ""
@@ -75,6 +77,8 @@ struct HouseholdSharePage: Sendable {
         if let publicWorksheet {
             content += "<section><h2>Public check-in worksheet</h2><p>\(Self.escape(publicWorksheet))</p></section>"
         }
+        let nonce = UUID().uuidString
+        contentSecurityPolicy = "\(Self.basePolicy); script-src 'nonce-\(nonce)'"
         let html = """
         <!doctype html>
         <html lang="en">
@@ -84,12 +88,55 @@ struct HouseholdSharePage: Sendable {
         :root{color-scheme:light dark}body{margin:2rem auto;padding:0 1.25rem;max-width:42rem;font:1rem/1.55 system-ui,sans-serif}
         h1,h2{line-height:1.2}section{border-top:1px solid GrayText;margin:1.4rem 0}
         p{white-space:pre-wrap;overflow-wrap:anywhere}.coordinates{font-variant-numeric:tabular-nums}
+        input{display:block;box-sizing:border-box;width:100%;font:inherit;padding:.5rem;margin:.3rem 0}
         </style>
-        <main><h1>Household information</h1>\(content)</main>
+        <main>
+        <h1>Household information</h1>
+        <div id="search" hidden role="search">
+        <label for="query">Find in shared information</label>
+        <input id="query" type="search" maxlength="120" autocomplete="off">
+        <p id="search-status" role="status"></p>
+        </div>
+        \(content)
+        </main>
+        <script nonce="\(nonce)">\(Self.searchScript)</script>
         </html>
         """
         body = Data(html.utf8)
     }
+
+    private static let searchScript = #"""
+        const search = document.querySelector("#search");
+        const input = document.querySelector("#query");
+        const status = document.querySelector("#search-status");
+        const sections = Array.from(document.querySelectorAll("main > section"));
+        if (sections.length) {
+            search.hidden = false;
+            const normalize = text => text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+            const entries = sections.map(section => {
+                const pins = Array.from(section.querySelectorAll("article"));
+                return { section, pins, text: normalize(section.textContent),
+                         pinText: pins.map(pin => normalize(pin.textContent)) };
+            });
+            input.addEventListener("input", () => {
+                const query = normalize(input.value.trim().slice(0, 120));
+                let matched = false;
+                for (const entry of entries) {
+                    if (entry.pins.length) {
+                        const heading = normalize(entry.section.querySelector("h2").textContent);
+                        entry.pins.forEach((pin, i) => {
+                            pin.hidden = !heading.includes(query) && !entry.pinText[i].includes(query);
+                        });
+                        entry.section.hidden = entry.pins.every(pin => pin.hidden);
+                    } else {
+                        entry.section.hidden = !entry.text.includes(query);
+                    }
+                    matched ||= !entry.section.hidden;
+                }
+                status.textContent = matched ? "" : "No matches in shared information.";
+            });
+        }
+        """#
 
     private static func place(_ place: HouseholdPlace) -> String {
         var fragment = "<article><h3>\(escape(place.name))</h3>"
@@ -233,7 +280,8 @@ final class HouseholdShareServer: @unchecked Sendable {
               tokenMatches(request[1]) else {
             return response(status: "404 Not Found", type: "text/plain; charset=utf-8", body: Data(unavailable.utf8))
         }
-        return response(status: "200 OK", type: "text/html; charset=utf-8", body: page.body, headOnly: request[0] == "HEAD")
+        return response(status: "200 OK", type: "text/html; charset=utf-8", body: page.body,
+                        headOnly: request[0] == "HEAD", contentSecurityPolicy: page.contentSecurityPolicy)
     }
 
     private func tokenMatches(_ path: Substring) -> Bool {
@@ -243,12 +291,13 @@ final class HouseholdShareServer: @unchecked Sendable {
         return difference == 0
     }
 
-    private func response(status: String, type: String, body: Data, headOnly: Bool = false) -> Data {
+    private func response(status: String, type: String, body: Data, headOnly: Bool = false,
+                          contentSecurityPolicy: String = HouseholdSharePage.basePolicy) -> Data {
         let headers = [
             "HTTP/1.1 \(status)", "Content-Type: \(type)", "Content-Length: \(body.count)",
             "Connection: close", "Cache-Control: no-store", "Referrer-Policy: no-referrer",
             "X-Content-Type-Options: nosniff", "X-Frame-Options: DENY",
-            "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
+            "Content-Security-Policy: \(contentSecurityPolicy)"
         ]
         var response = Data((headers.joined(separator: "\r\n") + "\r\n\r\n").utf8)
         if !headOnly { response.append(body) }

@@ -44,6 +44,12 @@ enum VerifyHouseholdSharing {
         precondition(!received.contains("<h2>Pins</h2>"))
         precondition(!received.contains("Public check-in worksheet"))
         precondition(http?.value(forHTTPHeaderField: "Cache-Control") == "no-store")
+        let policy = http?.value(forHTTPHeaderField: "Content-Security-Policy")
+        precondition(policy == page.contentSecurityPolicy)
+        precondition(policy?.contains("default-src 'none'") == true)
+        precondition(policy?.contains("script-src 'nonce-") == true)
+        precondition(received.contains("Find in shared information"))
+        precondition(received.contains("<script nonce="))
 
         guard case .expired = await iterator.next() else { fatalError("Unconfirmed expiry") }
         do {

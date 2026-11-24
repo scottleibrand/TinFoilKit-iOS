@@ -48,7 +48,7 @@ In Map, press and hold a location to copy its coordinates, set it as home, or sa
 
 In **Household → Import and export**, save a household backup to Files or restore one on another iPhone. The same screen imports and exports the desktop kit’s `notes.txt` and `places.json` files individually. If the local household file is damaged, restoring a backup or starting a new household keeps a separate copy of the damaged file.
 
-In **Household → Share on local network**, select household details or the verified public check-in worksheet and start a browser session on a trusted Wi-Fi or Ethernet network with IPv4. The link uses unencrypted HTTP. Anyone on that network who has the link or can watch its traffic can read the selection. The session ends after ten minutes, when you leave the screen, or when you stop it.
+In **Household → Share on local network**, select household details or the verified public check-in worksheet and start a browser session on a trusted Wi-Fi or Ethernet network with IPv4. The link uses unencrypted HTTP. Anyone on that network who has the link or can watch its traffic can read the selection. Guests can search the shared page in their browser. The session ends after ten minutes, when you leave the screen, or when you stop it.
 
 Use Print the Essentials in Household for a printable copy of your household information and selected pages from installed references. Install a regional place index to include the nearest services to your saved home.
 
