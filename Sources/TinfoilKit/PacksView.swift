@@ -57,10 +57,11 @@ struct PacksView: View {
             }
         }
         .navigationTitle("Content packs")
-        .confirmationDialog("Allow cellular data for this pack?", isPresented: Binding(
+        .alert("Allow cellular data for this pack?", isPresented: Binding(
             get: { cellularPack != nil }, set: { if !$0 { cellularPack = nil } }
-        ), titleVisibility: .visible, presenting: cellularPack) { pack in
+        ), presenting: cellularPack) { pack in
             Button("Allow cellular data") { downloads.start(pack, network: .cellularAllowed) }
+            Button("Cancel", role: .cancel) {}
         } message: { pack in
             Text("\(pack.title) is about \(pack.sizeEstimate.formatted(.byteCount(style: .file))). Switching download modes may restart the transfer.")
         }
