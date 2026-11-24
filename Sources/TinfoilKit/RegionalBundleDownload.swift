@@ -1,14 +1,16 @@
-import CryptoKit
 import Foundation
 
 struct RegionalBundleDownloadSource: Sendable {
+    static let maximumURLBytes = 4_096
+
     let url: URL
     let sha256: String
 
     init(url: String, sha256: String) throws {
         let address = url.trimmingCharacters(in: .whitespacesAndNewlines)
         let digest = sha256.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard let parsed = URL(string: address), RegionalBundleManifest.isHTTPS(parsed),
+        guard address.utf8.count <= Self.maximumURLBytes, let parsed = URL(string: address),
+              parsed.absoluteString.utf8.count <= Self.maximumURLBytes, RegionalBundleManifest.isHTTPS(parsed),
               RegionalBundleManifest.isSHA256(digest) else { throw RegionalBundleDownloadError.invalidSource }
         self.url = parsed
         self.sha256 = digest
@@ -17,6 +19,7 @@ struct RegionalBundleDownloadSource: Sendable {
 
 enum RegionalBundleDownloadError: LocalizedError, Equatable {
     case invalidSource, busy, manifestDigest, size, response, incomplete, storage
+    case pendingDownload, invalidCheckpoint
     case http(Int)
 
     var errorDescription: String? {
@@ -35,6 +38,10 @@ enum RegionalBundleDownloadError: LocalizedError, Equatable {
             "The transfer ended before all of the file arrived. Retry to continue."
         case .storage:
             "Free some storage for the download and the installed regional bundle, then retry."
+        case .pendingDownload:
+            "Resume or discard the pending regional download before starting another one."
+        case .invalidCheckpoint:
+            "The saved regional download could not be verified. Discard it to start again."
         case .http(let status):
             "The publisher returned HTTP \(status)."
         }
@@ -47,112 +54,129 @@ actor RegionalBundleDownload {
         case installing
     }
 
-    private let directory = URL.temporaryDirectory.appendingPathComponent("RegionalDownload-\(UUID().uuidString)",
-                                                                          isDirectory: true)
-    private var validators: [String: String] = [:]
-    private var manifest: RegionalBundleManifest?
+    struct Pending: Sendable {
+        let manifest: RegionalBundleManifest
+        let cellular: Bool
+        let started: Bool
+    }
+
+    static let shared = RegionalBundleDownload(directory: URL.applicationSupportDirectory
+        .appendingPathComponent("PendingRegionalDownload", isDirectory: true))
+    private let state: RegionalDownloadState
     private var busy = false
 
-    deinit { try? FileManager.default.removeItem(at: directory) }
+    init(directory: URL) {
+        state = RegionalDownloadState(directory: directory)
+    }
 
-    func load(_ source: RegionalBundleDownloadSource, cellular: Bool) async throws -> RegionalBundleManifest {
+    func pending() throws -> Pending? {
         guard !busy else { throw RegionalBundleDownloadError.busy }
+        guard let job = try state.job() else { return nil }
+        return try pending(for: job)
+    }
+
+    func load(_ source: RegionalBundleDownloadSource, cellular: Bool) async throws -> Pending {
+        guard !busy else { throw RegionalBundleDownloadError.busy }
+        guard try state.job() == nil else { throw RegionalBundleDownloadError.pendingDownload }
         busy = true
         defer { busy = false }
-        manifest = nil
-        validators.removeAll()
-        let files = FileManager.default
-        if files.fileExists(atPath: directory.path) { try files.removeItem(at: directory) }
-        try files.createDirectory(at: directory, withIntermediateDirectories: true)
-        let file = directory.appendingPathComponent("manifest.json")
+        var committed = false
+        defer { if !committed { try? state.discard() } }
+        try state.prepare()
+
         let outcome = await RegionalBundleTransfer.receive(
-            source.url, to: file, limit: Int64(RegionalBundleManifest.maximumManifestBytes),
+            source.url, to: state.manifestFile, limit: Int64(RegionalBundleManifest.maximumManifestBytes),
             size: nil, offset: 0, validator: nil, cellular: cellular
         ) { _ in }
         try Task.checkCancellation()
         if let error = outcome.error { throw error }
-        guard try Self.digest(file) == source.sha256 else { throw RegionalBundleDownloadError.manifestDigest }
-        let validated = try RegionalBundleManifest.read(from: file)
-        manifest = validated
-        return validated
+        let job = RegionalDownloadState.Job(source: source, cellular: cellular)
+        let pending = try pending(for: job)
+        try state.save(job)
+        committed = true
+        return pending
     }
 
-    func install(in storage: RegionalBundleStorage, cellular: Bool,
+    func discard() throws {
+        guard !busy else { throw RegionalBundleDownloadError.busy }
+        try state.discard()
+    }
+
+    func install(in storage: RegionalBundleStorage,
                  progress: @escaping @Sendable (Progress) -> Void) async throws -> RegionalBundleStorage.Installed {
         guard !busy else { throw RegionalBundleDownloadError.busy }
-        guard let manifest else { throw RegionalBundleManifest.Error.invalidManifest }
+        guard var job = try state.job() else { throw RegionalBundleDownloadError.invalidCheckpoint }
+        let manifest = try pending(for: job).manifest
         busy = true
         defer { busy = false }
-        let assets = manifest.assets.downloadFiles
+        if let installed = try await storage.installedBundles().first(where: { $0.manifest == manifest }) {
+            try? state.discard()
+            return installed
+        }
+        job.started = true
+        try state.save(job)
+
+        let assets = manifest.assets.downloadFiles.map { state.asset($0, job: job) }
         let total = manifest.assets.downloadByteCount
         let (stagingBytes, stagingOverflow) = total.addingReportingOverflow(manifest.assets.routing.byteCount)
-        let remaining = assets.reduce(Int64(0)) { $0 + $1.byteCount - savedSize(of: $1) }
+        let remaining = assets.reduce(Int64(0)) { total, asset in
+            let size = RegionalDownloadState.regularSize(asset.file) ?? 0
+            return total + asset.expected.byteCount - min(size, asset.expected.byteCount)
+        }
         let (needed, totalOverflow) = stagingBytes.addingReportingOverflow(remaining)
         guard !stagingOverflow, !totalOverflow else { throw RegionalBundleDownloadError.storage }
-        if let available = try directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        if let available = try state.directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             .volumeAvailableCapacityForImportantUsage, available < needed { throw RegionalBundleDownloadError.storage }
 
         var previousBytes: Int64 = 0
         for asset in assets {
             let base = previousBytes
-            try await fetch(asset, cellular: cellular) { offset in
-                progress(.receiving(asset.filename, base + offset, total))
+            try await fetch(asset, cellular: job.cellular) { offset in
+                progress(.receiving(asset.expected.filename, base + offset, total))
             }
-            previousBytes += asset.byteCount
+            previousBytes += asset.expected.byteCount
         }
         try Task.checkCancellation()
         progress(.installing)
-        let installed = try await storage.install(directory)
-        try? FileManager.default.removeItem(at: directory)
-        self.manifest = nil
-        validators.removeAll()
+        let installed = try await storage.install(state.directory)
+        try? state.discard()
         return installed
     }
 
-    private func savedSize(of asset: RegionalBundleManifest.Asset) -> Int64 {
-        let file = directory.appendingPathComponent(asset.filename)
-        let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
-        return (0...asset.byteCount).contains(size) ? size : 0
+    private func pending(for job: RegionalDownloadState.Job) throws -> Pending {
+        guard let size = RegionalDownloadState.regularSize(state.manifestFile),
+              (1...Int64(RegionalBundleManifest.maximumManifestBytes)).contains(size) else {
+            throw RegionalBundleDownloadError.invalidCheckpoint
+        }
+        let hash = try RegionalDownloadState.hash(state.manifestFile, byteCount: size)
+        guard RegionalDownloadState.hex(hash) == job.manifestSHA256 else {
+            throw RegionalBundleDownloadError.manifestDigest
+        }
+        let manifest = try RegionalBundleManifest.read(from: state.manifestFile)
+        return Pending(manifest: manifest, cellular: job.cellular, started: job.started)
     }
 
-    private func fetch(_ asset: RegionalBundleManifest.Asset, cellular: Bool,
+    private func fetch(_ asset: RegionalDownloadState.Asset, cellular: Bool,
                        progress: @escaping @Sendable (Int64) -> Void) async throws {
         try Task.checkCancellation()
-        let file = directory.appendingPathComponent(asset.filename)
-        if savedSize(of: asset) == asset.byteCount, try Self.digest(file) == asset.sha256 {
-            progress(asset.byteCount)
+        let expected = asset.expected
+        if try asset.verified() {
+            progress(expected.byteCount)
             return
         }
-        let validator = validators[asset.filename]
-        let saved = savedSize(of: asset)
-        let offset = validator != nil && saved < asset.byteCount ? saved : 0
+        let resume = try asset.resume()
+        if resume == nil { try asset.reset() }
+        let offset = resume?.offset ?? 0
         progress(offset)
         let outcome = await RegionalBundleTransfer.receive(
-            asset.url, to: file, limit: asset.byteCount, size: asset.byteCount,
-            offset: offset, validator: validator, cellular: cellular, progress: progress
+            expected.url, to: asset.file, limit: expected.byteCount, size: expected.byteCount,
+            offset: offset, validator: resume?.validator, cellular: cellular, checkpoint: asset, progress: progress
         )
-        validators[asset.filename] = outcome.validator
-        if let error = outcome.error {
-            if outcome.validator == nil { try? FileManager.default.removeItem(at: file) }
-            try Task.checkCancellation()
-            throw error
-        }
         try Task.checkCancellation()
-        guard try Self.digest(file) == asset.sha256 else {
-            validators[asset.filename] = nil
-            try? FileManager.default.removeItem(at: file)
-            throw RegionalBundleManifest.Error.invalidArtifact(asset.filename)
+        if let error = outcome.error { throw error }
+        guard try asset.verified() else {
+            try asset.reset()
+            throw RegionalBundleManifest.Error.invalidArtifact(expected.filename)
         }
-    }
-
-    private static func digest(_ file: URL) throws -> String {
-        let input = try FileHandle(forReadingFrom: file)
-        defer { try? input.close() }
-        var hash = SHA256()
-        while let bytes = try input.read(upToCount: 1024 * 1024), !bytes.isEmpty {
-            try Task.checkCancellation()
-            hash.update(data: bytes)
-        }
-        return hash.finalize().map { String(format: "%02x", $0) }.joined()
     }
 }
