@@ -4,12 +4,16 @@ import SwiftUI
 
 struct HouseholdShareView: View {
     let snapshot: HouseholdSnapshot
+    let canAcceptGuestNotes: Bool
+    let appendGuestNote: (String) throws -> Void
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var session = HouseholdShareSession()
     @State private var includeNotes = false
     @State private var includeHome = false
     @State private var includePins = false
     @State private var includeWorksheet = false
+    @State private var acceptGuestNotes = false
+    @State private var noteError: String?
     @State private var publicWorksheet: String?
 
     var body: some View {
@@ -23,6 +27,23 @@ struct HouseholdShareView: View {
                 }
                 if !hasNotes && snapshot.home == nil && snapshot.pins.isEmpty && publicWorksheet == nil {
                     Text("Add household information before sharing.").foregroundStyle(.secondary)
+                }
+            }
+            Section {
+                Toggle("Allow guests to send notes", isOn: $acceptGuestNotes)
+                    .disabled(session.running || !canAcceptGuestNotes)
+            } footer: {
+                Text("Review notes on this phone before adding them to Household.")
+            }
+            if let note = session.proposedNote {
+                Section("Guest note") {
+                    Text(note).textSelection(.enabled)
+                    Button("Append to household notes") { append(note) }
+                    Button("Discard", role: .destructive) {
+                        noteError = nil
+                        session.finishNoteReview()
+                    }
+                    if let noteError { Text(noteError).foregroundStyle(.secondary) }
                 }
             }
             Section {
@@ -57,6 +78,16 @@ struct HouseholdShareView: View {
         }
     }
 
+    private func append(_ note: String) {
+        do {
+            try appendGuestNote(note)
+            noteError = nil
+            session.finishNoteReview()
+        } catch {
+            noteError = error.localizedDescription
+        }
+    }
+
     private var hasNotes: Bool { !snapshot.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     private var startSharing: some View {
@@ -65,10 +96,12 @@ struct HouseholdShareView: View {
                 notes: includeNotes ? snapshot.notes : "",
                 home: includeHome ? snapshot.home : nil,
                 pins: includePins ? snapshot.pins : []
-            ), publicWorksheet: includeWorksheet ? publicWorksheet : nil)
+            ), publicWorksheet: includeWorksheet ? publicWorksheet : nil,
+               acceptsNotes: acceptGuestNotes && canAcceptGuestNotes)
         }
         .disabled(!((includeNotes && hasNotes) || (includeHome && snapshot.home != nil) ||
-                    (includePins && !snapshot.pins.isEmpty) || (includeWorksheet && publicWorksheet != nil)))
+                    (includePins && !snapshot.pins.isEmpty) || (includeWorksheet && publicWorksheet != nil) ||
+                    (acceptGuestNotes && canAcceptGuestNotes)))
     }
 }
 
@@ -79,6 +112,7 @@ private final class HouseholdShareSession: ObservableObject {
     }
 
     @Published private(set) var state: State = .idle
+    @Published private(set) var proposedNote: String?
     private var server: HouseholdShareServer?
     private var monitor: NWPathMonitor?
     private var startup: Task<Void, Never>?
@@ -92,10 +126,10 @@ private final class HouseholdShareSession: ObservableObject {
         }
     }
 
-    func start(_ snapshot: HouseholdSnapshot, publicWorksheet: String?) {
+    func start(_ snapshot: HouseholdSnapshot, publicWorksheet: String?, acceptsNotes: Bool) {
         guard attempt == nil else { return }
         let id = UUID()
-        let page = HouseholdSharePage(snapshot: snapshot, publicWorksheet: publicWorksheet)
+        let page = HouseholdSharePage(snapshot: snapshot, publicWorksheet: publicWorksheet, acceptsNotes: acceptsNotes)
         attempt = id
         state = .starting
         // Bound the wait even if path discovery does not report an interface.
@@ -114,6 +148,11 @@ private final class HouseholdShareSession: ObservableObject {
         monitor.start(queue: DispatchQueue(label: "org.tinfoilkit.share-path"))
     }
 
+    func finishNoteReview() {
+        proposedNote = nil
+        server?.finishNoteReview()
+    }
+
     func stop() {
         end(.idle)
     }
@@ -127,6 +166,7 @@ private final class HouseholdShareSession: ObservableObject {
         server?.stop()
         server = nil
         address = nil
+        proposedNote = nil
         state = newState
     }
 
@@ -158,6 +198,8 @@ private final class HouseholdShareSession: ObservableObject {
             startup?.cancel()
             startup = nil
             state = .ready(url)
+        case let .noteProposed(note):
+            proposedNote = note
         case let .failed(error):
             end(.message(error))
         case .expired:
