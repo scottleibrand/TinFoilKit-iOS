@@ -21,12 +21,14 @@ struct PackDownloadAttempt: Sendable {
     let key: String
     let retryCount: Int
     let retriedChecksum: Bool
+    let usesMirror: Bool
     private static let delays: [TimeInterval] = [2, 5, 15]
     private static let checksumPrefix = "checksum-retry:"
 
-    init(key: String, retryCount: Int = 0, retriedChecksum: Bool = false) {
+    init(key: String, retryCount: Int = 0, usesMirror: Bool = false, retriedChecksum: Bool = false) {
         self.key = key
         self.retryCount = retryCount
+        self.usesMirror = usesMirror
         self.retriedChecksum = retriedChecksum
     }
 
@@ -39,22 +41,42 @@ struct PackDownloadAttempt: Sendable {
         if parts.count == 1 {
             self.init(key: String(key), retriedChecksum: retriedChecksum)
         } else {
-            guard parts.count == 2, let count = Int(parts[1]), (1...Self.delays.count).contains(count) else { return nil }
-            self.init(key: String(key), retryCount: count, retriedChecksum: retriedChecksum)
+            guard let count = Int(parts[1]), (0...Self.delays.count).contains(count) else { return nil }
+            let mirror = parts.count == 3 && parts[2] == "mirror"
+            guard mirror || (parts.count == 2 && count > 0) else { return nil }
+            self.init(key: String(key), retryCount: count, usesMirror: mirror, retriedChecksum: retriedChecksum)
         }
     }
 
     var taskDescription: String {
-        let payload = retryCount == 0 ? key : "\(key)|\(retryCount)"
+        let payload = if usesMirror {
+            "\(key)|\(retryCount)|mirror"
+        } else {
+            retryCount == 0 ? key : "\(key)|\(retryCount)"
+        }
         return retriedChecksum ? Self.checksumPrefix + payload : payload
     }
 
     var transportRetry: Self {
-        Self(key: key, retryCount: retryCount + 1, retriedChecksum: retriedChecksum)
+        Self(key: key, retryCount: retryCount + 1, usesMirror: usesMirror, retriedChecksum: retriedChecksum)
     }
 
     var checksumRetry: Self? {
-        retriedChecksum ? nil : Self(key: key, retriedChecksum: true)
+        retriedChecksum ? nil : Self(key: key, usesMirror: usesMirror, retriedChecksum: true)
+    }
+
+    var mirror: Self { Self(key: key, usesMirror: true, retriedChecksum: retriedChecksum) }
+
+    func canTryMirror(for error: NSError) -> Bool {
+        guard !usesMirror, error.domain == NSURLErrorDomain else { return false }
+        switch URLError.Code(rawValue: error.code) {
+        case .timedOut, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed: return true
+        default: return false
+        }
+    }
+
+    func canTryMirror(for response: HTTPURLResponse) -> Bool {
+        !usesMirror && [404, 410, 408, 500, 502, 503, 504].contains(response.statusCode)
     }
 
     func retryDelay(for error: NSError) -> TimeInterval? {
@@ -190,6 +212,12 @@ final class PackDownloads: ObservableObject {
 
     func resumesOnCellular(for pack: PublishedPack) -> Bool {
         transfer.resumeNetwork(pack.editionKey) == .cellularAllowed
+    }
+
+    func activeMirrorHost(for pack: PublishedPack) -> String? {
+        guard let task = tasks[pack.editionKey]?.task,
+              PackDownloadAttempt(description: task.taskDescription)?.usesMirror == true else { return nil }
+        return PackCatalog.fallbackMirror(for: pack)?.host
     }
 
     func startAll() {
@@ -367,15 +395,24 @@ final class PackDownloads: ObservableObject {
         }
         for pack in packs {
             let key = pack.editionKey
+            let usesMirror = PackCatalog.fallbackMirror(for: pack) != nil
+                && transfer.hasMirrorResume(key, network: network)
             let previous = transfer.verificationContext(key)
+            let previousAttempt = previous?.attempt(for: key)
             let resumedChecksumRetry = transfer.hasResume(key, network: network) && previous?.network == network
-                && previous?.attempt(for: key)?.retriedChecksum == true
-            beginDownload(pack, network: network, attempt: PackDownloadAttempt(key: key, retriedChecksum: resumedChecksumRetry))
+                && previousAttempt?.usesMirror == usesMirror && previousAttempt?.retriedChecksum == true
+            let attempt = PackDownloadAttempt(key: key, usesMirror: usesMirror, retriedChecksum: resumedChecksumRetry)
+            beginDownload(pack, network: network, attempt: attempt)
         }
     }
 
     private func beginDownload(_ pack: PublishedPack, network: PackDownloadNetwork, attempt: PackDownloadAttempt,
                                delay: TimeInterval? = nil) {
+        let source = attempt.usesMirror ? PackCatalog.fallbackMirror(for: pack) : pack.source
+        guard let source else {
+            statuses[attempt.key] = .failed("This edition’s mirror is no longer in the catalog.")
+            return
+        }
         do {
             let verification = PackTransfer.VerificationContext(attempt: attempt, network: network, host: nil)
             try transfer.recordVerification(verification, key: attempt.key)
@@ -384,12 +421,12 @@ final class PackDownloads: ObservableObject {
             return
         }
         let session = transfer.session(for: network)
-        let resumeURL = transfer.resumeURL(attempt.key, network: network)
+        let resumeURL = transfer.resumeURL(attempt.key, network: network, usesMirror: attempt.usesMirror)
         let task: URLSessionDownloadTask
         if let resume = try? Data(contentsOf: resumeURL) {
             task = session.downloadTask(withResumeData: resume)
         } else {
-            task = session.downloadTask(with: pack.source)
+            task = session.downloadTask(with: source)
         }
         task.taskDescription = attempt.taskDescription
         if let delay { task.earliestBeginDate = Date().addingTimeInterval(delay) }
@@ -414,11 +451,14 @@ final class PackDownloads: ObservableObject {
     func pause(_ pack: PublishedPack) {
         let key = pack.editionKey
         guard let active = tasks.removeValue(forKey: key) else { return }
+        let usesMirror = PackDownloadAttempt(description: active.task.taskDescription)?.usesMirror == true
         statuses[key] = .pausing
         active.task.cancel { [weak self] resumeData in
             Task { @MainActor in
                 guard let self else { return }
-                if let resumeData { try? self.transfer.saveResume(resumeData, key: key, network: active.network) }
+                if let resumeData {
+                    try? self.transfer.saveResume(resumeData, key: key, network: active.network, usesMirror: usesMirror)
+                }
                 if case .pausing = self.statuses[key] { self.statuses[key] = .paused }
             }
         }
@@ -442,15 +482,22 @@ final class PackDownloads: ObservableObject {
             let key = ticket.key
             tasks[key] = nil
             if let pack = Self.catalog.first(where: { $0.editionKey == key }) { install(pack) }
-        case let .failed(ticket, message, delay):
+        case let .failed(ticket, message, delay, canTryMirror):
             let key = ticket.key
             guard accepts(ticket), tasks[key] != nil || restoring else { return }
             tasks[key] = nil
             switch statuses[key] {
             case .pausing, .paused, .verifying, .installed: break
             default:
-                if let delay, let pack = Self.catalog.first(where: { $0.editionKey == key }) {
+                guard let pack = Self.catalog.first(where: { $0.editionKey == key }) else { return }
+                if let delay {
                     beginDownload(pack, network: ticket.network, attempt: ticket.attempt.transportRetry, delay: delay)
+                } else if canTryMirror, PackCatalog.fallbackMirror(for: pack) != nil {
+                    // Resume data belongs to the origin and must not carry over to the mirror.
+                    transfer.clearResume(key)
+                    beginDownload(pack, network: ticket.network, attempt: ticket.attempt.mirror)
+                } else if ticket.attempt.usesMirror, let host = PackCatalog.fallbackMirror(for: pack)?.host {
+                    statuses[key] = .failed("Mirror \(host) could not provide the archive. \(message)")
                 } else {
                     statuses[key] = .failed(message)
                 }
@@ -545,7 +592,7 @@ final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
     enum Event: Sendable {
         case progress(Ticket, Double?)
         case downloaded(Ticket)
-        case failed(Ticket, String, retryAfter: TimeInterval?)
+        case failed(Ticket, String, retryAfter: TimeInterval?, canTryMirror: Bool = false)
         case finishedEvents(PackDownloadNetwork)
     }
 
@@ -597,8 +644,9 @@ final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
         try FileManager.default.moveItem(at: location, to: staged)
     }
 
-    func resumeURL(_ key: String, network: PackDownloadNetwork) -> URL {
-        directory.appendingPathComponent(key).appendingPathExtension(network.resumeExtension)
+    func resumeURL(_ key: String, network: PackDownloadNetwork, usesMirror: Bool = false) -> URL {
+        let suffix = usesMirror ? "mirror-\(network.resumeExtension)" : network.resumeExtension
+        return directory.appendingPathComponent(key).appendingPathExtension(suffix)
     }
 
     func hasResume(_ key: String) -> Bool {
@@ -607,6 +655,11 @@ final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
 
     func hasResume(_ key: String, network: PackDownloadNetwork) -> Bool {
         FileManager.default.fileExists(atPath: resumeURL(key, network: network).path)
+            || hasMirrorResume(key, network: network)
+    }
+
+    func hasMirrorResume(_ key: String, network: PackDownloadNetwork) -> Bool {
+        FileManager.default.fileExists(atPath: resumeURL(key, network: network, usesMirror: true).path)
     }
 
     func resumeNetwork(_ key: String) -> PackDownloadNetwork {
@@ -619,11 +672,12 @@ final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
     func clearResume(_ key: String) {
         for network in PackDownloadNetwork.allCases {
             try? FileManager.default.removeItem(at: resumeURL(key, network: network))
+            try? FileManager.default.removeItem(at: resumeURL(key, network: network, usesMirror: true))
         }
     }
 
-    func saveResume(_ data: Data, key: String, network: PackDownloadNetwork) throws {
-        try data.write(to: resumeURL(key, network: network), options: .atomic)
+    func saveResume(_ data: Data, key: String, network: PackDownloadNetwork, usesMirror: Bool = false) throws {
+        try data.write(to: resumeURL(key, network: network, usesMirror: usesMirror), options: .atomic)
     }
 
     func urlSession(
@@ -636,7 +690,8 @@ final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
         }
         guard (200...299).contains(response.statusCode) else {
             post(.failed(ticket, "The publisher did not return the archive (HTTP \(response.statusCode)).",
-                         retryAfter: ticket.attempt.retryDelay(for: response)))
+                         retryAfter: ticket.attempt.retryDelay(for: response),
+                         canTryMirror: ticket.attempt.canTryMirror(for: response)))
             return
         }
         do {
@@ -662,9 +717,10 @@ final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
         guard let ticket = Ticket(session: session, task: task), let error = error as NSError? else { return }
         guard error.code != NSURLErrorCancelled || error.domain != NSURLErrorDomain else { return }
         if let data = error.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
-            try? saveResume(data, key: ticket.key, network: ticket.network)
+            try? saveResume(data, key: ticket.key, network: ticket.network, usesMirror: ticket.attempt.usesMirror)
         }
-        post(.failed(ticket, error.localizedDescription, retryAfter: ticket.attempt.retryDelay(for: error)))
+        post(.failed(ticket, error.localizedDescription, retryAfter: ticket.attempt.retryDelay(for: error),
+                     canTryMirror: ticket.attempt.canTryMirror(for: error)))
     }
 
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {

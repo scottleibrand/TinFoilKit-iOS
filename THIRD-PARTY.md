@@ -55,6 +55,7 @@ Valhalla Mobile packages Valhalla and its dependencies. [Scripts/routing/README.
 - **Map tiles:** the app's tile cache reads the same Protomaps v4 basemap, with the same OpenStreetMap attribution and license.
 - **Content packs:** downloaded from Kiwix and its official mirrors when a user chooses them. Each pack lists its own attribution and terms in Content Packs. In summary:
   - Wikipedia packs and Appropedia: CC BY-SA. Images carry their own licenses.
+  - The Spanish Wikipedia highlights edition `2026-10` can fall back from FAU to Wikimedia using the same publisher SHA-256. Kiwix lists both locations for the 217,314,941-byte edition. [Kiwix Metalink](https://download.kiwix.org/zim/wikipedia/wikipedia_es_top_mini_2026-10.zim.meta4)
   - iFixit: CC BY-NC-SA 3.0, which prohibits commercial use.
   - The water and field medicine libraries: collections of documents under their authors' individual terms.
 - **Printable references:** Household prints page ranges from installed packs. They include *Where There Is No Doctor* (Hesperian Health Guides) and Washington State Department of Health guidance, under their publishers' terms.
