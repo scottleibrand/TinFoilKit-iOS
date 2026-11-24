@@ -4,11 +4,11 @@ struct RegionalBundleDownloadView: View {
     let storage: RegionalBundleStorage
     let onInstall: (RegionalBundleStorage.Installed) async -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var downloader = RegionalBundleDownload()
+    private let downloader = RegionalBundleDownload.shared
     @State private var manifestURL = ""
     @State private var checksum = ""
     @State private var cellular = false
-    @State private var manifest: RegionalBundleManifest?
+    @State private var pending: RegionalBundleDownload.Pending?
     @State private var task: Task<Void, Never>?
     @State private var attempt: UUID?
     @State private var activity = ""
@@ -16,17 +16,24 @@ struct RegionalBundleDownloadView: View {
     @State private var error: String?
     @State private var attemptedInstall = false
     @State private var cancelling = false
+    @State private var restoring = true
+    @State private var invalidPending = false
+    @State private var confirmingDiscard = false
 
     var body: some View {
         NavigationStack {
             Form {
-                if let manifest {
+                if restoring {
+                    ProgressView("Checking for a pending download")
+                } else if let pending {
+                    let manifest = pending.manifest
                     Section(manifest.region) {
                         LabeledContent("Edition", value: manifest.dataVersion)
                         LabeledContent("Download size",
                                        value: manifest.assets.downloadByteCount.formatted(.byteCount(style: .file)))
                         Link("Data source", destination: manifest.source)
                         Link("\(manifest.attribution) · \(manifest.license)", destination: manifest.licenseURL)
+                        LabeledContent("Network", value: pending.cellular ? "Wi-Fi and cellular" : "Wi-Fi only")
                     }
                     if let basemap = manifest.assets.basemap {
                         Section("Basemap") {
@@ -35,7 +42,7 @@ struct RegionalBundleDownloadView: View {
                             Link("\(basemap.attribution) · \(basemap.license)", destination: basemap.licenseURL)
                         }
                     }
-                } else {
+                } else if !invalidPending {
                     Section {
                         TextField("HTTPS manifest URL", text: $manifestURL)
                             .keyboardType(.URL)
@@ -48,9 +55,9 @@ struct RegionalBundleDownloadView: View {
                         Text("Use an HTTPS link and a SHA-256 you received from a trusted source.")
                     }
                     .disabled(task != nil)
+                    Toggle("Allow cellular data", isOn: $cellular)
+                        .disabled(task != nil)
                 }
-                Toggle("Allow cellular data", isOn: $cellular)
-                    .disabled(task != nil)
 
                 if task != nil {
                     Section {
@@ -59,24 +66,22 @@ struct RegionalBundleDownloadView: View {
                         } else {
                             ProgressView(activity)
                         }
-                        Button(cancelling ? "Cancelling…" : "Cancel", role: .cancel) {
+                        Button(cancelling ? "Stopping…" : (pending == nil ? "Cancel" : "Pause download"), role: .cancel) {
                             cancelling = true
                             task?.cancel()
                         }
                         .disabled(cancelling)
                     }
-                } else {
+                } else if !restoring {
                     Section {
-                        if manifest == nil {
+                        if invalidPending {
+                            Button("Discard download", role: .destructive) { confirmingDiscard = true }
+                        } else if pending == nil {
                             Button("Review download", action: loadManifest)
                                 .disabled(manifestURL.isEmpty || checksum.isEmpty)
                         } else {
-                            Button(attemptedInstall ? "Retry download" : "Download and install", action: install)
-                            Button("Change manifest") {
-                                manifest = nil
-                                error = nil
-                                attemptedInstall = false
-                            }
+                            Button(attemptedInstall ? "Resume download" : "Download and install", action: install)
+                            Button("Discard download", role: .destructive) { confirmingDiscard = true }
                         }
                         if let error {
                             Text(error).foregroundStyle(.secondary)
@@ -90,7 +95,13 @@ struct RegionalBundleDownloadView: View {
                 Button("Done") { dismiss() }
                     .disabled(task != nil)
             }
+            .confirmationDialog("Discard regional download?", isPresented: $confirmingDiscard, titleVisibility: .visible) {
+                Button("Discard download", role: .destructive, action: discard)
+            } message: {
+                Text("Saved download files will be removed.")
+            }
         }
+        .task { await restore() }
         .interactiveDismissDisabled(task != nil)
         .onDisappear { task?.cancel() }
     }
@@ -98,14 +109,35 @@ struct RegionalBundleDownloadView: View {
     private func loadManifest() {
         begin("Checking manifest") { _ in
             let source = try RegionalBundleDownloadSource(url: manifestURL, sha256: checksum)
-            manifest = try await downloader.load(source, cellular: cellular)
+            pending = try await downloader.load(source, cellular: cellular)
+        }
+    }
+
+    private func restore() async {
+        defer { restoring = false }
+        do {
+            pending = try await downloader.pending()
+            attemptedInstall = pending?.started == true
+        } catch is CancellationError {
+        } catch {
+            invalidPending = true
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func discard() {
+        begin("Discarding download") { _ in
+            try await downloader.discard()
+            pending = nil
+            invalidPending = false
+            attemptedInstall = false
         }
     }
 
     private func install() {
         attemptedInstall = true
         begin("Preparing download") { id in
-            let installed = try await downloader.install(in: storage, cellular: cellular) { progress in
+            let installed = try await downloader.install(in: storage) { progress in
                 Task { @MainActor in
                     guard attempt == id, !cancelling else { return }
                     switch progress {

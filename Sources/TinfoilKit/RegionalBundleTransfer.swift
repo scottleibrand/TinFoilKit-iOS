@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 struct RegionalBundleResponse {
@@ -43,8 +44,8 @@ struct RegionalBundleResponse {
         }
     }
 
-    private static func strongETag(_ text: String?) -> String? {
-        guard let text, text.utf8.count >= 2, text.utf8.first == 34, text.utf8.last == 34,
+    static func strongETag(_ text: String?) -> String? {
+        guard let text, (2...1024).contains(text.utf8.count), text.utf8.first == 34, text.utf8.last == 34,
               text.utf8.dropFirst().dropLast().allSatisfy({ $0 == 33 || (35...126).contains($0) }) else { return nil }
         return text
     }
@@ -69,6 +70,7 @@ final class RegionalBundleTransfer: NSObject, URLSessionDataDelegate, @unchecked
     private let limit: Int64
     private let size: Int64?
     private let offset: Int64
+    private let checkpoint: RegionalDownloadState.Asset?
     private let progress: @Sendable (Int64) -> Void
     // Delegate state is used on the session's serial delegate queue. The lock also covers starting and cancelling its task.
     private let lock = NSLock()
@@ -79,22 +81,27 @@ final class RegionalBundleTransfer: NSObject, URLSessionDataDelegate, @unchecked
     private var received: Int64
     private var validator: String?
     private var lastReport: Int64
+    private var lastCheckpoint: Int64
+    private var prefixHash = SHA256()
     private var failure: Error?
 
     private init(file: URL, limit: Int64, size: Int64?, offset: Int64, validator: String?,
+                 checkpoint: RegionalDownloadState.Asset?,
                  progress: @escaping @Sendable (Int64) -> Void) {
         self.file = file
         self.limit = limit
         self.size = size
         self.offset = offset
+        self.checkpoint = checkpoint
         self.validator = offset > 0 ? validator : nil
         self.progress = progress
         received = offset
         lastReport = offset
+        lastCheckpoint = offset
     }
 
     static func receive(_ url: URL, to file: URL, limit: Int64, size: Int64?, offset: Int64,
-                        validator: String?, cellular: Bool,
+                        validator: String?, cellular: Bool, checkpoint: RegionalDownloadState.Asset? = nil,
                         progress: @escaping @Sendable (Int64) -> Void) async -> Outcome {
         var request = URLRequest(url: url)
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
@@ -103,7 +110,7 @@ final class RegionalBundleTransfer: NSObject, URLSessionDataDelegate, @unchecked
             request.setValue(validator, forHTTPHeaderField: "If-Range")
         }
         let receiver = RegionalBundleTransfer(file: file, limit: limit, size: size, offset: offset,
-                                              validator: validator, progress: progress)
+                                              validator: validator, checkpoint: checkpoint, progress: progress)
         let transferRequest = request
         return await withTaskCancellationHandler {
             await withCheckedContinuation { receiver.start(transferRequest, cellular: cellular, completion: $0) }
@@ -161,19 +168,30 @@ final class RegionalBundleTransfer: NSObject, URLSessionDataDelegate, @unchecked
             }
             let output = try FileHandle(forWritingTo: file)
             writer = output
-            if headers.offset == 0 { try output.truncate(atOffset: 0) }
+            if headers.offset == 0 {
+                try checkpoint?.forgetCheckpoint()
+                try output.truncate(atOffset: 0)
+            } else if checkpoint != nil {
+                prefixHash = try RegionalDownloadState.hash(file, byteCount: headers.offset, cancellable: false)
+            }
             try output.seek(toOffset: UInt64(headers.offset))
             received = headers.offset
             lastReport = received
+            lastCheckpoint = received
             validator = headers.validator
             progress(received)
             completionHandler(.allow)
         } catch RegionalBundleDownloadError.http(let status) {
             failure = RegionalBundleDownloadError.http(status)
+            if status == 416 {
+                validator = nil
+                try? checkpoint?.forgetCheckpoint()
+            }
             completionHandler(.cancel)
         } catch {
             failure = error
             validator = nil
+            try? checkpoint?.forgetCheckpoint()
             completionHandler(.cancel)
         }
     }
@@ -184,6 +202,14 @@ final class RegionalBundleTransfer: NSObject, URLSessionDataDelegate, @unchecked
             guard let writer, Int64(data.count) <= limit - received else { throw RegionalBundleDownloadError.size }
             try writer.write(contentsOf: data)
             received += Int64(data.count)
+            if checkpoint != nil {
+                prefixHash.update(data: data)
+                if received - lastCheckpoint >= 8 * 1024 * 1024 {
+                    try writer.synchronize()
+                    try saveCheckpoint()
+                    lastCheckpoint = received
+                }
+            }
             if received - lastReport >= 256 * 1024 {
                 lastReport = received
                 progress(received)
@@ -191,6 +217,7 @@ final class RegionalBundleTransfer: NSObject, URLSessionDataDelegate, @unchecked
         } catch {
             failure = error
             validator = nil
+            try? checkpoint?.forgetCheckpoint()
             dataTask.cancel()
         }
     }
@@ -198,6 +225,7 @@ final class RegionalBundleTransfer: NSObject, URLSessionDataDelegate, @unchecked
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         do {
             try writer?.synchronize()
+            if writer != nil { try saveCheckpoint() }
             try writer?.close()
         } catch {
             failure = error
@@ -214,5 +242,14 @@ final class RegionalBundleTransfer: NSObject, URLSessionDataDelegate, @unchecked
         }
         session.finishTasksAndInvalidate()
         continuation?.resume(returning: Outcome(validator: validator, error: result))
+    }
+
+    private func saveCheckpoint() throws {
+        guard let checkpoint else { return }
+        if let validator, received > 0, received < limit {
+            try checkpoint.save(offset: received, validator: validator, hash: prefixHash)
+        } else {
+            try checkpoint.forgetCheckpoint()
+        }
     }
 }
