@@ -1,0 +1,111 @@
+name: TinfoilKit
+options:
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    GENERATE_INFOPLIST_FILE: YES
+packages:
+  SwiftSoup:
+    url: https://github.com/scinfu/SwiftSoup.git
+    exactVersion: 2.14.4
+targets:
+  TinfoilKit:
+    type: application
+    platform: iOS
+    sources:
+      - Sources/TinfoilKit
+      - path: .build/map-assets
+        type: folder
+        buildPhase: resources
+        optional: true
+      - path: .build/notices
+        type: folder
+        buildPhase: resources
+        optional: true
+    dependencies:
+      - target: ZIMArchive
+        embed: true
+      - framework: .build/map-tools/MapLibre.xcframework
+        embed: true
+      - sdk: libsqlite3.tbd
+      - sdk: FoundationModels.framework
+        weak: true
+    info:
+      path: .build/TinfoilKit-Info.plist
+      properties:
+        CFBundleDisplayName: Tinfoil Kit
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        NSLocationWhenInUseUsageDescription: Show your position on an installed offline map.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: org.openzim.zim
+            UTTypeConformsTo: [public.data]
+            UTTypeDescription: ZIM archive
+            UTTypeTagSpecification:
+              public.filename-extension: [zim]
+              public.mime-type: [application/x-zim]
+          - UTTypeIdentifier: org.protomaps.pmtiles
+            UTTypeConformsTo: [public.data]
+            UTTypeDescription: PMTiles archive
+            UTTypeTagSpecification:
+              public.filename-extension: [pmtiles]
+              public.mime-type: [application/vnd.pmtiles]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.tinfoilkit.ios
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/.build/CTFKReader"
+  TinfoilKitUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Tests/TinfoilKitUITests]
+    dependencies:
+      - target: TinfoilKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.tinfoilkit.ios.uitests
+  ZIMArchive:
+    type: framework
+    platform: iOS
+    sources: [Sources/ZIMArchive]
+    dependencies:
+      - package: SwiftSoup
+      - sdk: libsqlite3.tbd
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.tinfoilkit.zimarchive
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/.build/CTFKReader"
+        "OTHER_LDFLAGS[sdk=iphonesimulator*]": '$(inherited) "$(SRCROOT)/.build/reader-bridge/aarch64-apple-ios-sim/release/libtfk_reader.a"'
+        "OTHER_LDFLAGS[sdk=iphoneos*]": '$(inherited) "$(SRCROOT)/.build/reader-bridge/aarch64-apple-ios/release/libtfk_reader.a"'
+  ZIMArchiveTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests/ZIMArchiveTests
+      - path: .build/fixtures/climate.zim
+        buildPhase: resources
+    dependencies:
+      - target: ZIMArchive
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.tinfoilkit.zimarchive.tests
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/.build/CTFKReader"
+schemes:
+  TinfoilKit:
+    build:
+      targets:
+        TinfoilKit: all
+    test:
+      targets: [TinfoilKitUITests]
+  ZIMArchive:
+    build:
+      targets:
+        ZIMArchive: all
+    test:
+      targets: [ZIMArchiveTests]
