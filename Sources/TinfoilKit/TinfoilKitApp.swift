@@ -8,6 +8,8 @@ struct TinfoilKitApp: App {
     @StateObject private var packs = PackDownloads.shared
     @StateObject private var indexing = LibraryIndexing(library: .standard)
     @StateObject private var household = HouseholdStore()
+    @AppStorage("hasSeenOfflineStarterGuide") private var hasSeenOfflineStarterGuide = false
+    @State private var showingOfflineStarterGuide = false
 
     var body: some Scene {
         WindowGroup {
@@ -23,6 +25,24 @@ struct TinfoilKitApp: App {
             }
             .task { await packs.restore() }
             .task(id: packs.installedRevision) { await indexing.refresh() }
+            .task {
+                if Bundle.main.object(forInfoDictionaryKey: "TFKLightweightProfile") as? Bool == true,
+                   !hasSeenOfflineStarterGuide {
+                    showingOfflineStarterGuide = true
+                }
+            }
+            .sheet(isPresented: $showingOfflineStarterGuide, onDismiss: {
+                hasSeenOfflineStarterGuide = true
+            }) {
+                NavigationStack {
+                    DisasterStarterView()
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { showingOfflineStarterGuide = false }
+                            }
+                        }
+                }
+            }
             .onChange(of: indexing.archives) { previous, current in
                 let installed = Set(current.map(\.id))
                 for archive in previous where !installed.contains(archive.id) {
@@ -182,8 +202,10 @@ private struct LibraryView: View {
             } description: {
                 Text("Import a ZIM archive to read it offline.")
             } actions: {
-                Button("Import from Files") { choosingArchive = true }
+                NavigationLink("Offline starter guide") { DisasterStarterView() }
                     .buttonStyle(.borderedProminent)
+                Button("Import from Files") { choosingArchive = true }
+                    .buttonStyle(.bordered)
                     .disabled(importTask != nil)
             }
         } else if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -218,6 +240,7 @@ private struct LibraryView: View {
 
     private var archiveList: some View {
         List {
+            NavigationLink("Offline starter guide") { DisasterStarterView() }
             if !indexing.damagedArchiveIDs.isEmpty {
                 Section("Damaged archives") {
                     ForEach(indexing.damagedArchiveIDs, id: \.self) { id in

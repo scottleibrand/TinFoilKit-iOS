@@ -37,6 +37,8 @@ Keep provider credentials, private household data, and unpublished location or r
 
 ## Implementation and release gates
 
+The lightweight profile and bundled starter guide are implemented. The first local iPhone release build measured 9,426,954 bytes in a ZIP and excluded regional map archives, place indexes and routing packs. App Store download size, offline first launch on a fresh phone, and peer discovery are still to be verified.
+
 | Slice | Deliverable | Acceptance |
 | --- | --- | --- |
 | 1. Lightweight build and direct discovery | Measured lightweight release profile, starter reference and a foreground Nearby screen with verified pairing. | Cold install on two physical iPhones, including one on an older supported iOS. Disable cellular, disconnect both from any access point, leave Wi-Fi radios enabled, and demonstrate discovery and pairing. Repeat on a LAN without internet and with local-network permission denied. Verify discovery traffic exposes only the ephemeral service fields. |

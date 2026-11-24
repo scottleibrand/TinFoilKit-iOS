@@ -45,6 +45,26 @@ For a device build, add the Rust target `aarch64-apple-ios`, run `bash Scripts/p
 
 To enable Seattle walking previews, download the Seattle PBF from BBBike, install `osmium==4.2.0` in a local Python environment, and run `python Scripts/build-walking-graph.py Seattle.osm.pbf .build/map-assets/seattle-walking.sqlite` before building. The walking graph and place database use OpenStreetMap data under ODbL 1.0. [BBBike Seattle extract](https://download.bbbike.org/osm/bbbike/Seattle/) · [OpenStreetMap attribution and license](https://www.openstreetmap.org/copyright)
 
+### Lightweight release profile
+
+The lightweight profile bundles the map engine, glyphs and notices. Install regional data separately. The offline disaster starter guide opens on first launch and remains available in Library. The default development project can still bundle the Seattle map and test routing packs.
+
+After preparing the device Rust reader and Apple routing engine, build and measure the lightweight profile locally.
+
+```sh
+bash Scripts/prepare-map-assets.sh --lightweight
+xcodegen generate --spec project-lightweight.yml
+xcodebuild build -project TinfoilKitLightweight.xcodeproj -scheme TinfoilKit \
+    -configuration Release -destination generic/platform=iOS \
+    -derivedDataPath .build/LightweightDeviceDerivedData CODE_SIGNING_ALLOWED=NO
+ditto -c -k --keepParent \
+    .build/LightweightDeviceDerivedData/Build/Products/Release-iphoneos/TinfoilKit.app \
+    .build/TinfoilKit-lightweight.zip
+wc -c .build/TinfoilKit-lightweight.zip
+```
+
+The local ZIP measures this build. Use App Store Connect device-specific size reports for the distribution download size. [Nearby disaster-sharing plan](DISASTER-SHARING.md)
+
 ## Test
 
 Run the `ZIMArchive` scheme on a dedicated simulator for library and search tests. For the `TinfoilKit` UI test scheme, install the debug app in a dedicated simulator and copy `.build/fixtures/climate.zim` into its Documents folder as `Climate Test.zim`. The test uses the Files picker to import it on a fresh install.

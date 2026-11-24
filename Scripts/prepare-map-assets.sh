@@ -5,6 +5,12 @@ cd "$(dirname "$0")/.."
 
 tools=.build/map-tools
 assets=.build/map-assets
+if [[ "${1:-}" == --lightweight && $# -eq 1 ]]; then
+    assets=.build/lightweight/map-assets
+elif [[ $# -ne 0 ]]; then
+    echo "Usage: $0 [--lightweight]" >&2
+    exit 2
+fi
 fonts="$assets/glyphs/Noto Sans Regular"
 mkdir -p "$tools" "$fonts"
 
@@ -13,21 +19,46 @@ fetch() {
     mv "$2.partial" "$2"
 }
 
-if [[ ! -d "$tools/MapLibre.xcframework" || ! -f "$assets/MapLibre-LICENSE.txt" ]]; then
+if [[ ! -d "$tools/MapLibre.xcframework" || ! -f "$tools/LICENSE.md" ]]; then
     if [[ ! -f "$tools/maplibre.zip" ]]; then
         fetch https://github.com/maplibre/maplibre-native/releases/download/ios-v6.29.0/MapLibre.dynamic.xcframework.zip "$tools/maplibre.zip"
     fi
     printf '%s  %s\n' 0963b9cebd9e3b670b1a39f82e4ffa5ab6a6343352a0fd3430b3cbce4fac9bd8 "$tools/maplibre.zip" | shasum -a 256 -c
     unzip -oq "$tools/maplibre.zip" -d "$tools"
-    cp "$tools/LICENSE.md" "$assets/MapLibre-LICENSE.txt"
 fi
+cp "$tools/LICENSE.md" "$assets/MapLibre-LICENSE.txt"
 
 if [[ ! -f "$assets/MapLibre-iOS-LICENSE.txt" ]]; then
-    fetch https://raw.githubusercontent.com/maplibre/maplibre-native/ios-v6.29.0/platform/ios/LICENSE.md \
-        "$tools/MapLibre-iOS-LICENSE.txt"
+    if [[ ! -f "$tools/MapLibre-iOS-LICENSE.txt" ]]; then
+        fetch https://raw.githubusercontent.com/maplibre/maplibre-native/ios-v6.29.0/platform/ios/LICENSE.md \
+            "$tools/MapLibre-iOS-LICENSE.txt"
+    fi
     printf '%s  %s\n' 88adc1c42d7b0656580d8f42d81fc0f6ec1ab12417b68c7d3a20598d9bbcea19 \
         "$tools/MapLibre-iOS-LICENSE.txt" | shasum -a 256 -c
     cp "$tools/MapLibre-iOS-LICENSE.txt" "$assets/MapLibre-iOS-LICENSE.txt"
+fi
+
+font_source=https://raw.githubusercontent.com/protomaps/basemaps-assets/028c18f713baecad011301ff7a69acc39bcc2ae7/fonts
+for range in 0-255 256-511 8192-8447; do
+    if [[ ! -f "$fonts/$range.pbf" ]]; then
+        full_glyph=".build/map-assets/glyphs/Noto Sans Regular/$range.pbf"
+        if [[ -f "$full_glyph" ]]; then
+            cp "$full_glyph" "$fonts/$range.pbf"
+        else
+            fetch "$font_source/Noto%20Sans%20Regular/$range.pbf" "$fonts/$range.pbf"
+        fi
+    fi
+done
+if [[ ! -f "$assets/OFL.txt" ]]; then
+    if [[ -f .build/map-assets/OFL.txt ]]; then
+        cp .build/map-assets/OFL.txt "$assets/OFL.txt"
+    else
+        fetch "$font_source/OFL.txt" "$assets/OFL.txt"
+    fi
+fi
+
+if [[ "$assets" == .build/lightweight/map-assets ]]; then
+    exit 0
 fi
 
 if [[ ! -x "$tools/pmtiles" ]]; then
@@ -62,16 +93,6 @@ if [[ ! -f "$assets/seattle.pmtiles" ]]; then
         --bbox=-122.53,47.43,-122.18,47.78 --minzoom=6 --maxzoom=15
     "$tools/pmtiles" verify "$tools/seattle.pmtiles"
     mv "$tools/seattle.pmtiles" "$assets/seattle.pmtiles"
-fi
-
-font_source=https://raw.githubusercontent.com/protomaps/basemaps-assets/028c18f713baecad011301ff7a69acc39bcc2ae7/fonts
-for range in 0-255 256-511 8192-8447; do
-    if [[ ! -f "$fonts/$range.pbf" ]]; then
-        fetch "$font_source/Noto%20Sans%20Regular/$range.pbf" "$fonts/$range.pbf"
-    fi
-done
-if [[ ! -f "$assets/OFL.txt" ]]; then
-    fetch "$font_source/OFL.txt" "$assets/OFL.txt"
 fi
 
 if [[ ! -f "$assets/seattle-places.sqlite" ]]; then

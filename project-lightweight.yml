@@ -1,0 +1,21 @@
+include:
+  - project.yml
+name: TinfoilKitLightweight
+targets:
+  TinfoilKit:
+    sources:REPLACE:
+      - Sources/TinfoilKit
+      - path: .build/lightweight/map-assets
+        type: folder
+        buildPhase: resources
+      - path: .build/notices
+        type: folder
+        buildPhase: resources
+        optional: true
+      - path: .build/routing/Routing
+        type: folder
+        buildPhase: resources
+    info:
+      path: .build/TinfoilKit-Lightweight-Info.plist
+      properties:
+        TFKLightweightProfile: true

@@ -2,5 +2,6 @@
 /.build/
 /DerivedData/
 /TinfoilKit.xcodeproj/
+/TinfoilKitLightweight.xcodeproj/
 xcuserdata/
 .DS_Store
