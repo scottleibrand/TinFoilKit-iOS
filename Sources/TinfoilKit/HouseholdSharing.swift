@@ -62,8 +62,10 @@ struct HouseholdSharePage: Sendable {
     static let basePolicy = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
     let body: Data
     let contentSecurityPolicy: String
+    let acceptsNotes: Bool
 
-    init(snapshot: HouseholdSnapshot, publicWorksheet: String? = nil) {
+    init(snapshot: HouseholdSnapshot, publicWorksheet: String? = nil, acceptsNotes: Bool = false) {
+        self.acceptsNotes = acceptsNotes
         var content = ""
         if !snapshot.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             content += "<section><h2>Notes</h2><p>\(Self.escape(snapshot.notes))</p></section>"
@@ -78,7 +80,10 @@ struct HouseholdSharePage: Sendable {
             content += "<section><h2>Public check-in worksheet</h2><p>\(Self.escape(publicWorksheet))</p></section>"
         }
         let nonce = UUID().uuidString
-        contentSecurityPolicy = "\(Self.basePolicy); script-src 'nonce-\(nonce)'"
+        let notePolicy = acceptsNotes ? "; connect-src 'self'" : ""
+        contentSecurityPolicy = "\(Self.basePolicy); script-src 'nonce-\(nonce)'; form-action 'none'\(notePolicy)"
+        let noteForm = acceptsNotes ? Self.noteForm : ""
+        let noteScript = acceptsNotes ? Self.noteScript : ""
         let html = """
         <!doctype html>
         <html lang="en">
@@ -88,7 +93,7 @@ struct HouseholdSharePage: Sendable {
         :root{color-scheme:light dark}body{margin:2rem auto;padding:0 1.25rem;max-width:42rem;font:1rem/1.55 system-ui,sans-serif}
         h1,h2{line-height:1.2}section{border-top:1px solid GrayText;margin:1.4rem 0}
         p{white-space:pre-wrap;overflow-wrap:anywhere}.coordinates{font-variant-numeric:tabular-nums}
-        input{display:block;box-sizing:border-box;width:100%;font:inherit;padding:.5rem;margin:.3rem 0}
+        input,textarea{display:block;box-sizing:border-box;width:100%;font:inherit;padding:.5rem;margin:.3rem 0}
         </style>
         <main>
         <h1>Household information</h1>
@@ -98,8 +103,10 @@ struct HouseholdSharePage: Sendable {
         <p id="search-status" role="status"></p>
         </div>
         \(content)
+        \(noteForm)
         </main>
-        <script nonce="\(nonce)">\(Self.searchScript)</script>
+        <script nonce="\(nonce)">\(Self.searchScript)
+        \(noteScript)</script>
         </html>
         """
         body = Data(html.utf8)
@@ -138,6 +145,52 @@ struct HouseholdSharePage: Sendable {
         }
         """#
 
+    private static let noteForm = """
+        <div id="guest-note" hidden>
+        <h2>Send a note to the host</h2>
+        <form>
+        <label for="note">Note for review</label>
+        <textarea id="note" maxlength="1000" rows="4" required></textarea>
+        <button type="submit">Send for review</button>
+        </form>
+        <p role="status"></p>
+        </div>
+        """
+
+    private static let noteScript = #"""
+        const notePanel = document.querySelector("#guest-note");
+        const noteForm = notePanel.querySelector("form");
+        const note = noteForm.querySelector("textarea");
+        const submit = noteForm.querySelector("button");
+        const noteStatus = notePanel.querySelector("[role=status]");
+        notePanel.hidden = false;
+        noteForm.addEventListener("submit", async event => {
+            event.preventDefault();
+            if (submit.disabled) return;
+            submit.disabled = true;
+            noteStatus.textContent = "Sending…";
+            try {
+                const reply = await fetch(location.href, {
+                    method: "POST", mode: "same-origin", credentials: "omit", redirect: "error",
+                    headers: { "X-Tinfoil-Guest-Note": "1" },
+                    body: new URLSearchParams({ note: note.value })
+                });
+                if (reply.status === 202) {
+                    note.value = "";
+                    noteStatus.textContent = "Sent to the host for review.";
+                } else if (reply.status === 409) {
+                    noteStatus.textContent = "The host already has a note to review. Try again later.";
+                } else {
+                    noteStatus.textContent = "The note could not be sent. Check the message and sharing link.";
+                }
+            } catch {
+                noteStatus.textContent = "The sharing session is unavailable.";
+            } finally {
+                submit.disabled = false;
+            }
+        });
+        """#
+
     private static func place(_ place: HouseholdPlace) -> String {
         var fragment = "<article><h3>\(escape(place.name))</h3>"
         fragment += "<p class=\"coordinates\">\(escape(place.coordinateText))</p>"
@@ -160,6 +213,7 @@ final class HouseholdShareServer: @unchecked Sendable {
         case listening(URL)
         case failed(String)
         case expired
+        case noteProposed(String)
     }
 
     private static let maximumHeaderBytes = 8_192
@@ -176,6 +230,7 @@ final class HouseholdShareServer: @unchecked Sendable {
     private let deadline: ContinuousClock.Instant
     private var connections: [UUID: NWConnection] = [:]
     private var closed = false
+    private var reviewingNote = false
 
     init(address: HouseholdShareAddress, page: HouseholdSharePage, lifetime: TimeInterval = defaultLifetime,
          event: @escaping @Sendable (Event) -> Void) throws {
@@ -220,6 +275,10 @@ final class HouseholdShareServer: @unchecked Sendable {
         queue.asyncAfter(deadline: .now() + lifetime) { [weak self] in self?.finish(.expired) }
     }
 
+    func finishNoteReview() {
+        queue.async { [self] in reviewingNote = false }
+    }
+
     func stop() {
         queue.async { [self] in finish(nil) }
     }
@@ -247,41 +306,81 @@ final class HouseholdShareServer: @unchecked Sendable {
         connection.receive(minimumIncompleteLength: 1, maximumLength: Self.maximumHeaderBytes - received.count) {
             [weak self] data, _, complete, error in
             guard let self, self.connections[id] != nil else { return }
-            var header = received
-            if let data { header.append(data) }
-            if let end = header.range(of: Self.headerEnd)?.lowerBound {
-                self.respond(connection, id: id, header: Data(header.prefix(upTo: end)))
-            } else if header.count == Self.maximumHeaderBytes || complete || error != nil {
+            var buffer = received
+            if let data { buffer.append(data) }
+            if let delimiter = buffer.range(of: Self.headerEnd) {
+                let header = Data(buffer.prefix(upTo: delimiter.lowerBound))
+                let body = Data(buffer.suffix(from: delimiter.upperBound))
+                self.route(connection, id: id, header: header, initialBody: body, complete: complete || error != nil)
+            } else if buffer.count == Self.maximumHeaderBytes || complete || error != nil {
                 self.close(id)
             } else {
-                self.receive(connection, id: id, received: header)
+                self.receive(connection, id: id, received: buffer)
             }
         }
     }
 
-    private func respond(_ connection: NWConnection, id: UUID, header: Data) {
+    private func route(_ connection: NWConnection, id: UUID, header: Data, initialBody: Data, complete: Bool) {
         guard !closed, ContinuousClock.now < deadline else { close(id); return }
-        let response = makeResponse(header: header)
-        connection.send(content: response, completion: .contentProcessed { [weak self] _ in self?.close(id) })
-    }
-
-    private func makeResponse(header: Data) -> Data {
-        let unavailable = "Not found"
         let lines = String(decoding: header, as: UTF8.self).components(separatedBy: "\r\n")
         let request = lines.first?.split(separator: " ", omittingEmptySubsequences: false) ?? []
-        let hosts = lines.dropFirst().compactMap { line -> String? in
-            guard let colon = line.firstIndex(of: ":"), line[..<colon].lowercased() == "host" else { return nil }
-            return line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+        var headers: [String: [String]] = [:]
+        for line in lines.dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let name = line[..<colon].lowercased()
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            headers[name, default: []].append(value)
         }
         guard let port = listener.port, request.count == 3,
               request[2] == "HTTP/1.1" || request[2] == "HTTP/1.0",
-              hosts == ["\(address.host):\(port.rawValue)"],
-              request[0] == "GET" || request[0] == "HEAD",
-              tokenMatches(request[1]) else {
-            return response(status: "404 Not Found", type: "text/plain; charset=utf-8", body: Data(unavailable.utf8))
+              headers["host"] == ["\(address.host):\(port.rawValue)"], tokenMatches(request[1]) else {
+            send(connection, id: id, text: "Not found", status: "404 Not Found")
+            return
         }
-        return response(status: "200 OK", type: "text/html; charset=utf-8", body: page.body,
-                        headOnly: request[0] == "HEAD", contentSecurityPolicy: page.contentSecurityPolicy)
+        if request[0] == "GET" || request[0] == "HEAD" {
+            send(connection, id: id, data: response(
+                status: "200 OK", type: "text/html; charset=utf-8", body: page.body,
+                headOnly: request[0] == "HEAD", contentSecurityPolicy: page.contentSecurityPolicy
+            ))
+        } else if request[0] == "POST", page.acceptsNotes, let length = HouseholdNoteProposal.bodyLength(headers: headers) {
+            receiveNote(connection, id: id, body: initialBody, length: length, complete: complete)
+        } else {
+            send(connection, id: id, text: "Not found", status: "404 Not Found")
+        }
+    }
+
+    private func receiveNote(_ connection: NWConnection, id: UUID, body: Data, length: Int, complete: Bool) {
+        guard !closed, ContinuousClock.now < deadline else { close(id); return }
+        if body.count == length {
+            guard let note = HouseholdNoteProposal.parse(body) else {
+                send(connection, id: id, text: "Invalid note", status: "400 Bad Request")
+                return
+            }
+            guard !reviewingNote else {
+                send(connection, id: id, text: "A note is awaiting review", status: "409 Conflict")
+                return
+            }
+            reviewingNote = true
+            event(.noteProposed(note))
+            send(connection, id: id, text: "Sent for review", status: "202 Accepted")
+        } else if body.count < length, !complete {
+            connection.receive(minimumIncompleteLength: 1, maximumLength: length - body.count) {
+                [weak self] data, _, complete, error in
+                guard let self, self.connections[id] != nil else { return }
+                self.receiveNote(connection, id: id, body: body + (data ?? Data()), length: length,
+                                 complete: complete || error != nil)
+            }
+        } else {
+            send(connection, id: id, text: "Incomplete note", status: "400 Bad Request")
+        }
+    }
+
+    private func send(_ connection: NWConnection, id: UUID, text: String, status: String) {
+        send(connection, id: id, data: response(status: status, type: "text/plain; charset=utf-8", body: Data(text.utf8)))
+    }
+
+    private func send(_ connection: NWConnection, id: UUID, data: Data) {
+        connection.send(content: data, completion: .contentProcessed { [weak self] _ in self?.close(id) })
     }
 
     private func tokenMatches(_ path: Substring) -> Bool {

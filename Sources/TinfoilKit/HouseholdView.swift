@@ -65,7 +65,10 @@ struct HouseholdView: View {
                         Label("Print the essentials", systemImage: "printer")
                     }
                     NavigationLink {
-                        HouseholdShareView(snapshot: printableSnapshot)
+                        HouseholdShareView(snapshot: printableSnapshot, canAcceptGuestNotes: household.loadError == nil) { note in
+                            try saveDraft()
+                            try household.appendGuestNote(note)
+                        }
                     } label: {
                         Label("Share on local network", systemImage: "person.2")
                     }
@@ -103,11 +106,13 @@ struct HouseholdView: View {
     }
 
     private func saveNotes() {
+        perform { try saveDraft() }
+    }
+
+    private func saveDraft() throws {
         guard let draft else { return }
-        perform {
-            try household.saveNotes(draft)
-            self.draft = nil
-        }
+        try household.saveNotes(draft)
+        self.draft = nil
     }
 
     private func perform(_ action: () throws -> Void) {

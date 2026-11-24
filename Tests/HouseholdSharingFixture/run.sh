@@ -5,6 +5,7 @@ output="$(mktemp -d)"
 trap 'rm -rf "$output"' EXIT
 xcrun swiftc -module-cache-path "$output/module-cache" -o "$output/verify" \
     Tests/HouseholdSharingFixture/VerifyHouseholdSharing.swift \
+    Sources/TinfoilKit/HouseholdNoteProposal.swift \
     Sources/TinfoilKit/HouseholdSharing.swift \
     Sources/TinfoilKit/Household.swift \
     Sources/TinfoilKit/MapCoordinateText.swift
