@@ -47,11 +47,12 @@ public final class LibraryIndexing: ObservableObject {
                 if ArticleIndex(archiveURL: file).hasSearchableIndex { readable.insert(archive.id) }
             }
             guard revision == inventoryRevision, generation == refreshGeneration else { return }
+            let archivesChanged = archives != inventory.archives
             archives = inventory.archives
             damagedArchiveIDs = inventory.damaged
             let ids = Set(archives.map(\.id))
             let nextSearchable = searchable.intersection(ids).union(readable)
-            if nextSearchable != searchable {
+            if archivesChanged || nextSearchable != searchable {
                 searchable = nextSearchable
                 searchRevision += 1
             }
@@ -79,7 +80,8 @@ public final class LibraryIndexing: ObservableObject {
         try await library.removeArchive(id)
         inventoryRevision += 1
         archives.removeAll { $0.id == id }
-        if searchable.remove(id) != nil { searchRevision += 1 }
+        searchable.remove(id)
+        searchRevision += 1
         completedIndexes.remove(id)
         errors[id] = nil
         await refresh()
@@ -158,7 +160,8 @@ public final class LibraryIndexing: ObservableObject {
             guard let removedID = try await library.finishUpdate(archive) else { return }
             inventoryRevision += 1
             archives.removeAll { $0.id == removedID }
-            if searchable.remove(removedID) != nil { searchRevision += 1 }
+            searchable.remove(removedID)
+            searchRevision += 1
             completedIndexes.remove(removedID)
             errors[removedID] = nil
             errors[archive.id] = nil

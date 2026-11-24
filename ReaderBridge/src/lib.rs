@@ -26,10 +26,12 @@ pub struct TFKResource {
     data: Blob,
 }
 
-pub struct TFKPDFEntry {
+pub struct TFKEntryMetadata {
     path: CString,
     title: CString,
 }
+
+pub struct TFKTitleMatches(Vec<TFKEntryMetadata>);
 
 fn item_path(item: &Item, legacy: bool) -> Result<CString, String> {
     let path = if legacy {
@@ -193,11 +195,69 @@ pub unsafe extern "C" fn tfk_archive_article(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn tfk_archive_title_prefix(
+    archive: &TFKArchive,
+    prefix: *const c_char,
+    error: *mut *mut c_char,
+) -> *mut TFKTitleMatches {
+    let result = (|| {
+        let prefix = CStr::from_ptr(prefix)
+            .to_str()
+            .map_err(|error| error.to_string())?;
+        let archive = &archive.0;
+        let legacy = !archive.header().uses_new_namespaces();
+        let namespace = if legacy { b'A' } else { b'C' };
+        let mut matches = Vec::new();
+        if prefix.is_empty() || prefix.len() > 512 {
+            return Ok(TFKTitleMatches(matches));
+        }
+        let range = match archive.title_prefix_range(namespace, prefix) {
+            Ok(range) => range,
+            Err(zimru::Error::EntryNotFound) => return Ok(TFKTitleMatches(matches)),
+            Err(error) => return Err(error.to_string()),
+        };
+        for index in range.take(120) {
+            let entry = archive
+                .entry_by_title_index(index)
+                .map_err(|error| error.to_string())?;
+            let Ok(item) = entry.get_item(true) else {
+                continue;
+            };
+            if item.namespace() != namespace || !item.mimetype().starts_with("text/html") {
+                continue;
+            }
+            matches.push(TFKEntryMetadata {
+                path: item_path(&item, legacy)?,
+                title: CString::new(entry.title()).map_err(|error| error.to_string())?,
+            });
+            if matches.len() == 30 {
+                break;
+            }
+        }
+        Ok(TFKTitleMatches(matches))
+    })();
+    return_result(result, error)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tfk_title_matches_entry(
+    matches: &TFKTitleMatches,
+    index: usize,
+) -> *const TFKEntryMetadata {
+    matches.0.get(index).map_or(ptr::null(), |entry| entry)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tfk_title_matches_close(matches: *mut TFKTitleMatches) {
+    drop(Box::from_raw(matches));
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn tfk_archive_pdf_entry(
     archive: &TFKArchive,
     index: u32,
     error: *mut *mut c_char,
-) -> *mut TFKPDFEntry {
+) -> *mut TFKEntryMetadata {
     let result = (|| {
         let entry = archive
             .0
@@ -210,7 +270,7 @@ pub unsafe extern "C" fn tfk_archive_pdf_entry(
         if item.mimetype() != "application/pdf" {
             return Ok(None);
         }
-        Ok(Some(TFKPDFEntry {
+        Ok(Some(TFKEntryMetadata {
             path: item_path(&item, !archive.0.header().uses_new_namespaces())?,
             title: CString::new(item.title()).map_err(|error| error.to_string())?,
         }))
@@ -223,17 +283,17 @@ pub unsafe extern "C" fn tfk_archive_pdf_entry(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn tfk_pdf_entry_path(entry: &TFKPDFEntry) -> *const c_char {
+pub unsafe extern "C" fn tfk_entry_metadata_path(entry: &TFKEntryMetadata) -> *const c_char {
     entry.path.as_ptr()
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn tfk_pdf_entry_title(entry: &TFKPDFEntry) -> *const c_char {
+pub unsafe extern "C" fn tfk_entry_metadata_title(entry: &TFKEntryMetadata) -> *const c_char {
     entry.title.as_ptr()
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn tfk_pdf_entry_close(entry: *mut TFKPDFEntry) {
+pub unsafe extern "C" fn tfk_entry_metadata_close(entry: *mut TFKEntryMetadata) {
     drop(Box::from_raw(entry));
 }
 

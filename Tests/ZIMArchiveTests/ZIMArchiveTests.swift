@@ -14,6 +14,18 @@ private final class Fractions: @unchecked Sendable {
 }
 
 final class ZIMArchiveTests: XCTestCase {
+    func testEmbeddedArticleTitlesAreSearchableBeforeIndexing() throws {
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "climate", withExtension: "zim"))
+        let archive = try ZIMArchive(fileURL: fixture)
+        let matches = try archive.articleTitles(matching: "climate   change")
+        let article = try XCTUnwrap(matches.first { $0.title == "Climate change" })
+
+        XCTAssertTrue(try archive.resource(at: article.path).mimeType.hasPrefix("text/html"))
+        XCTAssertLessThanOrEqual(matches.count, 30)
+        XCTAssertEqual(Set(matches.map(\.path)).count, matches.count)
+        XCTAssertTrue(try archive.articleTitles(matching: "zz-no-such-article-title").isEmpty)
+    }
+
     func testImportedArchiveVerificationDetectsCorruption() async throws {
         let directory = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
