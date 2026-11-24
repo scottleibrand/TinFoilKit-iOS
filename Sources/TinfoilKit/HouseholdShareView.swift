@@ -24,7 +24,7 @@ struct HouseholdShareView: View {
                 switch session.state {
                 case .ready(let link):
                     ShareLink(item: link) {
-                        Label("Share private link", systemImage: "square.and.arrow.up")
+                        Label("Share local link", systemImage: "square.and.arrow.up")
                     }
                     Button("Stop sharing", role: .destructive) { session.stop() }
                 case .starting:
@@ -151,7 +151,7 @@ private final class HouseholdShareSession: ObservableObject {
         case let .failed(error):
             end(.message(error))
         case .expired:
-            end(.message("The private link expired."))
+            end(.message("The local link expired."))
         }
     }
 }

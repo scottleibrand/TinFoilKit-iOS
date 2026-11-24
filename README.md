@@ -16,6 +16,8 @@ In Map, press and hold a location to copy its coordinates, set it as home, or sa
 
 In **Household → Import and export**, save a household backup to Files or restore one on another iPhone. The same screen imports and exports the desktop kit’s `notes.txt` and `places.json` files individually. If the local household file is damaged, restoring a backup or starting a new household keeps a separate copy of the damaged file.
 
+In **Household → Share on local network**, select the household details to share and start a browser session on a trusted Wi-Fi or Ethernet network with IPv4. The link uses unencrypted HTTP. Anyone on that network who has the link or can watch its traffic can read the selection. The session ends after ten minutes, when you leave the screen, or when you stop it.
+
 Use Print the Essentials in Household for a printable copy of your household information and selected pages from installed references. Install a regional place index to include the nearest services to your saved home.
 
 To build a regional address and service index, install `osmium==4.2.0` and run `python Scripts/build-regional-place-index.py region.osm.pbf region.sqlite --region "Region name" --source https://provider.example/region.osm.pbf`, using the actual source URL. Import the resulting SQLite file from Map. It works with any basemap and includes its own OpenStreetMap attribution.
@@ -30,7 +32,7 @@ Open **Library → Find nearby** to discover other Tinfoil Kit devices with Near
 
 ## Build locally
 
-Use Xcode, XcodeGen, Rust, Node.js, and Python 3. The first preparation downloads the pinned reader, map and routing dependencies plus a public ZIM test fixture. Generated files and external data are stored in `.build/`.
+Use an Apple Silicon Mac with Xcode 26 or later, XcodeGen, Rust, Node.js, and Python 3. Preparation downloads the reader, map and routing dependencies plus a public ZIM test fixture. Generated files and external data are stored in `.build/`.
 
 ```sh
 rustup target add aarch64-apple-ios-sim
