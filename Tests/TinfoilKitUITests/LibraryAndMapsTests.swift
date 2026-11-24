@@ -165,5 +165,12 @@ final class LibraryAndMapsTests: XCTestCase {
         app.buttons["ask-submit"].tap()
         XCTAssertTrue(app.staticTexts["Matching passages"].waitForExistence(timeout: 30))
         XCTAssertFalse(app.staticTexts["Answer"].exists)
+        let online = app.buttons["Ask online"]
+        XCTAssertTrue(online.waitForExistence(timeout: 5))
+        online.tap()
+        XCTAssertTrue(app.buttons["Search Google"].waitForExistence(timeout: 5))
+        for provider in ["ChatGPT", "Claude", "Google Gemini"] {
+            XCTAssertTrue(app.buttons["Copy question and open \(provider)"].exists)
+        }
     }
 }

@@ -3,6 +3,18 @@ import XCTest
 @testable import TinfoilKit
 
 final class OnlineAskClientTests: XCTestCase {
+    func testKeylessGoogleSearchPreservesTheQuestionAsOneParameter() throws {
+        let question = "Café + water & power? #outage"
+        let url = try XCTUnwrap(OnlineAskWebSearch.googleURL(for: question))
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.scheme, "https")
+        XCTAssertEqual(components.host, "www.google.com")
+        XCTAssertEqual(components.path, "/search")
+        XCTAssertEqual(components.queryItems, [URLQueryItem(name: "q", value: question)])
+        XCTAssertTrue(components.percentEncodedQuery?.contains("%2B") == true)
+        XCTAssertNil(components.fragment)
+    }
+
     func testGPTKeepsInlineCitationsAndCompleteSources() throws {
         let payload = #"""
         {"status":"completed","output":[

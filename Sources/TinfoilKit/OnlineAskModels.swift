@@ -12,6 +12,27 @@ enum OnlineAskProvider: String, CaseIterable, Codable, Identifiable, Sendable {
         case .gemini: "Google Gemini"
         }
     }
+
+    var website: URL {
+        switch self {
+        case .gpt: URL(string: "https://chatgpt.com/")!
+        case .claude: URL(string: "https://claude.ai/")!
+        case .gemini: URL(string: "https://gemini.google.com/")!
+        }
+    }
+}
+
+enum OnlineAskWebSearch {
+    static func googleURL(for question: String) -> URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "www.google.com"
+        components.path = "/search"
+        components.queryItems = [URLQueryItem(name: "q", value: question)]
+        // Form-style query parsers interpret a bare plus as a space.
+        components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        return components.url
+    }
 }
 
 struct OnlineAskCitation: Codable, Hashable, Identifiable, Sendable {
