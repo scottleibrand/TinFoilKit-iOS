@@ -26,20 +26,23 @@ struct HouseholdSnapshot: Codable, Equatable, Sendable {
     var notes = ""
     var home: HouseholdPlace?
     var pins: [HouseholdPlace] = []
+
+    var isValid: Bool {
+        home?.isValid != false && pins.allSatisfy(\.isValid) && Set(pins.map(\.id)).count == pins.count
+    }
 }
 
 @MainActor
 final class HouseholdStore: ObservableObject {
     @Published private(set) var snapshot = HouseholdSnapshot()
-    private(set) var loadError: Error?
+    @Published private(set) var loadError: Error?
     private let file: URL
 
     init(file: URL = URL.applicationSupportDirectory.appendingPathComponent("Household/household.json")) {
         self.file = file
         do {
             let saved = try JSONDecoder().decode(HouseholdSnapshot.self, from: Data(contentsOf: file))
-            guard saved.home?.isValid != false, saved.pins.allSatisfy(\.isValid),
-                  Set(saved.pins.map(\.id)).count == saved.pins.count else {
+            guard saved.isValid else {
                 throw CocoaError(.fileReadCorruptFile)
             }
             snapshot = saved
@@ -79,18 +82,42 @@ final class HouseholdStore: ObservableObject {
         try save(next)
     }
 
+    func restore(_ next: HouseholdSnapshot) throws {
+        guard next.isValid else { throw PlaceError.invalidHousehold }
+        guard loadError != nil || snapshot != next else { return }
+        let data = try JSONEncoder().encode(next)
+        if loadError != nil {
+            let directory = file.deletingLastPathComponent()
+            let recovery = directory.appendingPathComponent(
+                "household-unreadable-\(UUID().uuidString).json"
+            )
+            try FileManager.default.copyItem(at: file, to: recovery)
+        }
+        try write(data)
+        snapshot = next
+        loadError = nil
+    }
+
     private func save(_ next: HouseholdSnapshot) throws {
         if let loadError { throw loadError }
         guard snapshot != next else { return }
-        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let data = try JSONEncoder().encode(next)
-        try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try write(JSONEncoder().encode(next))
         snapshot = next
     }
 
-    private enum PlaceError: LocalizedError {
-        case invalid
+    private func write(_ data: Data) throws {
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
 
-        var errorDescription: String? { "Enter a name and valid coordinates for this place." }
+    private enum PlaceError: LocalizedError {
+        case invalid, invalidHousehold
+
+        var errorDescription: String? {
+            switch self {
+            case .invalid: "Enter a name and valid coordinates for this place."
+            case .invalidHousehold: "The household backup contains invalid or duplicate locations."
+            }
+        }
     }
 }

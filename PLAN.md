@@ -61,7 +61,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 
 ### Household
 
-- Household data can't be exported or imported, so moving to a phone without a backup or sharing with family isn't possible. A damaged household file blocks every edit, and there's no way to recover it.
+- Household notes, home and pins can move through an iPhone backup file or the desktop kit's notes and places files. Verify Files import, export and damaged-data recovery on a device.
 - Printable references depend on exact edition filenames and page numbers. A catalog update silently drops them. The post-disaster source isn't in the catalog. Check page ranges whenever the catalog changes an edition.
 
 ### Tests and build

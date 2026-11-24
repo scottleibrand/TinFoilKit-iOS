@@ -69,6 +69,14 @@ struct HouseholdView: View {
                     } label: {
                         Label("Share on local network", systemImage: "person.2")
                     }
+                    NavigationLink {
+                        HouseholdFilesView(household: household) {
+                            try household.restore($0)
+                            draft = nil
+                        }
+                    } label: {
+                        Label("Import and export", systemImage: "arrow.left.arrow.right")
+                    }
                 }
             }
             .navigationTitle("Household")
