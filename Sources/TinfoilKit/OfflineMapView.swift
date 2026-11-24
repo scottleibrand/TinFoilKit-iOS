@@ -9,7 +9,7 @@ struct OfflineMapView: View {
     @State private var regionStorage = RegionalPlaceStorage()
     @State private var placeRegions: [RegionalPlaceStorage.Installed] = []
     @State private var routeStorage = RegionalRouteStore()
-    @State private var routingRegion: RegionalRouteStore.Installed?
+    @State private var routingRegions: [RegionalRouteStore.Installed] = []
     @StateObject private var location = MapLocation()
     @StateObject private var exploration = MapExploration()
     @AppStorage("lastOfflineMapPosition") private var savedPosition = ""
@@ -33,6 +33,7 @@ struct OfflineMapView: View {
     @State private var editingPin: HouseholdPlace?
     @State private var showingBasemaps = false
     @State private var showingPlaceRegions = false
+    @State private var showingRoutingPacks = false
 
     private var savedPlaces: [HouseholdPlace] {
         (household.snapshot.home.map { [$0] } ?? []) + household.snapshot.pins
@@ -86,10 +87,10 @@ struct OfflineMapView: View {
                     UIPasteboard.general.string = MapCoordinateText.degreesMinutesSeconds(place.coordinate)
                 }
                 if let origin = location.fix?.coordinate ?? household.snapshot.home?.coordinate {
-                    if routingRegion != nil {
+                    if supportsOfflineRoute(from: origin, to: place.coordinate) {
                         Button("Drive here") { routeHere(place, from: origin, mode: .driving) }
                     }
-                    if routingRegion != nil || walkingIndex != nil {
+                    if supportsOfflineRoute(from: origin, to: place.coordinate) || walkingIndex != nil {
                         Button("Walk here") { routeHere(place, from: origin, mode: .walking) }
                     }
                 }
@@ -113,6 +114,9 @@ struct OfflineMapView: View {
             }
             .sheet(isPresented: $showingPlaceRegions) {
                 InstalledPlaceDataView(storage: regionStorage, regions: $placeRegions)
+            }
+            .sheet(isPresented: $showingRoutingPacks) {
+                InstalledRoutingPacksView(storage: routeStorage, packs: $routingRegions)
             }
             .onChange(of: location.fix?.timestamp) {
                 if let fix = location.fix {
@@ -144,7 +148,7 @@ struct OfflineMapView: View {
                     placeRegions = try await regionStorage.installedIndexes()
                 }
                 catch { errorMessage = error.localizedDescription }
-                do { routingRegion = try await routeStorage.current() }
+                do { routingRegions = try await routeStorage.installedPacks() }
                 catch { errorMessage = error.localizedDescription }
             }
             .task(id: routeRequest?.id) {
@@ -219,10 +223,10 @@ struct OfflineMapView: View {
                             }
                         } else if let selectedPlace {
                             Text(selectedPlace.name)
-                            if routingRegion != nil || walkingIndex != nil {
+                            if supportsOfflineRoute(from: selectedPlace.coordinate) || walkingIndex != nil {
                                 Button("Start walk here") { findDestination(from: selectedPlace, mode: .walking) }
                             }
-                            if routingRegion != nil {
+                            if supportsOfflineRoute(from: selectedPlace.coordinate) {
                                 Button("Start drive here") { findDestination(from: selectedPlace, mode: .driving) }
                             }
                         }
@@ -273,9 +277,8 @@ struct OfflineMapView: View {
                         }
                         .disabled(importingRouting)
                     }
-                    if let routingRegion {
-                        Link("Routing data · \(routingRegion.pack.region)", destination: routingRegion.pack.licenseURL)
-                    }
+                    Button("Installed routing packs", systemImage: "signpost.right") { showingRoutingPacks = true }
+                        .disabled(importingRouting)
                 } label: {
                     Label("Import map data", systemImage: "plus")
                 }
@@ -343,8 +346,8 @@ struct OfflineMapView: View {
                 importingRouting = true
                 defer { importingRouting = false }
                 routeRequest = nil
-                let installed = try await routeStorage.install(file)
-                routingRegion = installed
+                _ = try await routeStorage.install(file)
+                routingRegions = try await routeStorage.installedPacks()
                 route = nil
             }
         } catch {
@@ -406,14 +409,21 @@ struct OfflineMapView: View {
         )
     }
 
+    private func supportsOfflineRoute(from origin: CLLocationCoordinate2D, to destination: CLLocationCoordinate2D? = nil) -> Bool {
+        let start = MapRoute.Point(latitude: origin.latitude, longitude: origin.longitude)
+        let end = destination.map { MapRoute.Point(latitude: $0.latitude, longitude: $0.longitude) }
+        return routingRegions.contains { installed in
+            let bounds = installed.pack.bounds
+            return bounds.contains(start) && (end.map(bounds.contains) ?? true)
+        }
+    }
+
     private func calculate(_ request: RouteRequest) async {
         defer { if routeRequest?.id == request.id { routeRequest = nil } }
         do {
             let result: MapRoute
-            if let routingRegion, (request.mode == .driving ||
-                (routingRegion.pack.bounds.contains(request.origin) && routingRegion.pack.bounds.contains(request.destination))) {
-                result = try await routeStorage.route(routingRegion, from: request.origin, to: request.destination,
-                                                      mode: request.mode)
+            if request.mode == .driving || supportsOfflineRoute(from: request.origin.coordinate, to: request.destination.coordinate) {
+                result = try await routeStorage.route(from: request.origin, to: request.destination, mode: request.mode)
             } else if request.mode == .walking, let index = walkingIndex {
                 let preview = try await Task.detached {
                     try WalkingRouter(index: index).route(

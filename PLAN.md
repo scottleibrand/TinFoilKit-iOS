@@ -10,7 +10,7 @@ Status as of 2026-11-24. "Built" means the feature exists in the app. It is comp
 | --- | --- | --- |
 | Offline library | Built | Run the milestone 1 acceptance checks on a device with a publisher archive. Measure PDF extraction time and search-index storage on the larger packs. |
 | Content packs | Partly built | The bundled catalog has English and Spanish choices and dated editions. Wi-Fi downloads, disk space checks, checksum verification, repair and replacement after indexing are implemented. Expand coverage, add catalog refresh and exercise real interrupted transfers. |
-| Maps | Partly built | The online tile cache, place index import and walking previews exist. Region installation with explicit coverage and the chosen routing engine remain. |
+| Maps | Partly built | Imported basemaps, place indexes and Valhalla routing packs work offline. Add in-app regional downloads and verify the full navigation workflow on an iPhone. |
 | Ask | Partly built | Search and cited answers use Apple's on-device model. Behavior on devices without Apple Intelligence and the decision on a downloadable model remain. |
 | Household tools | Built | Run the airplane-mode restart and printing checks on a device. |
 | Household sharing | Partly built | A Desktop kit screen and a phone-hosted read-only household session exist. Review the listener and test peer connectivity. Verified pack transfer and shared queries remain. |
@@ -41,7 +41,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 
 ### Maps
 
-- **Beta.** The map keeps multiple imported basemaps with coverage and a saved selection. Address and service search and household printing use multiple installed place indexes. Publish region packs (tiles, places and routing data) in the catalog for direct installation, and let users manage multiple routing graphs.
+- **Beta.** The map keeps multiple imported basemaps, place indexes, and offline routing graphs. Address and service search and household printing use the installed place indexes. Routes use a graph that covers both endpoints. Publish region packs with tiles, places and routing data in the catalog for direct installation.
 - **Beta.** The tile cache:
   - reveals the areas a user views to the Source Cooperative host, which needs a privacy disclosure and an off switch;
   - downloads over cellular;
@@ -52,7 +52,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 - The map style is minimal and hand-written. It has no street names, house numbers or point-of-interest icons, and only English labels. Adopt the Protomaps basemaps style (BSD-3-Clause) with its fonts and icons.
 - Region coverage is a bounding box. Show coverage as the region's actual outline where it isn't rectangular.
 - Regional place indexes are excluded from device backup.
-- Walking routes show a line and a distance only. There are no step-by-step directions and no driving. This waits on the routing engine choice in milestone 3.
+- Installed routing packs support walking and driving directions with individual steps. Verify each mode on a physical iPhone in airplane mode.
 
 ### Ask
 
@@ -88,7 +88,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 - Render installed Protomaps regions in MapLibre with packaged style assets, visible attribution and GPS location. A region install covers an explicit area. Test an upstream PMTiles file and cold-launch with connectivity disabled.
 - The tile cache saves tiles fetched from Source Cooperative as the user pans. It supplements installed regions and does not replace them. When offline, show areas outside installed regions and the cache as unavailable, and never wait on the network to draw the map.
 - Add regional place search from a prebuilt SQLite place index. Verify search and coverage boundaries offline. [Upstream map design](https://github.com/tudor-city-ventures/tinfoil-kit/blob/64179271bcebffc5d76f1e3d13d2592e0089b6b1/docs/DESIGN.md#maps)
-- Upstream routes with GraphHopper, which needs Java and can't run on iOS. Walking previews currently use a graph built by [Scripts/build-walking-graph.py](Scripts/build-walking-graph.py). Evaluate Valhalla (MIT) with the probe in [Scripts/routing](Scripts/routing) for walking and driving with one-way streets and turn restrictions. Record the engine choice, its routing data format and size per region, and how that data is downloaded with a region.
+- The iOS app runs Valhalla (MIT) with regional `.tfkroute` graph packs. A simulator test verifies walking and driving maneuvers and a one-way detour. The bundled walking preview remains available for its covered area. Include compatible graphs when publishing regional downloads. [Routing engine and format](Scripts/routing/README.md)
 
 ## 4. Answers and sharing
 

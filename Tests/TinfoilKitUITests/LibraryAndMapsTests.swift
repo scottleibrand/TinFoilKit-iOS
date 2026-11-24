@@ -65,6 +65,10 @@ final class LibraryAndMapsTests: XCTestCase {
         app.buttons["Import map data"].tap()
         app.buttons["Installed place data"].tap()
         XCTAssertTrue(app.navigationBars["Installed place data"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        app.buttons["Import map data"].tap()
+        app.buttons["Installed routing packs"].tap()
+        XCTAssertTrue(app.navigationBars["Installed routing packs"].waitForExistence(timeout: 5))
     }
 
     func testSeattleWalkingPreview() throws {

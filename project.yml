@@ -96,7 +96,11 @@ targets:
   MapTileTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [Tests/MapTileTests]
+    sources:
+      - path: Tests/MapTileTests
+        excludes: [Fixtures]
+      - path: Tests/MapTileTests/Fixtures/Synthetic.tfkroute
+        buildPhase: resources
     dependencies:
       - target: TinfoilKit
     settings:
