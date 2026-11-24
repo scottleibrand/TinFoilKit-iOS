@@ -40,6 +40,8 @@ Keep provider credentials, private household data, and unpublished location or r
 
 The lightweight profile and bundled starter guide are implemented. The first local iPhone release build measured 9,426,954 bytes in a ZIP and excluded regional map archives, place indexes and routing packs. App Store download size and offline first launch on a fresh phone still need verification.
 
+The first foreground public-sync item is an original MIT-licensed household check-in worksheet. It is packaged with the standard build and pinned by exact byte count and SHA-256 in both profiles. Nearby can receive it over TLS when public sync is enabled and store it atomically for offline reading and relay.
+
 | Slice | Deliverable | Acceptance |
 | --- | --- | --- |
 | 1. Lightweight build and direct discovery | Measured lightweight release profile, starter reference and a foreground Nearby screen. | Cold install on two physical iPhones, including one on an older supported iOS. Disable cellular, disconnect both from any access point, leave Wi-Fi radios enabled, and demonstrate discovery. Repeat on a LAN without internet and with local-network permission denied. Verify discovery traffic exposes only the ephemeral service fields. |

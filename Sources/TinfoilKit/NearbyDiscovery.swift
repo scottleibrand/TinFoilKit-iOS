@@ -26,8 +26,12 @@ final class NearbyDiscovery: ObservableObject {
     @Published private(set) var state: State = .idle
     @Published private(set) var localID: String?
     @Published private(set) var peers: [Peer] = []
+    @Published private(set) var publicReferenceText: String?
     var isRunning: Bool { browser != nil }
 
+    private let publicReference: NearbyPublicReference
+    private var publicSyncEnabled = false
+    private var publicTransfer: NearbyPublicTransfer?
     private let queue = DispatchQueue(label: "org.tinfoilkit.nearby-discovery")
     private var generation = UUID()
     private var browser: NWBrowser?
@@ -37,20 +41,29 @@ final class NearbyDiscovery: ObservableObject {
     private var waiting: [Phase: State] = [:]
     private var recentLocalIDs: [String] = []
 
+    init(publicReference: NearbyPublicReference = NearbyPublicReference()) {
+        self.publicReference = publicReference
+        publicReferenceText = publicReference.loadVerified().flatMap { String(data: $0, encoding: .utf8) }
+    }
+
     deinit {
         rotation?.cancel()
         browser?.cancel()
         listener?.cancel()
     }
 
-    func start() {
+    func start(publicSync enabled: Bool? = nil) {
+        if let enabled, enabled != publicSyncEnabled {
+            stop()
+            publicSyncEnabled = enabled
+        }
         guard !isRunning else { return }
         let id = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         let generation = self.generation
 
         let listener: NWListener
         do {
-            let parameters = Self.localParameters()
+            let parameters = try publicSyncEnabled ? NearbyPublicTLS.listenerParameters() : Self.localParameters()
             parameters.acceptLocalOnly = true
             listener = try NWListener(using: parameters)
         } catch {
@@ -60,7 +73,15 @@ final class NearbyDiscovery: ObservableObject {
         listener.service = NWListener.Service(
             name: Self.instancePrefix + id, type: Self.serviceType, domain: Self.domain
         )
-        listener.newConnectionHandler = { connection in connection.cancel() }
+        listener.newConnectionHandler = { [weak self] connection in
+            DispatchQueue.main.async {
+                guard let self, self.generation == generation, let transfer = self.publicTransfer else {
+                    connection.cancel()
+                    return
+                }
+                transfer.accept(connection)
+            }
+        }
         listener.stateUpdateHandler = { [weak self] update in
             DispatchQueue.main.async { self?.listenerChanged(update, generation: generation) }
         }
@@ -81,6 +102,11 @@ final class NearbyDiscovery: ObservableObject {
 
         self.listener = listener
         self.browser = browser
+        if publicSyncEnabled {
+            publicTransfer = NearbyPublicTransfer(reference: publicReference) { [weak self] bytes in
+                self?.publicReferenceText = String(data: bytes, encoding: .utf8)
+            }
+        }
         localID = id
         recentLocalIDs.append(id)
         if recentLocalIDs.count > 16 { recentLocalIDs.removeFirst() }
@@ -145,6 +171,7 @@ final class NearbyDiscovery: ObservableObject {
             mark(.browser, waitingFor: nil)
         case let .waiting(error):
             peers.removeAll()
+            publicTransfer?.updateTargets([:])
             mark(.browser, waitingFor: Self.problem(for: error, terminal: false))
         case let .failed(error):
             end(Self.problem(for: error, terminal: true))
@@ -175,15 +202,23 @@ final class NearbyDiscovery: ObservableObject {
 
     private func resultsChanged(_ results: Set<NWBrowser.Result>, generation: UUID) {
         guard generation == self.generation, waiting[.browser] == nil else { return }
-        var ids: Set<String> = []
+        var endpoints: [String: NWEndpoint] = [:]
         for result in results {
             if let id = Self.peerID(for: result.endpoint), !recentLocalIDs.contains(id) {
-                ids.insert(id)
-                if ids.count == Self.peerLimit { break }
+                // A service seen on loopback is hosted on this device. Use that link instead of
+                // resolving our own Wi-Fi address, which can stall even with a matching service.
+                if let loopback = result.interfaces.first(where: { $0.type == .loopback }),
+                   case let .service(name, type, domain, _) = result.endpoint {
+                    endpoints[id] = .service(name: name, type: type, domain: domain, interface: loopback)
+                } else if endpoints[id] == nil {
+                    endpoints[id] = result.endpoint
+                }
+                if endpoints.count == Self.peerLimit { break }
             }
         }
-        let updated = ids.sorted().map(Peer.init(id:))
+        let updated = endpoints.keys.sorted().map(Peer.init(id:))
         if updated != peers { peers = updated }
+        publicTransfer?.updateTargets(endpoints)
     }
 
     private static func peerID(for endpoint: NWEndpoint) -> String? {
@@ -218,6 +253,8 @@ final class NearbyDiscovery: ObservableObject {
         generation = UUID()
         rotation?.cancel()
         rotation = nil
+        publicTransfer?.stop()
+        publicTransfer = nil
         browser?.cancel()
         listener?.cancel()
         browser = nil

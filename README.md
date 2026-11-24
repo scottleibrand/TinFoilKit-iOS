@@ -28,7 +28,7 @@ To make a graph available for installation from the app bundle, place its `.tfkr
 
 Open **Offline readiness** from the Library toolbar to check storage, installed content, indexing progress, model availability, and map coverage before a trip.
 
-Open **Library → Find nearby** to discover other Tinfoil Kit devices with Nearby open. Compare the temporary codes shown on the two screens. This build implements discovery. [Nearby sharing plan](DISASTER-SHARING.md)
+Open **Library → Find nearby** to discover devices with Nearby open. Enable **Sync public references** on both devices to automatically receive and relay the verified household check-in worksheet. The standard build supplies the original worksheet. The lightweight build can receive it and keep it for offline reading. [Nearby sharing plan](DISASTER-SHARING.md)
 
 ## Build locally
 
@@ -72,5 +72,7 @@ The local ZIP measures this build. Use App Store Connect device-specific size re
 ## Test
 
 Run the `ZIMArchive` scheme on a dedicated simulator for library and search tests. For the `TinfoilKit` UI test scheme, install the debug app in a dedicated simulator and copy `.build/fixtures/climate.zim` into its Documents folder as `Climate Test.zim`. The test uses the Files picker to import it on a fresh install.
+
+Run `bash Tests/NearbyPublicFixture/run.sh` on a Mac with local networking access to exercise discovery, opt-in, and relay between independent processes.
 
 Project source code is under the [MIT license](LICENSE). See the [third-party notices](THIRD-PARTY.md) for dependency and content terms and the [implementation plan](PLAN.md) for milestones and release criteria.

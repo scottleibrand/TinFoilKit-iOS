@@ -6,6 +6,7 @@ struct NearbyView: View {
     @Environment(\.openURL) private var openURL
     @StateObject private var discovery = NearbyDiscovery()
     @State private var screenIsOpen = false
+    @AppStorage("nearbyPublicSyncEnabled") private var publicSyncEnabled = false
 
     var body: some View {
         List {
@@ -31,12 +32,26 @@ struct NearbyView: View {
                     }
                 }
             }
+            Section {
+                Toggle("Sync public references", isOn: $publicSyncEnabled)
+                if let text = discovery.publicReferenceText {
+                    NavigationLink(NearbyPublicReference.title) {
+                        ScrollView {
+                            Text(text).frame(maxWidth: .infinity, alignment: .leading).padding()
+                        }
+                        .navigationTitle(NearbyPublicReference.title)
+                        .navigationBarTitleDisplayMode(.inline)
+                    }
+                }
+            } footer: {
+                Text("Tinfoil Kit exchanges verified public references automatically while Nearby is open on both devices.")
+            }
         }
         .navigationTitle("Nearby")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             screenIsOpen = true
-            if scenePhase == .active { discovery.start() }
+            if scenePhase == .active { discovery.start(publicSync: publicSyncEnabled) }
         }
         .onDisappear {
             screenIsOpen = false
@@ -45,10 +60,13 @@ struct NearbyView: View {
         .onChange(of: scenePhase) {
             guard screenIsOpen else { return }
             if scenePhase == .active {
-                discovery.start()
+                discovery.start(publicSync: publicSyncEnabled)
             } else if scenePhase == .background {
                 discovery.stop()
             }
+        }
+        .onChange(of: publicSyncEnabled) {
+            if screenIsOpen, scenePhase == .active { discovery.start(publicSync: publicSyncEnabled) }
         }
     }
 
