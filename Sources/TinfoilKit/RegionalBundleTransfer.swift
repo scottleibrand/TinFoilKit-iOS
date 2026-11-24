@@ -82,35 +82,37 @@ final class RegionalBundleTransfer: NSObject, URLSessionDataDelegate, @unchecked
     private var validator: String?
     private var lastReport: Int64
     private var lastCheckpoint: Int64
-    private var prefixHash = SHA256()
+    private var prefixHash: SHA256
     private var failure: Error?
 
-    private init(file: URL, limit: Int64, size: Int64?, offset: Int64, validator: String?,
+    private init(file: URL, limit: Int64, size: Int64?, resume: RegionalDownloadState.Asset.Resume?,
                  checkpoint: RegionalDownloadState.Asset?,
                  progress: @escaping @Sendable (Int64) -> Void) {
         self.file = file
         self.limit = limit
         self.size = size
-        self.offset = offset
+        offset = resume?.offset ?? 0
         self.checkpoint = checkpoint
-        self.validator = offset > 0 ? validator : nil
+        validator = resume?.validator
         self.progress = progress
         received = offset
         lastReport = offset
         lastCheckpoint = offset
+        prefixHash = resume?.prefixHash ?? SHA256()
     }
 
-    static func receive(_ url: URL, to file: URL, limit: Int64, size: Int64?, offset: Int64,
-                        validator: String?, cellular: Bool, checkpoint: RegionalDownloadState.Asset? = nil,
+    static func receive(_ url: URL, to file: URL, limit: Int64, size: Int64?,
+                        cellular: Bool, resume: RegionalDownloadState.Asset.Resume? = nil,
+                        checkpoint: RegionalDownloadState.Asset? = nil,
                         progress: @escaping @Sendable (Int64) -> Void) async -> Outcome {
         var request = URLRequest(url: url)
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
-        if offset > 0 {
-            request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
-            request.setValue(validator, forHTTPHeaderField: "If-Range")
+        if let resume {
+            request.setValue("bytes=\(resume.offset)-", forHTTPHeaderField: "Range")
+            request.setValue(resume.validator, forHTTPHeaderField: "If-Range")
         }
-        let receiver = RegionalBundleTransfer(file: file, limit: limit, size: size, offset: offset,
-                                              validator: validator, checkpoint: checkpoint, progress: progress)
+        let receiver = RegionalBundleTransfer(file: file, limit: limit, size: size, resume: resume,
+                                              checkpoint: checkpoint, progress: progress)
         let transferRequest = request
         return await withTaskCancellationHandler {
             await withCheckedContinuation { receiver.start(transferRequest, cellular: cellular, completion: $0) }
@@ -122,6 +124,7 @@ final class RegionalBundleTransfer: NSObject, URLSessionDataDelegate, @unchecked
     private func start(_ request: URLRequest, cellular: Bool, completion: CheckedContinuation<Outcome, Never>) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.allowsCellularAccess = cellular
+        configuration.waitsForConnectivity = true
         configuration.httpShouldSetCookies = false
         configuration.urlCredentialStorage = nil
         configuration.urlCache = nil
@@ -171,8 +174,7 @@ final class RegionalBundleTransfer: NSObject, URLSessionDataDelegate, @unchecked
             if headers.offset == 0 {
                 try checkpoint?.forgetCheckpoint()
                 try output.truncate(atOffset: 0)
-            } else if checkpoint != nil {
-                prefixHash = try RegionalDownloadState.hash(file, byteCount: headers.offset, cancellable: false)
+                prefixHash = SHA256()
             }
             try output.seek(toOffset: UInt64(headers.offset))
             received = headers.offset

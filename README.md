@@ -107,7 +107,11 @@ For the nearby-service Ask UI test, build an index from `Tests/RegionalPlaceInde
 
 For the regional bundle import UI test, copy a valid synthetic bundle folder named `Synthetic Regional Fixture` into the app’s Documents folder on the dedicated simulator. Set the dataset region to `Routing test fixture` when preparing the bundle. The test imports and removes that edition.
 
+To exercise interrupted HTTPS downloads, use a dedicated simulator that trusts a test certificate for `127.0.0.1`. Run `python3 Tests/RegionalDownloadFixture/serve.py BUNDLE CERTIFICATE KEY CONFIGURATION` with the synthetic bundle and its test server certificate and key. Copy the generated configuration into the app’s Documents folder as `RegionalHTTPSFixture.json` and run `MapTileTests/RegionalBundleTransferTests/testResumesInterruptedHTTPSDownload`. Restart the server before each run.
+
 For the version 2 UI test, run `python Tests/RegionalBundleFixture/run.py --ui-bundle ".build/Synthetic Regional Map Fixture"` and copy that folder into the same simulator Documents folder. The test verifies automatic basemap selection, visible publisher credit, and removal.
+
+For the regional download recovery UI test, copy the same version 2 fixture into the test app’s `Library/Application Support/PendingRegionalDownload` directory on the simulator. Write `job.json` alongside the assets with `schemaVersion` set to `1`, `manifestSHA256` set to the SHA-256 of `manifest.json`, `cellular` set to `false`, and `started` set to `true`. The test reopens and installs the completed job without reaching a publisher.
 
 Run `bash Tests/NearbyPublicFixture/run.sh` on a Mac with local networking access to exercise discovery, opt-in, relay, and completion of existing transfers after discovery stops.
 

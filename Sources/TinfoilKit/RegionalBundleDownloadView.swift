@@ -18,6 +18,7 @@ struct RegionalBundleDownloadView: View {
     @State private var cancelling = false
     @State private var restoring = true
     @State private var invalidPending = false
+    @State private var waitingForTransfer = false
     @State private var confirmingDiscard = false
 
     var body: some View {
@@ -42,7 +43,7 @@ struct RegionalBundleDownloadView: View {
                             Link("\(basemap.attribution) · \(basemap.license)", destination: basemap.licenseURL)
                         }
                     }
-                } else if !invalidPending {
+                } else if !invalidPending, !waitingForTransfer {
                     Section {
                         TextField("HTTPS manifest URL", text: $manifestURL)
                             .keyboardType(.URL)
@@ -74,7 +75,9 @@ struct RegionalBundleDownloadView: View {
                     }
                 } else if !restoring {
                     Section {
-                        if invalidPending {
+                        if waitingForTransfer {
+                            Button("Check again") { Task { await restore() } }
+                        } else if invalidPending {
                             Button("Discard download", role: .destructive) { confirmingDiscard = true }
                         } else if pending == nil {
                             Button("Review download", action: loadManifest)
@@ -114,11 +117,17 @@ struct RegionalBundleDownloadView: View {
     }
 
     private func restore() async {
+        restoring = true
+        waitingForTransfer = false
+        error = nil
         defer { restoring = false }
         do {
             pending = try await downloader.pending()
             attemptedInstall = pending?.started == true
         } catch is CancellationError {
+        } catch RegionalBundleDownloadError.busy {
+            waitingForTransfer = true
+            error = "The previous regional transfer is finishing."
         } catch {
             invalidPending = true
             self.error = error.localizedDescription
@@ -154,7 +163,7 @@ struct RegionalBundleDownloadView: View {
                     }
                 }
             }
-            await onInstall(installed)
+            await Task { await onInstall(installed) }.value
             dismiss()
         }
     }

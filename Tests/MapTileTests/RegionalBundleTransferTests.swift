@@ -86,6 +86,47 @@ final class RegionalBundleTransferTests: XCTestCase {
         }
     }
 
+    func testResumesInterruptedHTTPSDownload() async throws {
+        struct Fixture: Decodable {
+            let url: String
+            let sha256: String
+            let interruptedBytes: Int64
+        }
+
+        let fixtureFile = URL.documentsDirectory.appendingPathComponent("RegionalHTTPSFixture.json")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: fixtureFile.path), "Requires a local HTTPS fixture.")
+        let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: fixtureFile))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pendingDirectory = root.appendingPathComponent("pending")
+        let storage = RegionalBundleStorage(directory: root.appendingPathComponent("installed"))
+        let source = try RegionalBundleDownloadSource(url: fixture.url, sha256: fixture.sha256)
+        let download = RegionalBundleDownload(directory: pendingDirectory)
+        let preview = try await download.load(source, cellular: false)
+
+        do {
+            _ = try await download.install(in: storage) { _ in }
+            XCTFail("The server should interrupt the initial transfer.")
+            return
+        } catch {
+            XCTAssertEqual(
+                RegionalDownloadState.regularSize(pendingDirectory.appendingPathComponent("places.sqlite")),
+                fixture.interruptedBytes
+            )
+        }
+
+        let reopened = RegionalBundleDownload(directory: pendingDirectory)
+        let pending = try await reopened.pending()
+        XCTAssertEqual(pending?.manifest, preview.manifest)
+        XCTAssertEqual(pending?.cellular, false)
+        XCTAssertEqual(pending?.started, true)
+        let installed = try await reopened.install(in: storage) { _ in }
+        XCTAssertTrue(installed.isUsable)
+        XCTAssertEqual(installed.manifest, preview.manifest)
+        let remaining = try await reopened.pending()
+        XCTAssertNil(remaining)
+    }
+
     private func response(status: Int, headers: [String: String]) throws -> HTTPURLResponse {
         try XCTUnwrap(HTTPURLResponse(
             url: URL(string: "https://example.invalid/artifact")!, statusCode: status,

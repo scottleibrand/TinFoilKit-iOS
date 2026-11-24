@@ -19,6 +19,9 @@ final class RegionalDownloadStateTests: XCTestCase {
         XCTAssertEqual(checkpoint.offset, 4)
         XCTAssertEqual(checkpoint.validator, "\"original\"")
         XCTAssertEqual(try Data(contentsOf: asset.file), prefix)
+        var resumedHash = checkpoint.prefixHash
+        resumedHash.update(data: Data("efghij".utf8))
+        XCTAssertEqual(RegionalDownloadState.hex(resumedHash), asset.expected.sha256)
     }
 
     func testRejectsStaleOrCorruptCheckpointsAndUnverifiedFile() throws {

@@ -26,9 +26,10 @@ struct RegionalDownloadState: Sendable {
             let prefixSHA256: String
         }
 
-        struct Resume {
+        struct Resume: Sendable {
             let offset: Int64
             let validator: String
+            let prefixHash: SHA256
         }
 
         let file: URL
@@ -56,7 +57,7 @@ struct RegionalDownloadState: Sendable {
                 try output.truncate(atOffset: UInt64(checkpoint.byteCount))
                 try output.synchronize()
             }
-            return Resume(offset: checkpoint.byteCount, validator: checkpoint.validator)
+            return Resume(offset: checkpoint.byteCount, validator: checkpoint.validator, prefixHash: hash)
         }
 
         func save(offset: Int64, validator: String, hash: SHA256) throws {
@@ -119,18 +120,20 @@ struct RegionalDownloadState: Sendable {
     func discard() throws { try Self.remove(directory) }
 
     static func regularSize(_ file: URL) -> Int64? {
-        guard let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
+        // A transfer grows and truncates this file between reads.
+        let current = URL(fileURLWithPath: file.path)
+        guard let values = try? current.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
               values.isRegularFile == true, values.isSymbolicLink == false, let size = values.fileSize else { return nil }
         return Int64(size)
     }
 
-    static func hash(_ file: URL, byteCount: Int64, cancellable: Bool = true) throws -> SHA256 {
+    static func hash(_ file: URL, byteCount: Int64) throws -> SHA256 {
         let input = try FileHandle(forReadingFrom: file)
         defer { try? input.close() }
         var hash = SHA256()
         var remaining = byteCount
         while remaining > 0 {
-            if cancellable { try Task.checkCancellation() }
+            try Task.checkCancellation()
             guard let bytes = try input.read(upToCount: Int(min(remaining, 1024 * 1024))), !bytes.isEmpty else {
                 throw RegionalBundleDownloadError.invalidCheckpoint
             }

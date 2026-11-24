@@ -86,7 +86,7 @@ actor RegionalBundleDownload {
 
         let outcome = await RegionalBundleTransfer.receive(
             source.url, to: state.manifestFile, limit: Int64(RegionalBundleManifest.maximumManifestBytes),
-            size: nil, offset: 0, validator: nil, cellular: cellular
+            size: nil, cellular: cellular
         ) { _ in }
         try Task.checkCancellation()
         if let error = outcome.error { throw error }
@@ -109,7 +109,9 @@ actor RegionalBundleDownload {
         let manifest = try pending(for: job).manifest
         busy = true
         defer { busy = false }
-        if let installed = try await storage.installedBundles().first(where: { $0.manifest == manifest }) {
+        let installedBundles = try await storage.installedBundles()
+        try Task.checkCancellation()
+        if let installed = installedBundles.first(where: { $0.isUsable && $0.manifest == manifest }) {
             try? state.discard()
             return installed
         }
@@ -170,7 +172,7 @@ actor RegionalBundleDownload {
         progress(offset)
         let outcome = await RegionalBundleTransfer.receive(
             expected.url, to: asset.file, limit: expected.byteCount, size: expected.byteCount,
-            offset: offset, validator: resume?.validator, cellular: cellular, checkpoint: asset, progress: progress
+            cellular: cellular, resume: resume, checkpoint: asset, progress: progress
         )
         try Task.checkCancellation()
         if let error = outcome.error { throw error }
