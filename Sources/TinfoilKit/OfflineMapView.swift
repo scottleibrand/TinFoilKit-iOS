@@ -34,6 +34,7 @@ struct OfflineMapView: View {
     @State private var showingBasemaps = false
     @State private var showingPlaceRegions = false
     @State private var showingRoutingPacks = false
+    @State private var showingMapDownloads = false
 
     private var savedPlaces: [HouseholdPlace] {
         (household.snapshot.home.map { [$0] } ?? []) + household.snapshot.pins
@@ -118,13 +119,22 @@ struct OfflineMapView: View {
             .sheet(isPresented: $showingRoutingPacks) {
                 InstalledRoutingPacksView(storage: routeStorage, packs: $routingRegions)
             }
+            .sheet(isPresented: $showingMapDownloads) {
+                MapDownloadsView(exploration: exploration)
+            }
             .onChange(of: location.fix?.timestamp) {
                 if let fix = location.fix {
                     marker = MapMarker(coordinate: fix.coordinate, title: "Current position")
                 }
             }
-            .onAppear { location.setVisible(true, centerInitially: savedPosition.isEmpty) }
-            .onDisappear { location.setVisible(false) }
+            .onAppear {
+                location.setVisible(true, centerInitially: savedPosition.isEmpty)
+                exploration.setVisible(true)
+            }
+            .onDisappear {
+                location.setVisible(false)
+                exploration.setVisible(false)
+            }
             .fileImporter(
                 isPresented: $choosing,
                 allowedContentTypes: importKind.contentTypes
@@ -202,6 +212,8 @@ struct OfflineMapView: View {
                                 Text("Available offline")
                             case .incomplete:
                                 Button("Retry saving this area") { exploration.retry() }
+                            case .unavailable:
+                                Text("Incomplete offline coverage")
                             case nil:
                                 Color.clear
                             }
@@ -263,6 +275,7 @@ struct OfflineMapView: View {
                     systemImage: location.following ? "location.fill" : "location"
                 ) { handleLocationButton() }
                 Menu {
+                    Button("Map downloads", systemImage: "arrow.down.circle") { showingMapDownloads = true }
                     Button("Installed basemaps", systemImage: "map") { showingBasemaps = true }
                     Button("Installed place data", systemImage: "list.bullet") { showingPlaceRegions = true }
                     Button("Import map tiles", systemImage: "map") { chooseImport(.tiles) }

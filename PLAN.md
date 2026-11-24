@@ -42,12 +42,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 ### Maps
 
 - **Beta.** The map keeps multiple imported basemaps, place indexes, and offline routing graphs. Address and service search and household printing use the installed place indexes. Routes use a graph that covers both endpoints. Publish region packs with tiles, places and routing data in the catalog for direct installation.
-- **Beta.** The tile cache:
-  - reveals the areas a user views to the Source Cooperative host, which needs a privacy disclosure and an off switch;
-  - downloads over cellular;
-  - has no size limit, eviction or clear option.
-
-  `v4.pmtiles` is a moving build, so tiles from different builds can mix. Choose a production tile host and record which build each cached tile came from.
+- **Beta.** Map downloads explains that the tile host sees the areas requested. Users can limit downloads to Wi-Fi, turn them off, or clear saved tiles. Tiles remain available until cleared. `v4.pmtiles` is a moving build, so tiles from different builds can mix. Choose a production tile host and record which build each cached tile came from.
 - [Scripts/prepare-map-assets.sh](Scripts/prepare-map-assets.sh) extracts Seattle from the long-lived Source Cooperative basemap. Check the style and regenerate the derived assets when the source's ETag changes.
 - The map style is minimal and hand-written. It has no street names, house numbers or point-of-interest icons, and only English labels. Adopt the Protomaps basemaps style (BSD-3-Clause) with its fonts and icons.
 - Region coverage is a bounding box. Show coverage as the region's actual outline where it isn't rectangular.

@@ -39,21 +39,34 @@ actor PMTileArchive {
     private var snapshot: Task<Snapshot, Error>?
     private var leaves: [UInt64: Task<[Entry], Error>] = [:]
     private var etag: String?
-    private static let session: URLSession = {
+    private let session: URLSession
+    private static let cellularSession = makeSession(allowsCellular: true)
+    private static let nonCellularSession = makeSession(allowsCellular: false)
+
+    private static func makeSession(allowsCellular: Bool) -> URLSession {
         let config = URLSessionConfiguration.ephemeral
         config.urlCache = nil
+        config.allowsCellularAccess = allowsCellular
         config.timeoutIntervalForRequest = 12
         config.timeoutIntervalForResource = 25
         config.httpAdditionalHeaders = ["User-Agent": "TinfoilKit-iOS/1"]
         return URLSession(configuration: config)
-    }()
+    }
 
-    init(url: URL) {
+    init(url: URL, allowsCellular: Bool = true) {
         self.url = url
+        session = allowsCellular ? Self.cellularSession : Self.nonCellularSession
     }
 
     func contains(_ tile: MapTile) async throws -> Bool {
         try await locate(tile, allowOverzoom: true) != nil
+    }
+
+    func cancelPendingReads() {
+        snapshot?.cancel()
+        snapshot = nil
+        for leaf in leaves.values { leaf.cancel() }
+        leaves.removeAll()
     }
 
     func vectorTile(_ tile: MapTile) async throws -> Data? {
@@ -136,6 +149,7 @@ actor PMTileArchive {
     }
 
     private func read(offset: UInt64, count: Int) async throws -> Data {
+        try Task.checkCancellation()
         guard count > 0, count <= 2 * 1024 * 1024 else { throw ArchiveError.invalid }
         let end = try Self.add(offset, UInt64(count - 1))
         if url.isFileURL {
@@ -150,7 +164,7 @@ actor PMTileArchive {
         request.setValue("bytes=\(offset)-\(end)", forHTTPHeaderField: "Range")
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         if let etag { request.setValue(etag, forHTTPHeaderField: "If-Match") }
-        let (body, reply) = try await Self.session.bytes(for: request)
+        let (body, reply) = try await session.bytes(for: request)
         guard let response = reply as? HTTPURLResponse else { throw ArchiveError.invalid }
         if response.statusCode == 412 { throw ArchiveError.changed }
         guard response.statusCode == 206,

@@ -72,6 +72,8 @@ final class ExploredMapTileTests: XCTestCase {
         let view = MapViewport(west: -122.37, south: 47.59, east: -122.32, north: 47.62, zoom: 12)
         let tile = try XCTUnwrap(view.tiles.first)
         let store = ExploredMapTiles(directory: output, source: fixture)
+        let skipped = await store.save(tile, seed: nil, download: false)
+        XCTAssertEqual(skipped, .missing)
         let saved = await store.save(tile, seed: nil, download: true)
         XCTAssertEqual(saved, .saved)
         let file = output.appendingPathComponent("\(tile.zoom)/\(tile.x)/\(tile.y).pbf")
@@ -80,6 +82,33 @@ final class ExploredMapTileTests: XCTestCase {
         let reopened = ExploredMapTiles(directory: output, source: output.appendingPathComponent("unavailable.pmtiles"))
         let offline = await reopened.save(tile, seed: nil, download: false)
         XCTAssertEqual(offline, .available)
+        let bytes = try await store.savedBytes()
+        XCTAssertGreaterThan(bytes, 0)
+        try await store.clearSavedTiles()
+        let empty = try await store.savedBytes()
+        XCTAssertEqual(empty, 0)
+        let afterClear = await reopened.save(tile, seed: nil, download: false)
+        XCTAssertEqual(afterClear, .missing)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.path))
+    }
+
+    func testMapDownloadPolicyRespectsTheNetworkAndOffSwitch() {
+        XCTAssertFalse(MapDownloadPolicy.off.permitsDownloads(online: true, wifi: true))
+        XCTAssertFalse(MapDownloadPolicy.wifiOnly.permitsDownloads(online: true, wifi: false))
+        XCTAssertTrue(MapDownloadPolicy.wifiOnly.permitsDownloads(online: true, wifi: true))
+        XCTAssertTrue(MapDownloadPolicy.wifiAndCellular.permitsDownloads(online: true, wifi: false))
+        XCTAssertFalse(MapDownloadPolicy.wifiAndCellular.permitsDownloads(online: false, wifi: false))
+    }
+
+    @MainActor
+    func testMapDownloadPreferenceSurvivesReopening() throws {
+        let suite = "MapDownloads-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let exploration = MapExploration(defaults: defaults)
+        XCTAssertEqual(exploration.policy, .wifiAndCellular)
+        exploration.setPolicy(.off)
+        XCTAssertEqual(MapExploration(defaults: defaults).policy, .off)
     }
 
     @MainActor
