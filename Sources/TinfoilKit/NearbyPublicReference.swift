@@ -3,12 +3,14 @@ import Foundation
 
 /// The first public item known to both builds. Only these exact bytes can enter this store.
 struct NearbyPublicReference: Sendable {
-    static let id = "household-check-in-v1"
+    static let id = manifest.id
     static let title = "Household check-in worksheet"
-    static let expectedByteCount = 1_977
+    static let expectedByteCount = manifest.byteCount
 
-    private static let sha256 = "4a3386d0c610571465db46352f3f395d768867e899e711de363b42cae4a9b18c"
-    private static let minimumFreeBytes = Int64(1_048_576 + 2 * expectedByteCount)
+    private static let manifest = NearbyPublicManifest(
+        id: "household-check-in-v1", byteCount: 1_977,
+        sha256: "4a3386d0c610571465db46352f3f395d768867e899e711de363b42cae4a9b18c"
+    )!
 
     private let directory: URL
     private let bundledFile: URL?
@@ -29,28 +31,40 @@ struct NearbyPublicReference: Sendable {
         return Self.readVerified(at: receivedFile)
     }
 
-    func canReceive() -> Bool {
+    func admission() -> NearbyPublicManifest.Admission {
+        let verified: Set<String> = loadVerified() == nil ? [] : [Self.manifest.sha256]
+        return Self.manifest.admit(Self.manifest, verifiedDigests: verified, availableBytes: storageCapacity())
+    }
+
+    private func storageCapacity() -> Int64? {
         let manager = FileManager.default
         var ancestor = directory
         while !manager.fileExists(atPath: ancestor.path) {
             let parent = ancestor.deletingLastPathComponent()
-            guard parent.path != ancestor.path else { return false }
+            guard parent.path != ancestor.path else { return nil }
             ancestor = parent
         }
-        return (availableCapacity(ancestor) ?? 0) >= Self.minimumFreeBytes
+        return availableCapacity(ancestor)
     }
 
-    func receiveVerified(_ data: Data) throws {
+    func receiveVerified(_ data: Data) throws -> Bool {
         guard Self.matches(data) else { throw StoreError.invalidReference }
-        guard loadVerified() == nil else { return }
-        guard canReceive() else { throw StoreError.insufficientStorage }
+        switch admission() {
+        case .alreadyInstalled: return false
+        case .receive: break
+        case .unlisted: throw StoreError.invalidReference
+        case .insufficientStorage: throw StoreError.insufficientStorage
+        }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var folder = directory
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try folder.setResourceValues(values)
-        guard canReceive() else { throw StoreError.insufficientStorage }
+        let decision = admission()
+        if decision == .alreadyInstalled { return false }
+        guard decision == .receive else { throw StoreError.insufficientStorage }
         try data.write(to: receivedFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        return true
     }
 
     private var receivedFile: URL {
@@ -69,7 +83,7 @@ struct NearbyPublicReference: Sendable {
 
     private static func matches(_ bytes: Data) -> Bool {
         bytes.count == Self.expectedByteCount &&
-            SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined() == Self.sha256
+            SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined() == Self.manifest.sha256
     }
 
     private static func volumeCapacity(at url: URL) -> Int64? {
