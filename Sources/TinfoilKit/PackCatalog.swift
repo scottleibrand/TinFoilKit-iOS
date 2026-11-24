@@ -31,12 +31,14 @@ enum PackCatalog {
         let section: Section
         let language: Language
         let isDefault: Bool
+        let individualDownloadOnly: Bool?
         let detail: String?
         let termsURL: URL?
         let usesPDFDirectory: Bool
         let allowsArchiveSharing: Bool
 
         var id: String { pack.editionKey }
+        var isBulkEligible: Bool { isDefault && individualDownloadOnly != true }
     }
 
     static let entries = (try? bundled.get()) ?? []
