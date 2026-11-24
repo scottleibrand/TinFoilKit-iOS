@@ -255,10 +255,11 @@ private struct LibraryView: View {
     }
 
     private var searchResults: some View {
-        List {
-            if ArticleSummaryView.isAvailable {
+        let passages = results.filter { !$0.match.excerpt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return List {
+            if ArticleSummaryView.isAvailable, !passages.isEmpty {
                 Button("Summarize matching articles", systemImage: "text.justify.leading") {
-                    summary = SummaryRequest(question: query, sources: Array(results.prefix(5)))
+                    summary = SummaryRequest(question: query, sources: Array(passages.prefix(5)))
                 }
             }
             ForEach(results) { result in
@@ -267,7 +268,9 @@ private struct LibraryView: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(result.match.title)
-                        Text(result.match.excerpt).font(.subheadline).lineLimit(3)
+                        if !result.match.excerpt.isEmpty {
+                            Text(result.match.excerpt).font(.subheadline).lineLimit(3)
+                        }
                         Text(result.archive.title).font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -441,10 +444,12 @@ private struct LibraryView: View {
         }
         do {
             try await Task.sleep(for: .milliseconds(180))
+            var titleCache: [UUID: [ZIMArchive.ArticleTitle]] = [:]
             for await _ in updates {
                 do {
-                    let matches = try await searchIndexes(for: requested)
+                    let (matches, titles) = try await searchIndexes(for: requested, titleCache: titleCache)
                     try Task.checkCancellation()
+                    titleCache = titles
                     results = matches
                     resultsQuery = requested
                 } catch is CancellationError {
@@ -462,22 +467,38 @@ private struct LibraryView: View {
         }
     }
 
-    private func searchIndexes(for requested: String) async throws -> [SummarySource] {
-        var sources: [(InstalledArchive, ArticleIndex)] = []
-        for archive in archives where indexing.searchable.contains(archive.id) {
+    private func searchIndexes(
+        for requested: String, titleCache: [UUID: [ZIMArchive.ArticleTitle]]
+    ) async throws -> ([SummarySource], [UUID: [ZIMArchive.ArticleTitle]]) {
+        var sources: [(InstalledArchive, URL)] = []
+        for archive in archives {
             try Task.checkCancellation()
             let url = await library.fileURL(for: archive.id)
-            sources.append((archive, ArticleIndex(archiveURL: url)))
+            sources.append((archive, url))
         }
         let inputs = sources
         let worker = Task.detached(priority: .userInitiated) {
-            let groups = try inputs.map { archive, index in
+            var titlesByArchive: [UUID: [ZIMArchive.ArticleTitle]] = [:]
+            let groups = try inputs.map { archive, url in
                 try Task.checkCancellation()
-                return try index.search(requested, includeIncomplete: true, prefixMatching: true).map {
+                let index = ArticleIndex(archiveURL: url)
+                var matches = try index.search(requested, includeIncomplete: true, prefixMatching: true)
+                if !index.isReady, matches.count < 30, requested.count >= 2 {
+                    let titles = titleCache[archive.id]
+                        ?? (try? ZIMArchive(fileURL: url).articleTitles(matching: requested)) ?? []
+                    titlesByArchive[archive.id] = titles
+                    var paths = Set(matches.map(\.path))
+                    for title in titles where paths.insert(title.path).inserted {
+                        matches.append(.init(path: title.path, title: title.title, excerpt: "", rank: 0))
+                        if matches.count == 30 { break }
+                    }
+                }
+                try Task.checkCancellation()
+                return matches.map {
                     SummarySource(archive: archive, match: $0)
                 }
             }
-            return LibraryResultOrder.interleave(groups, limit: 50)
+            return (LibraryResultOrder.interleave(groups, limit: 50), titlesByArchive)
         }
         return try await withTaskCancellationHandler {
             try await worker.value
