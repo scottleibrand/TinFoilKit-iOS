@@ -50,7 +50,8 @@ final class LibraryAndMapsTests: XCTestCase {
         ).firstMatch
         if denyLocation.waitForExistence(timeout: 3) { denyLocation.tap() }
         XCTAssertTrue(app.staticTexts["Seattle area"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.links["© OpenStreetMap contributors"].exists)
+        let attribution = app.descendants(matching: .any)["© OpenStreetMap contributors"].firstMatch
+        XCTAssertTrue(attribution.waitForExistence(timeout: 5))
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Seattle offline map"
         screenshot.lifetime = .keepAlways
