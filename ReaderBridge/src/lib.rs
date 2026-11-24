@@ -26,17 +26,26 @@ pub struct TFKResource {
     data: Blob,
 }
 
-fn read_item(item: Item, legacy: bool) -> Result<TFKResource, String> {
-    if item.size().map_err(|error| error.to_string())? > MAX_RESOURCE_BYTES {
-        return Err("This archive resource exceeds the 32 MiB reader limit.".into());
-    }
+pub struct TFKPDFEntry {
+    path: CString,
+    title: CString,
+}
+
+fn item_path(item: &Item, legacy: bool) -> Result<CString, String> {
     let path = if legacy {
         format!("{}/{}", char::from(item.namespace()), item.path())
     } else {
         item.path().to_owned()
     };
+    CString::new(path).map_err(|error| error.to_string())
+}
+
+fn read_item(item: Item, legacy: bool) -> Result<TFKResource, String> {
+    if item.size().map_err(|error| error.to_string())? > MAX_RESOURCE_BYTES {
+        return Err("This archive resource exceeds the 32 MiB reader limit.".into());
+    }
     Ok(TFKResource {
-        path: CString::new(path).map_err(|error| error.to_string())?,
+        path: item_path(&item, legacy)?,
         title: CString::new(item.title()).map_err(|error| error.to_string())?,
         mime: CString::new(item.mimetype()).map_err(|error| error.to_string())?,
         data: item.get_data().map_err(|error| error.to_string())?,
@@ -162,6 +171,51 @@ pub unsafe extern "C" fn tfk_archive_article(
         Ok(Some(resource)) => Box::into_raw(Box::new(resource)),
         Err(message) => return_result(Err(message), error),
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tfk_archive_pdf_entry(
+    archive: &TFKArchive,
+    index: u32,
+    error: *mut *mut c_char,
+) -> *mut TFKPDFEntry {
+    let result = (|| {
+        let entry = archive
+            .0
+            .entry_by_url_index(index)
+            .map_err(|error| error.to_string())?;
+        if entry.is_redirect() {
+            return Ok(None);
+        }
+        let item = entry.get_item(false).map_err(|error| error.to_string())?;
+        if item.mimetype() != "application/pdf" {
+            return Ok(None);
+        }
+        Ok(Some(TFKPDFEntry {
+            path: item_path(&item, !archive.0.header().uses_new_namespaces())?,
+            title: CString::new(item.title()).map_err(|error| error.to_string())?,
+        }))
+    })();
+    match result {
+        Ok(None) => ptr::null_mut(),
+        Ok(Some(entry)) => Box::into_raw(Box::new(entry)),
+        Err(message) => return_result(Err(message), error),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tfk_pdf_entry_path(entry: &TFKPDFEntry) -> *const c_char {
+    entry.path.as_ptr()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tfk_pdf_entry_title(entry: &TFKPDFEntry) -> *const c_char {
+    entry.title.as_ptr()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tfk_pdf_entry_close(entry: *mut TFKPDFEntry) {
+    drop(Box::from_raw(entry));
 }
 
 #[no_mangle]

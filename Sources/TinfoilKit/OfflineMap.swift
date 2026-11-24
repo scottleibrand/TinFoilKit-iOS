@@ -47,20 +47,44 @@ struct OfflineMap: Equatable {
             && (minLongitude...maxLongitude).contains(coordinate.longitude)
     }
 
-    func makeStyle() throws -> URL {
+    enum MapError: LocalizedError {
+        case invalidArchive
+
+        var errorDescription: String? {
+            "Choose a PMTiles v3 vector map that uses Mapbox Vector Tiles."
+        }
+    }
+}
+
+struct OfflineMapStyle: Identifiable {
+    let id = UUID()
+    let seed: OfflineMap?
+    let downloadedTiles: URL
+
+    func json(tileRevision: Int) throws -> String {
         let attributes = "© OpenStreetMap contributors · Protomaps"
+        let tileTemplate = downloadedTiles.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            + "/{z}/{x}/{y}.pbf"
+        // Give MapLibre a new tile pyramid so an earlier file miss is requested again.
+        let downloadedSource = "downloaded-\(tileRevision)"
+        var sources: [String: Any] = [
+            downloadedSource: ["type": "vector", "tiles": [tileTemplate], "maxzoom": 15, "attribution": attributes]
+        ]
+        if let seed {
+            sources["installed"] = ["type": "vector", "url": "pmtiles://" + seed.archive.absoluteString, "attribution": attributes]
+        }
         var style: [String: Any] = [
             "version": 8,
-            "sources": ["basemap": [
-                "type": "vector",
-                "url": "pmtiles://" + archive.absoluteString,
-                "attribution": attributes
-            ]],
+            "sources": sources,
             "layers": [
                 ["id": "background", "type": "background", "paint": ["background-color": "#f2eee6"]],
                 layer("landcover", type: "fill", paint: ["fill-color": "#d8e2cf", "fill-opacity": 0.6]),
                 layer("landuse", type: "fill", paint: ["fill-color": "#e3e8d8", "fill-opacity": 0.55]),
-                layer("water", type: "fill", paint: ["fill-color": "#add3de"]),
+                layer("water", type: "fill", geometry: "Polygon", paint: ["fill-color": "#add3de"]),
+                layer("waterways", type: "line", sourceLayer: "water", geometry: "LineString", paint: [
+                    "line-color": "#add3de",
+                    "line-width": ["interpolate", ["linear"], ["zoom"], 7, 0.4, 13, 1.2, 17, 2.6]
+                ]),
                 layer("buildings", type: "fill", paint: ["fill-color": "#d4cbc0"]),
                 layer("boundaries", type: "line", paint: ["line-color": "#968e85", "line-width": 0.8]),
                 layer("roads", type: "line", paint: [
@@ -76,7 +100,6 @@ struct OfflineMap: Equatable {
             layers.append([
                 "id": "places",
                 "type": "symbol",
-                "source": "basemap",
                 "source-layer": "places",
                 "layout": [
                     "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],
@@ -87,22 +110,28 @@ struct OfflineMap: Equatable {
             ])
             style["layers"] = layers
         }
-
-        let output = URL.cachesDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("json")
-        try JSONSerialization.data(withJSONObject: style).write(to: output, options: .atomic)
-        return output
-    }
-
-    private func layer(_ name: String, type: String, paint: [String: Any]) -> [String: Any] {
-        ["id": name, "type": type, "source": "basemap", "source-layer": name, "paint": paint]
-    }
-
-    enum MapError: LocalizedError {
-        case invalidArchive
-
-        var errorDescription: String? {
-            "Choose a PMTiles v3 vector map that uses Mapbox Vector Tiles."
+        let layers = style["layers"] as? [[String: Any]] ?? []
+        let drawable = Array(layers.dropFirst())
+        let sourceIDs = seed == nil ? ["downloaded"] : ["downloaded", "installed"]
+        style["layers"] = Array(layers.prefix(1)) + drawable.flatMap { layer in
+            sourceIDs.map { source in
+                var copy = layer
+                copy["id"] = "\(source)-\(layer["id"] as? String ?? "")"
+                copy["source"] = source == "downloaded" ? downloadedSource : source
+                return copy
+            }
         }
+
+        return String(decoding: try JSONSerialization.data(withJSONObject: style), as: UTF8.self)
+    }
+
+    private func layer(_ name: String, type: String, sourceLayer: String? = nil, geometry: String? = nil,
+                       paint: [String: Any]) -> [String: Any] {
+        var layer: [String: Any] = ["id": name, "type": type, "source-layer": sourceLayer ?? name, "paint": paint]
+        if let geometry {
+            layer["filter"] = ["==", ["geometry-type"], geometry]
+        }
+        return layer
     }
 }
 
@@ -130,8 +159,8 @@ actor MapStorage {
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try localDirectory.setResourceValues(values)
-        let staging = directory.appendingPathComponent(UUID().uuidString).appendingPathExtension("partial")
-        defer { try? files.removeItem(at: staging) }
+        let staging = StagingCleanup.beginImport(in: directory)
+        defer { StagingCleanup.endImport(at: staging) }
         let accessed = source.startAccessingSecurityScopedResource()
         defer { if accessed { source.stopAccessingSecurityScopedResource() } }
         if accessed {

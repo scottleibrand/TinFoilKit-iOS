@@ -24,12 +24,24 @@ targets:
         type: folder
         buildPhase: resources
         optional: true
+      - path: .build/routing/Routing
+        type: folder
+        buildPhase: resources
+      - path: .build/routing-packs
+        type: folder
+        buildPhase: resources
+        optional: true
     dependencies:
       - target: ZIMArchive
         embed: true
       - framework: .build/map-tools/MapLibre.xcframework
         embed: true
+      - framework: .build/routing/TFKValhalla.xcframework
+        embed: false
       - sdk: libsqlite3.tbd
+      - sdk: libz.tbd
+      - sdk: libc++.tbd
+      - sdk: CoreFoundation.framework
       - sdk: FoundationModels.framework
         weak: true
     info:
@@ -57,9 +69,15 @@ targets:
             UTTypeTagSpecification:
               public.filename-extension: [pmtiles]
               public.mime-type: [application/vnd.pmtiles]
+          - UTTypeIdentifier: org.tinfoilkit.routing-pack
+            UTTypeConformsTo: [public.data]
+            UTTypeDescription: Tinfoil Kit offline routing pack
+            UTTypeTagSpecification:
+              public.filename-extension: [tfkroute]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.tinfoilkit.ios
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/.build/CTFKReader"
   TinfoilKitUITests:
     type: bundle.ui-testing
@@ -70,6 +88,16 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.tinfoilkit.ios.uitests
+  MapTileTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests/MapTileTests]
+    dependencies:
+      - target: TinfoilKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.tinfoilkit.ios.maptests
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/.build/CTFKReader"
   ZIMArchive:
     type: framework
     platform: iOS
@@ -87,8 +115,11 @@ targets:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - Tests/ZIMArchiveTests
+      - path: Tests/ZIMArchiveTests
+        excludes: [Fixtures]
       - path: .build/fixtures/climate.zim
+        buildPhase: resources
+      - path: Tests/ZIMArchiveTests/Fixtures/pdf-collection.zim
         buildPhase: resources
     dependencies:
       - target: ZIMArchive
@@ -102,7 +133,7 @@ schemes:
       targets:
         TinfoilKit: all
     test:
-      targets: [TinfoilKitUITests]
+      targets: [MapTileTests, TinfoilKitUITests]
   ZIMArchive:
     build:
       targets:

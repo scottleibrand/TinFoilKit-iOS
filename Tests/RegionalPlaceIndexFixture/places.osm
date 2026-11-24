@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="Tinfoil Kit synthetic fixture">
+  <node id="1" lat="47.610" lon="-122.330">
+    <tag k="addr:housenumber" v="123"/>
+    <tag k="addr:street" v="Café Avenue"/>
+    <tag k="addr:city" v="Exampleville"/>
+    <tag k="addr:postcode" v="98100"/>
+  </node>
+  <node id="2" lat="47.611" lon="-122.330">
+    <tag k="amenity" v="hospital"/>
+    <tag k="name" v="Central Hospital"/>
+  </node>
+  <node id="3" lat="47.642" lon="-122.330">
+    <tag k="amenity" v="hospital"/>
+    <tag k="name" v="North Hospital"/>
+  </node>
+  <node id="4" lat="47.610" lon="-122.331">
+    <tag k="shop" v="chemist"/>
+  </node>
+  <node id="5" lat="47.602" lon="-122.325"/>
+  <node id="6" lat="47.603" lon="-122.325"/>
+  <node id="7" lat="47.603" lon="-122.324"/>
+  <node id="8" lat="47.602" lon="-122.324"/>
+  <node id="9" lat="0.000" lon="179.990">
+    <tag k="emergency" v="assembly_point"/>
+    <tag k="name" v="East Shelter"/>
+  </node>
+  <node id="10" lat="0.000" lon="-179.975">
+    <tag k="amenity" v="shelter"/>
+    <tag k="name" v="West Shelter"/>
+  </node>
+  <way id="11">
+    <nd ref="5"/>
+    <nd ref="6"/>
+    <nd ref="7"/>
+    <nd ref="8"/>
+    <nd ref="5"/>
+    <tag k="addr:housenumber" v="8"/>
+    <tag k="addr:place" v="Beacon Square"/>
+  </way>
+  <way id="12">
+    <nd ref="5"/>
+    <nd ref="6"/>
+    <nd ref="7"/>
+    <nd ref="8"/>
+    <nd ref="5"/>
+  </way>
+  <relation id="13">
+    <member type="way" ref="12" role="outer"/>
+    <tag k="type" v="multipolygon"/>
+    <tag k="amenity" v="fire_station"/>
+    <tag k="name" v="Station 7"/>
+  </relation>
+</osm>

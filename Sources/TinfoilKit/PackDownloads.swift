@@ -6,16 +6,33 @@ import ZIMArchive
 @MainActor
 final class PackDownloads: ObservableObject {
     static let shared = PackDownloads()
-    static let catalog = [
-        wikipedia("climate-change", title: "Wikipedia Climate Change", size: 13_000_000,
-                  hash: "dbcc313b4dd30cf7abbb1e6481c493d82937262158ea97624ca879a0bcf98b67"),
-        wikipedia("chemistry", title: "Wikipedia Chemistry", size: 23_322_446,
-                  hash: "560be082e8bb14cf3736489e680aa83b8f918b0ad00cc2a2adfe811844109259")
-    ]
+
+    typealias CatalogEntry = PackCatalog.Entry
+
+    static let catalog = PackCatalog.entries.map(\.pack)
+    private static let defaultPacks = PackCatalog.entries.filter(\.isDefault).map(\.pack)
+    private static let essentials = PackCatalog.entries.filter {
+        $0.section == .essentials && $0.isDefault
+    }.map(\.pack)
+
+    static func allowsArchiveSharing(_ pack: PublishedPack) -> Bool {
+        PackCatalog.entries.first { $0.pack == pack }?.allowsArchiveSharing == true
+    }
+
+    static func usesPDFDirectory(_ pack: PublishedPack) -> Bool {
+        PackCatalog.entries.first { $0.pack.id == pack.id }?.usesPDFDirectory == true
+    }
 
     @Published private(set) var statuses: [String: Status] = [:]
     @Published private(set) var restoring = true
     @Published private(set) var installedRevision = 0
+    @Published private(set) var downloadAllError: String?
+
+    var downloadAllSizeEstimate: Int64 {
+        sizeEstimate(for: Self.defaultPacks)
+    }
+
+    var essentialsSizeEstimate: Int64 { sizeEstimate(for: Self.essentials) }
 
     private let library = InstalledLibrary.standard
     private let staging = URL.applicationSupportDirectory.appendingPathComponent("PackDownloads", isDirectory: true)
@@ -44,7 +61,13 @@ final class PackDownloads: ObservableObject {
         for pack in Self.catalog {
             let key = pack.editionKey
             if case .verifying = statuses[key] { continue }
-            if installed.contains(where: { $0.pack == pack }) {
+            let repair = repairTarget(key)
+            let update = updateTarget(key)
+            if repair == nil, let current = installed.first(where: { $0.pack == pack }),
+               update == nil || current.replacesArchiveID == update {
+                if update != nil { try? FileManager.default.removeItem(at: updateURL(key)) }
+                try? FileManager.default.removeItem(at: transfer.downloadURL(key))
+                try? FileManager.default.removeItem(at: transfer.resumeURL(key))
                 statuses[key] = .installed
             } else if let task = sessionTasks.first(where: { $0.taskDescription == key }) as? URLSessionDownloadTask {
                 tasks[key] = task
@@ -53,25 +76,193 @@ final class PackDownloads: ObservableObject {
                 install(pack)
             } else if FileManager.default.fileExists(atPath: transfer.resumeURL(key).path) {
                 statuses[key] = .paused
+            } else if repair != nil || update != nil {
+                statuses[key] = .failed("The download was interrupted. Retry to continue.")
             }
         }
     }
 
     func start(_ pack: PublishedPack) {
-        let key = pack.editionKey
-        guard !restoring, tasks[key] == nil else { return }
+        guard !restoring, canStart(pack) else { return }
+        downloadAllError = nil
         do {
-            try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
-            var directory = staging
-            var values = URLResourceValues()
-            values.isExcludedFromBackup = true
-            try directory.setResourceValues(values)
-            let available = try directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-            if let bytes = available.volumeAvailableCapacityForImportantUsage,
-               bytes < pack.sizeEstimate * 2 + 64 * 1024 * 1024 {
-                statuses[key] = .failed("Free more storage to download and index this pack.")
-                return
+            try enqueue([pack])
+        } catch {
+            statuses[pack.editionKey] = .failed(error.localizedDescription)
+        }
+    }
+
+    func startAll() {
+        startBatch(Self.defaultPacks)
+    }
+
+    func startEssentials() {
+        startBatch(Self.essentials)
+    }
+
+    private func sizeEstimate(for packs: [PublishedPack]) -> Int64 {
+        packs.filter(canStart).reduce(0) { $0 + $1.sizeEstimate }
+    }
+
+    private func startBatch(_ packs: [PublishedPack]) {
+        guard !restoring else { return }
+        let eligible = packs.filter(canStart)
+        guard !eligible.isEmpty else { return }
+        downloadAllError = nil
+        do {
+            try enqueue(eligible)
+        } catch {
+            downloadAllError = error.localizedDescription
+        }
+    }
+
+    func archiveRemoved(_ archive: InstalledArchive) {
+        guard let pack = archive.pack else { return }
+        let key = pack.editionKey
+        if repairTarget(key) == archive.id {
+            try? FileManager.default.removeItem(at: repairURL(key))
+            try? FileManager.default.removeItem(at: transfer.resumeURL(key))
+            try? FileManager.default.removeItem(at: transfer.downloadURL(key))
+            statuses[key] = nil
+        } else if case .installed = statuses[key] {
+            statuses[key] = nil
+        }
+        for replacement in Self.catalog where updateTarget(replacement.editionKey) == archive.id {
+            let updateKey = replacement.editionKey
+            tasks.removeValue(forKey: updateKey)?.cancel()
+            try? FileManager.default.removeItem(at: updateURL(updateKey))
+            try? FileManager.default.removeItem(at: transfer.resumeURL(updateKey))
+            try? FileManager.default.removeItem(at: transfer.downloadURL(updateKey))
+            statuses[updateKey] = nil
+        }
+    }
+
+    func availableUpdate(for archive: InstalledArchive) -> PublishedPack? {
+        guard !restoring, let previous = archive.pack, !isRepairing(archive) else { return nil }
+        if let pending = Self.catalog.first(where: { updateTarget($0.editionKey) == archive.id }) {
+            return canStart(pending) ? pending : nil
+        }
+        return Self.catalog.filter {
+            $0.id == previous.id && previous.version < $0.version && updateTarget($0.editionKey) == nil
+        }.max { $0.version < $1.version }.flatMap { pack in
+            if case .installed = statuses[pack.editionKey] { return pack }
+            return canStart(pack) ? pack : nil
+        }
+    }
+
+    func update(_ archive: InstalledArchive, to replacement: PublishedPack) async throws {
+        guard availableUpdate(for: archive) == replacement else { return }
+        let key = replacement.editionKey
+        if case .installed = statuses[key] {
+            statuses[key] = .verifying
+            defer { statuses[key] = .installed }
+            try await library.installPack(replacement, from: transfer.downloadURL(key), replacing: archive.id)
+            installedRevision += 1
+            return
+        }
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        let wasPending = updateTarget(key) != nil
+        if !wasPending {
+            try Data(archive.id.uuidString.utf8).write(to: updateURL(key), options: .atomic)
+        }
+        do {
+            try enqueue([replacement])
+        } catch {
+            if !wasPending { try? FileManager.default.removeItem(at: updateURL(key)) }
+            throw error
+        }
+    }
+
+    func isDownloadingUpdate(for archive: InstalledArchive) -> Bool {
+        Self.catalog.contains { pack in
+            let key = pack.editionKey
+            guard updateTarget(key) == archive.id else { return false }
+            switch statuses[key] {
+            case .pausing, .downloading, .verifying: return true
+            default: return false
             }
+        }
+    }
+
+    func canRepair(_ archive: InstalledArchive) -> Bool {
+        guard !restoring, let pack = archive.pack, Self.catalog.contains(pack), !isDownloadingUpdate(for: archive),
+              tasks[pack.editionKey] == nil else { return false }
+        if case .installed = statuses[pack.editionKey] { return true }
+        return false
+    }
+
+    func isRepairing(_ archive: InstalledArchive) -> Bool {
+        guard let pack = archive.pack, repairTarget(pack.editionKey) == archive.id else { return false }
+        switch statuses[pack.editionKey] {
+        case .pausing, .downloading, .verifying: return true
+        default: return false
+        }
+    }
+
+    func repair(_ archive: InstalledArchive) throws {
+        guard canRepair(archive), let pack = archive.pack else { return }
+        let key = pack.editionKey
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        try Data(archive.id.uuidString.utf8).write(to: repairURL(key), options: .atomic)
+        do {
+            try enqueue([pack])
+        } catch {
+            try? FileManager.default.removeItem(at: repairURL(key))
+            throw error
+        }
+    }
+
+    private func repairURL(_ key: String) -> URL {
+        staging.appendingPathComponent(key).appendingPathExtension("repair")
+    }
+
+    private func repairTarget(_ key: String) -> UUID? {
+        (try? String(contentsOf: repairURL(key), encoding: .utf8)).flatMap(UUID.init(uuidString:))
+    }
+
+    private func updateURL(_ key: String) -> URL {
+        staging.appendingPathComponent(key).appendingPathExtension("update")
+    }
+
+    private func updateTarget(_ key: String) -> UUID? {
+        (try? String(contentsOf: updateURL(key), encoding: .utf8)).flatMap(UUID.init(uuidString:))
+    }
+
+    private func canStart(_ pack: PublishedPack) -> Bool {
+        let key = pack.editionKey
+        guard tasks[key] == nil else { return false }
+        switch statuses[key] {
+        case nil, .paused, .failed: return true
+        case .downloading, .pausing, .verifying, .installed: return false
+        }
+    }
+
+    private func enqueue(_ packs: [PublishedPack]) throws {
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        var directory = staging
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try directory.setResourceValues(values)
+        let available = try directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        let downloadAndIndexBytes = packs.reduce(Int64.zero) { $0 + capacityEstimate(for: $1) }
+        let reservedBytes = Self.catalog.reduce(Int64.zero) { total, pack in
+            let key = pack.editionKey
+            switch statuses[key] {
+            case .downloading:
+                let received = max(0, tasks[key]?.countOfBytesReceived ?? 0)
+                return total + capacityEstimate(for: pack) - min(received, pack.sizeEstimate)
+            case .verifying:
+                return total + capacityEstimate(for: pack) - pack.sizeEstimate
+            default:
+                return total
+            }
+        }
+        let required = downloadAndIndexBytes + reservedBytes + 64 * 1024 * 1024
+        if let bytes = available.volumeAvailableCapacityForImportantUsage, bytes < required {
+            throw InsufficientStorage(shortfall: required - bytes)
+        }
+        for pack in packs {
+            let key = pack.editionKey
             let task: URLSessionDownloadTask
             if let resume = try? Data(contentsOf: transfer.resumeURL(key)) {
                 task = transfer.session.downloadTask(withResumeData: resume)
@@ -82,8 +273,19 @@ final class PackDownloads: ObservableObject {
             tasks[key] = task
             statuses[key] = .downloading(nil)
             task.resume()
-        } catch {
-            statuses[key] = .failed(error.localizedDescription)
+        }
+    }
+
+    private func capacityEstimate(for pack: PublishedPack) -> Int64 {
+        // Downloads move into the library. Only a new edition needs room for another index.
+        repairTarget(pack.editionKey) == nil ? pack.sizeEstimate * 2 : pack.sizeEstimate
+    }
+
+    private struct InsufficientStorage: LocalizedError {
+        let shortfall: Int64
+
+        var errorDescription: String? {
+            "Free up at least \(shortfall.formatted(.byteCount(style: .file))) to download and index the selected content."
         }
     }
 
@@ -129,7 +331,13 @@ final class PackDownloads: ObservableObject {
         let file = transfer.downloadURL(key)
         Task {
             do {
-                try await library.installPack(pack, from: file)
+                if let archiveID = repairTarget(key) {
+                    try await library.repairPack(pack, archiveID: archiveID, from: file, movingSource: true)
+                    try FileManager.default.removeItem(at: repairURL(key))
+                } else {
+                    try await library.installPack(pack, from: file, replacing: updateTarget(key), movingSource: true)
+                    try? FileManager.default.removeItem(at: updateURL(key))
+                }
                 try? FileManager.default.removeItem(at: file)
                 try? FileManager.default.removeItem(at: transfer.resumeURL(key))
                 statuses[key] = .installed
@@ -140,16 +348,6 @@ final class PackDownloads: ObservableObject {
                 statuses[key] = .failed(error.localizedDescription)
             }
         }
-    }
-
-    private static func wikipedia(_ topic: String, title: String, size: Int64, hash: String) -> PublishedPack {
-        let version = "2026-10"
-        let filename = "wikipedia_en_\(topic)_mini_\(version).zim"
-        return PublishedPack(
-            id: "wikipedia-en-\(topic)", title: title, version: version,
-            source: URL(string: "https://download.kiwix.org/zim/wikipedia/\(filename)")!,
-            sha256: hash, sizeEstimate: size, attribution: "Wikipedia contributors · CC BY-SA · Packaged by Kiwix"
-        )
     }
 }
 
@@ -168,6 +366,7 @@ private final class PackTransfer: NSObject, URLSessionDownloadDelegate, @uncheck
     lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.background(withIdentifier: Self.identifier)
         configuration.sessionSendsLaunchEvents = true
+        configuration.allowsCellularAccess = false
         return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }()
 

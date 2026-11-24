@@ -10,6 +10,12 @@ public final class ZIMArchive {
         public let data: Data
     }
 
+    public struct PDFEntry: Identifiable, Sendable {
+        public var id: String { path }
+        public let path: String
+        public let title: String
+    }
+
     public struct ReadError: LocalizedError {
         public let errorDescription: String?
     }
@@ -61,6 +67,31 @@ public final class ZIMArchive {
     }
 
     public func article(at index: UInt32) throws -> Resource? {
+        try article(at: index, maximumBytes: nil)
+    }
+
+    public func pdfEntries() throws -> [PDFEntry] {
+        try (0..<entryCount).compactMap { index in
+            try Task.checkCancellation()
+            return try pdfEntry(at: index)
+        }
+    }
+
+    func pdfEntry(at index: UInt32) throws -> PDFEntry? {
+        var error: UnsafeMutablePointer<CChar>?
+        guard let entry = tfk_archive_pdf_entry(archive, index, &error) else {
+            if let error {
+                throw Self.readError(error, fallback: "The archive document could not be read.")
+            }
+            return nil
+        }
+        defer { tfk_pdf_entry_close(entry) }
+        let path = String(cString: tfk_pdf_entry_path(entry))
+        let title = String(cString: tfk_pdf_entry_title(entry))
+        return PDFEntry(path: path, title: title.isEmpty ? path : title)
+    }
+
+    func article(at index: UInt32, maximumBytes: Int?) throws -> Resource? {
         var error: UnsafeMutablePointer<CChar>?
         guard let resource = tfk_archive_article(archive, index, &error) else {
             if let error {
@@ -68,10 +99,10 @@ public final class ZIMArchive {
             }
             return nil
         }
-        return try Self.read(resource)
+        return try Self.read(resource, maximumBytes: maximumBytes)
     }
 
-    private static func read(_ resource: OpaquePointer) throws -> Resource {
+    private static func read(_ resource: OpaquePointer, maximumBytes: Int? = nil) throws -> Resource {
         defer { tfk_resource_close(resource) }
         var count = 0
         guard let bytes = tfk_resource_bytes(resource, &count) else {
@@ -81,7 +112,7 @@ public final class ZIMArchive {
             path: String(cString: tfk_resource_path(resource)),
             title: String(cString: tfk_resource_title(resource)),
             mimeType: String(cString: tfk_resource_mime(resource)),
-            data: Data(bytes: bytes, count: count)
+            data: Data(bytes: bytes, count: min(count, maximumBytes ?? count))
         )
     }
 

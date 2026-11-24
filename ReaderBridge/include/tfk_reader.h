@@ -5,6 +5,7 @@
 
 typedef struct TFKArchive TFKArchive;
 typedef struct TFKResource TFKResource;
+typedef struct TFKPDFEntry TFKPDFEntry;
 
 /* Callers supply valid file and path strings and release owned handles. An
  * error output, if provided, must point to an empty slot. Read operations
@@ -19,6 +20,13 @@ TFKResource *tfk_archive_resource(const TFKArchive *archive, const char *path, c
 /* Returns a non-redirect HTML article at a URL-table index. A null result
  * with no error means the entry is outside the searchable article set. */
 TFKResource *tfk_archive_article(const TFKArchive *archive, uint32_t index, char **error);
+
+/* Returns a non-redirect PDF entry without reading the PDF bytes. A null
+ * result with no error means the entry is not a PDF. */
+TFKPDFEntry *tfk_archive_pdf_entry(const TFKArchive *archive, uint32_t index, char **error);
+const char *tfk_pdf_entry_path(const TFKPDFEntry *entry);
+const char *tfk_pdf_entry_title(const TFKPDFEntry *entry);
+void tfk_pdf_entry_close(TFKPDFEntry *entry);
 
 /* Resource strings and bytes are borrowed until the resource is closed. */
 const char *tfk_resource_path(const TFKResource *resource);

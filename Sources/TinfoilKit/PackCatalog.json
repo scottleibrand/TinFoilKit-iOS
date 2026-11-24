@@ -1,0 +1,191 @@
+[
+  {
+    "pack": {
+      "id": "zimgit-water-en",
+      "title": "Water Treatment Library",
+      "version": "2024-08",
+      "source": "https://download.kiwix.org/zim/other/zimgit-water_en_2024-08.zim",
+      "sha256": "392c7bc970a44fddd61dd17f6eabf1f4e21936f2d5c27c83093e1dc475cb56b6",
+      "sizeEstimate": 20924451,
+      "attribution": "Collected by ZIM Git · Individual document terms · Packaged by Kiwix"
+    },
+    "section": "essentials",
+    "language": "en",
+    "isDefault": true,
+    "usesPDFDirectory": true,
+    "allowsArchiveSharing": false,
+    "detail": "Browse offline PDF manuals on safe drinking water."
+  },
+  {
+    "pack": {
+      "id": "appropedia-en",
+      "title": "Appropedia",
+      "version": "2026-02",
+      "source": "https://download.kiwix.org/zim/other/appropedia_en_all_maxi_2026-02.zim",
+      "sha256": "dcf200ba723c27397e1c9a2e4891ff91fa13993df1fa285315190d8525a53469",
+      "sizeEstimate": 581641351,
+      "attribution": "Appropedia contributors · CC BY-SA 4.0 unless otherwise noted · Packaged by Kiwix"
+    },
+    "section": "essentials",
+    "language": "en",
+    "isDefault": true,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false,
+    "detail": "Search practical guides to water, sanitation, shelter, and off-grid technology."
+  },
+  {
+    "pack": {
+      "id": "zimgit-medicine-en",
+      "title": "Field Medicine Library",
+      "version": "2024-08",
+      "source": "https://download.kiwix.org/zim/other/zimgit-medicine_en_2024-08.zim",
+      "sha256": "a86c31b93e9800aae2cd812ef18cbf9c087a7537784c62fbc259db7f9f9d18c0",
+      "sizeEstimate": 70179585,
+      "attribution": "Collected by ZIM Git · Individual document terms · Packaged by Kiwix"
+    },
+    "section": "essentials",
+    "language": "en",
+    "isDefault": true,
+    "usesPDFDirectory": true,
+    "allowsArchiveSharing": false,
+    "detail": "Browse offline field medicine and first aid manuals in PDF format."
+  },
+  {
+    "pack": {
+      "id": "wikipedia-en-simple-mini",
+      "title": "Simple English Wikipedia",
+      "version": "2026-09",
+      "source": "https://ftp.fau.de/kiwix/zim/wikipedia/wikipedia_en-simple_all_mini_2026-09.zim",
+      "sha256": "a6a56861f8dedca2e2434d921c61c74e552c80310623173b1ec31e80ce1a692e",
+      "sizeEstimate": 530482005,
+      "attribution": "Wikipedia contributors · CC BY-SA · Packaged by Kiwix"
+    },
+    "section": "essentials",
+    "language": "en",
+    "isDefault": true,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false,
+    "detail": "Search overview sections and infoboxes from the Simple English encyclopedia."
+  },
+  {
+    "pack": {
+      "id": "wikipedia-en-climate-change",
+      "title": "Wikipedia Climate Change",
+      "version": "2026-10",
+      "source": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_climate-change_mini_2026-10.zim",
+      "sha256": "dbcc313b4dd30cf7abbb1e6481c493d82937262158ea97624ca879a0bcf98b67",
+      "sizeEstimate": 13000000,
+      "attribution": "Wikipedia contributors · CC BY-SA · Packaged by Kiwix"
+    },
+    "section": "topics",
+    "language": "en",
+    "isDefault": true,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false
+  },
+  {
+    "pack": {
+      "id": "wikipedia-en-chemistry",
+      "title": "Wikipedia Chemistry",
+      "version": "2026-10",
+      "source": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_chemistry_mini_2026-10.zim",
+      "sha256": "560be082e8bb14cf3736489e680aa83b8f918b0ad00cc2a2adfe811844109259",
+      "sizeEstimate": 23322446,
+      "attribution": "Wikipedia contributors · CC BY-SA · Packaged by Kiwix"
+    },
+    "section": "topics",
+    "language": "en",
+    "isDefault": true,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false
+  },
+  {
+    "pack": {
+      "id": "wikipedia-en-top-nopic",
+      "title": "Best of English Wikipedia",
+      "version": "2026-09",
+      "source": "https://dumps.wikimedia.org/kiwix/zim/wikipedia/wikipedia_en_top_nopic_2026-09.zim",
+      "sha256": "8369b95b6b2179051b56ebed0d43fd3646020d03367eb03d7fc34d84090c501b",
+      "sizeEstimate": 2745850723,
+      "attribution": "Wikipedia contributors · CC BY-SA · Packaged by Kiwix"
+    },
+    "section": "extended",
+    "language": "en",
+    "isDefault": true,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false,
+    "detail": "Search full articles from a selection of English Wikipedia without images.",
+    "termsURL": "https://en.wikipedia.org/wiki/Wikipedia:Copyrights"
+  },
+  {
+    "pack": {
+      "id": "ifixit-en-all",
+      "title": "iFixit Repair Guides",
+      "version": "2025-12",
+      "source": "https://mirror.download.kiwix.org/zim/ifixit/ifixit_en_all_2025-12.zim",
+      "sha256": "9bb5f3408707fd0300c6ef47a425c3217187f144cd9154a928183816aa72eead",
+      "sizeEstimate": 3570695757,
+      "attribution": "iFixit contributors · CC BY-NC-SA 3.0 · Packaged by Kiwix"
+    },
+    "section": "extended",
+    "language": "en",
+    "isDefault": true,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false,
+    "detail": "Browse illustrated repair guides for phones, computers, and household equipment.",
+    "termsURL": "https://about.ifixit.com/Info/Licensing"
+  },
+  {
+    "pack": {
+      "id": "wikipedia-es-top-mini",
+      "title": "Wikipedia destacada en español",
+      "version": "2026-10",
+      "source": "https://ftp.fau.de/kiwix/zim/wikipedia/wikipedia_es_top_mini_2026-10.zim",
+      "sha256": "333afa3522e736cf417c98d3ca71fbc2ff5370b5b3a3699cad4cafbe70e47dde",
+      "sizeEstimate": 217314941,
+      "attribution": "Wikipedia contributors · Text CC BY-SA 4.0 · Packaged by Kiwix"
+    },
+    "section": "essentials",
+    "language": "es",
+    "isDefault": true,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false,
+    "detail": "Consulta las introducciones y fichas de una selección de artículos populares en español.",
+    "termsURL": "https://es.wikipedia.org/wiki/Wikipedia:Derechos_de_autor"
+  },
+  {
+    "pack": {
+      "id": "wikipedia-en-simple-mini",
+      "title": "Simple English Wikipedia",
+      "version": "2026-06",
+      "source": "https://ftp.fau.de/kiwix/zim/wikipedia/wikipedia_en-simple_all_mini_2026-06.zim",
+      "sha256": "b13941506e85dcef1668b40ae02fe54e89f0f3059b022c7811039c37bcabb35f",
+      "sizeEstimate": 471822478,
+      "attribution": "Wikipedia contributors · CC BY-SA · Packaged by Kiwix"
+    },
+    "section": "essentials",
+    "language": "en",
+    "isDefault": false,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false,
+    "detail": "Search overview sections and infoboxes from the Simple English encyclopedia."
+  },
+  {
+    "pack": {
+      "id": "wikipedia-es-top-mini",
+      "title": "Wikipedia destacada en español",
+      "version": "2026-07",
+      "source": "https://ftp.fau.de/kiwix/zim/wikipedia/wikipedia_es_top_mini_2026-07.zim",
+      "sha256": "742dbed32d1d977de22606d268fe381a2a5eb360ce06bfc60d552be468645784",
+      "sizeEstimate": 205850124,
+      "attribution": "Wikipedia contributors · Text CC BY-SA 4.0 · Packaged by Kiwix"
+    },
+    "section": "essentials",
+    "language": "es",
+    "isDefault": false,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false,
+    "detail": "Consulta las introducciones y fichas de una selección de artículos populares en español.",
+    "termsURL": "https://es.wikipedia.org/wiki/Wikipedia:Derechos_de_autor"
+  }
+]

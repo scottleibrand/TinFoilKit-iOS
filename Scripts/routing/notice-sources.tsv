@@ -1,0 +1,25 @@
+Valhalla-Mobile-MIT.txt https://raw.githubusercontent.com/Rallista/valhalla-mobile/d03c3f51925f9e0211013a6e90a69dd216654810/LICENSE.md
+Valhalla-MIT.txt https://raw.githubusercontent.com/valhalla/valhalla/a919bb6b64d61d12f79ea5466d5cf599a39714ad/COPYING
+Boost-1.92.0.txt https://raw.githubusercontent.com/boostorg/boost/boost-1.92.0/LICENSE_1_0.txt
+Protobuf-v33.4.txt https://raw.githubusercontent.com/protocolbuffers/protobuf/v33.4/LICENSE
+Protobuf-UTF8-Range-v33.4.txt https://raw.githubusercontent.com/protocolbuffers/protobuf/v33.4/third_party/utf8_range/LICENSE
+Abseil-20260107.1.txt https://raw.githubusercontent.com/abseil/abseil-cpp/20260107.1/LICENSE
+LZ4-1.10.0.txt https://raw.githubusercontent.com/lz4/lz4/v1.10.0/lib/LICENSE
+LZ4-xxHash.txt https://raw.githubusercontent.com/lz4/lz4/v1.10.0/lib/xxhash.c prefix
+RapidJSON-vcpkg.txt https://raw.githubusercontent.com/Tencent/rapidjson/24b5e7a8b27f42fa16b96fc70aade9106cf7102f/license.txt
+RapidJSON-Valhalla.txt https://raw.githubusercontent.com/Tencent/rapidjson/083f359f5c36198accc2b9360ce1e32a333231d9/license.txt
+Date-Library.txt https://raw.githubusercontent.com/HowardHinnant/date/b2e917ce6ca8dc11403772f6161b8f69f808c38b/LICENSE.txt
+Date-date.h.txt https://raw.githubusercontent.com/HowardHinnant/date/b2e917ce6ca8dc11403772f6161b8f69f808c38b/include/date/date.h prefix
+Date-tz.h.txt https://raw.githubusercontent.com/HowardHinnant/date/b2e917ce6ca8dc11403772f6161b8f69f808c38b/include/date/tz.h prefix
+Date-tz_private.h.txt https://raw.githubusercontent.com/HowardHinnant/date/b2e917ce6ca8dc11403772f6161b8f69f808c38b/include/date/tz_private.h prefix
+Date-ios.h.txt https://raw.githubusercontent.com/HowardHinnant/date/b2e917ce6ca8dc11403772f6161b8f69f808c38b/include/date/ios.h prefix
+Date-tz.cpp.txt https://raw.githubusercontent.com/HowardHinnant/date/b2e917ce6ca8dc11403772f6161b8f69f808c38b/src/tz.cpp prefix
+Date-ios.mm.txt https://raw.githubusercontent.com/HowardHinnant/date/b2e917ce6ca8dc11403772f6161b8f69f808c38b/src/ios.mm prefix
+cpp-statsd-client.txt https://raw.githubusercontent.com/vthiery/cpp-statsd-client/b60bc7bb930df664b4ab9573ad8bee80d29dc72d/LICENSE.md
+Flatbush.txt https://raw.githubusercontent.com/chusitoo/flatbush/b7a28a07bb97f708c9a8780b3d7af3908429baa8/LICENSE
+Microtar.txt https://raw.githubusercontent.com/rxi/microtar/27076e1b9290e9c7842bb7890a54fcf172406c84/LICENSE
+unordered_dense.txt https://raw.githubusercontent.com/martinus/unordered_dense/73f3cbb237e84d483afafc743f1f14ec53e12314/LICENSE
+protozero.txt https://raw.githubusercontent.com/mapbox/protozero/f379578a3f7c8162aac0ac31c2696de09a5b5f93/LICENSE.md
+protozero-Folly.txt https://raw.githubusercontent.com/mapbox/protozero/f379578a3f7c8162aac0ac31c2696de09a5b5f93/LICENSE.from_folly
+vtzero.txt https://raw.githubusercontent.com/mapbox/vtzero/d4e8e099a32c37dfb54c04539ce73851bbe35917/LICENSE
+vtzero-External.txt https://raw.githubusercontent.com/mapbox/vtzero/d4e8e099a32c37dfb54c04539ce73851bbe35917/EXTERNAL_LICENSES.txt

@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 
 public struct InstalledArchive: Identifiable, Equatable, Sendable, Codable {
@@ -6,113 +7,335 @@ public struct InstalledArchive: Identifiable, Equatable, Sendable, Codable {
     public let title: String
     public let byteCount: Int64
     public let pack: PublishedPack?
+    public let replacesArchiveID: UUID?
+
+    public init(
+        id: UUID, title: String, byteCount: Int64, pack: PublishedPack?,
+        replacesArchiveID: UUID? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.byteCount = byteCount
+        self.pack = pack
+        self.replacesArchiveID = replacesArchiveID
+    }
 }
 
 /// Owns imported archive copies and their manifests.
 public actor InstalledLibrary {
+    /// The installed archives, plus folders whose manifest or archive can no longer be read.
+    public struct Inventory: Equatable, Sendable {
+        public let archives: [InstalledArchive]
+        public let damaged: [UUID]
+    }
+
     public static let standard = InstalledLibrary(
         directory: URL.applicationSupportDirectory.appendingPathComponent("Library", isDirectory: true)
     )
 
     private let directory: URL
     private let files = FileManager.default
+    private var activeStaging: Set<UUID> = []
+    private var activeEditions: Set<String> = []
+    private var busyArchives: Set<UUID> = []
 
     public init(directory: URL) {
         self.directory = directory
     }
 
     public func archives() throws -> [InstalledArchive] {
+        try inventory().archives
+    }
+
+    public func inventory() throws -> Inventory {
         try prepareDirectory()
         let entries = try files.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         )
-        return try entries.compactMap { folder -> InstalledArchive? in
+        var archives: [InstalledArchive] = []
+        var damaged: [UUID] = []
+        for folder in entries {
             guard let id = UUID(uuidString: folder.lastPathComponent),
-                  try folder.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else {
-                return nil
+                  (try? folder.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
+                continue
             }
-            let manifest = try Data(contentsOf: folder.appendingPathComponent("manifest.json"))
-            let entry = try JSONDecoder().decode(InstalledArchive.self, from: manifest)
-            guard entry.id == id else { throw ImportError.invalidManifest }
+            // One unreadable folder must not hide the rest of the library.
+            if let entry = try? JSONDecoder().decode(
+                InstalledArchive.self, from: Data(contentsOf: folder.appendingPathComponent("manifest.json"))
+            ), entry.id == id, files.fileExists(atPath: fileURL(for: id).path) {
+                archives.append(entry)
+            } else {
+                damaged.append(id)
+            }
+        }
+        return Inventory(
+            archives: archives.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending },
+            damaged: damaged.sorted { $0.uuidString < $1.uuidString }
+        )
+    }
+
+    /// Copies an archive into the library. Cancel the calling task to stop the copy.
+    @discardableResult
+    public func importArchive(
+        from source: URL,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> InstalledArchive {
+        try await installArchive(from: source, pack: nil, moving: false, progress: progress)
+    }
+
+    @discardableResult
+    public func installPack(
+        _ pack: PublishedPack, from source: URL, replacing previousID: UUID? = nil, movingSource: Bool = false
+    ) async throws -> InstalledArchive {
+        guard activeEditions.insert(pack.editionKey).inserted else { throw ImportError.busy }
+        defer { activeEditions.remove(pack.editionKey) }
+        if let previousID, !busyArchives.insert(previousID).inserted { throw ImportError.busy }
+        defer { if let previousID { busyArchives.remove(previousID) } }
+        let installed = try archives()
+        if let previousID {
+            guard let entry = installed.first(where: { $0.id == previousID }),
+                  let previous = entry.pack,
+                  !installed.contains(where: { $0.id == entry.replacesArchiveID }),
+                  previous.id == pack.id, previous.version < pack.version else {
+                throw ImportError.invalidUpdate
+            }
+            if let pending = installed.first(where: { $0.replacesArchiveID == previousID }) {
+                guard pending.pack == pack else { throw ImportError.invalidUpdate }
+                return pending
+            }
+        }
+        if let existing = installed.first(where: { $0.pack == pack }) {
+            guard let previousID else { return existing }
+            guard !installed.contains(where: { $0.id == existing.replacesArchiveID }) else {
+                throw ImportError.invalidUpdate
+            }
+            // Reuse a verified edition installed separately if the user now wants it to replace the old one.
+            guard busyArchives.insert(existing.id).inserted else { throw ImportError.busy }
+            defer { busyArchives.remove(existing.id) }
+            try await verifyArchive(existing)
+            try Task.checkCancellation()
+            let replacement = InstalledArchive(
+                id: existing.id, title: existing.title, byteCount: existing.byteCount,
+                pack: pack, replacesArchiveID: previousID
+            )
+            try JSONEncoder().encode(replacement).write(to: manifestURL(for: existing.id), options: .atomic)
+            return replacement
+        }
+        return try await installArchive(
+            from: source, pack: pack, replacesArchiveID: previousID, moving: movingSource, progress: { _ in }
+        )
+    }
+
+    /// An update survives restart as two installed archives until the replacement's index is ready.
+    func finishUpdate(_ replacement: InstalledArchive) throws -> UUID? {
+        guard let previousID = replacement.replacesArchiveID,
+              let pack = replacement.pack,
+              ArticleIndex(archiveURL: fileURL(for: replacement.id)).isReady else { return nil }
+        let installed = try archives()
+        guard installed.contains(replacement),
+              let previous = installed.first(where: { $0.id == previousID })?.pack,
+              previous.id == pack.id, previous.version < pack.version else { return nil }
+        try removeArchive(previousID)
+        return previousID
+    }
+
+    /// Verify the replacement's bytes before replacing the installed archive of the same edition.
+    public func repairPack(
+        _ pack: PublishedPack, archiveID: UUID, from source: URL, movingSource: Bool = false
+    ) async throws {
+        guard source.isFileURL, source.pathExtension.lowercased() == "zim",
+              try archives().contains(where: { $0.id == archiveID && $0.pack == pack }) else {
+            throw ImportError.invalidRepair
+        }
+        guard busyArchives.insert(archiveID).inserted else { throw ImportError.busy }
+        defer { busyArchives.remove(archiveID) }
+
+        try await withStagedArchive(id: UUID(), source: source, pack: pack, moving: movingSource) { staged, _ in
+            let original = fileURL(for: archiveID)
+            try staged.withUnsafeFileSystemRepresentation { source in
+                try original.withUnsafeFileSystemRepresentation { destination in
+                    guard let source, let destination, rename(source, destination) == 0 else {
+                        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                    }
+                }
+            }
+        }
+    }
+
+    private func installArchive(
+        from source: URL, pack: PublishedPack?, replacesArchiveID: UUID? = nil,
+        moving: Bool, progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> InstalledArchive {
+        let id = UUID()
+        return try await withStagedArchive(id: id, source: source, pack: pack, moving: moving, progress: progress) {
+            stagedFile, archiveTitle in
+            let values = try stagedFile.resourceValues(forKeys: [.fileSizeKey])
+            let entry = InstalledArchive(
+                id: id,
+                title: pack?.title ?? archiveTitle ?? source.deletingPathExtension().lastPathComponent,
+                byteCount: Int64(values.fileSize ?? 0),
+                pack: pack,
+                replacesArchiveID: replacesArchiveID
+            )
+            let staging = stagedFile.deletingLastPathComponent()
+            let manifest = try JSONEncoder().encode(entry)
+            try manifest.write(to: staging.appendingPathComponent("manifest.json"))
+            try files.moveItem(at: staging, to: directory.appendingPathComponent(id.uuidString))
             return entry
-        }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        }
     }
 
-    @discardableResult
-    public func importArchive(from source: URL) throws -> InstalledArchive {
-        try installArchive(from: source, pack: nil)
-    }
-
-    @discardableResult
-    public func installPack(_ pack: PublishedPack, from source: URL) throws -> InstalledArchive {
-        if let installed = try archives().first(where: { $0.pack == pack }) { return installed }
-        return try installArchive(from: source, pack: pack)
-    }
-
-    private func installArchive(from source: URL, pack: PublishedPack?) throws -> InstalledArchive {
-        guard source.isFileURL, source.pathExtension.caseInsensitiveCompare("zim") == .orderedSame else {
+    private func withStagedArchive<Result>(
+        id: UUID, source: URL, pack: PublishedPack?, moving: Bool,
+        progress: @escaping @Sendable (Double) -> Void = { _ in },
+        publish: (URL, String?) throws -> Result
+    ) async throws -> Result {
+        guard source.isFileURL, source.pathExtension.lowercased() == "zim" else {
             throw ImportError.invalidFile
         }
         try prepareDirectory()
-        let id = UUID()
         let staging = directory.appendingPathComponent(".\(id.uuidString).partial")
         try files.createDirectory(at: staging, withIntermediateDirectories: false)
-        defer { try? files.removeItem(at: staging) }
-        let stagedFile = staging.appendingPathComponent("archive.zim")
-
-        let accessed = source.startAccessingSecurityScopedResource()
-        defer { if accessed { source.stopAccessingSecurityScopedResource() } }
-        if accessed {
-            var coordinationError: NSError?
-            var copyError: Error?
-            NSFileCoordinator().coordinate(
-                readingItemAt: source,
-                options: .withoutChanges,
-                error: &coordinationError
-            ) { file in
-                do {
-                    try copyArchive(file, to: stagedFile)
-                } catch {
-                    copyError = error
-                }
-            }
-            if let error = coordinationError { throw error }
-            if let error = copyError { throw error }
-        } else {
-            try copyArchive(source, to: stagedFile)
+        activeStaging.insert(id)
+        defer {
+            activeStaging.remove(id)
+            try? files.removeItem(at: staging)
         }
-
-        if let pack { try verify(stagedFile, expectedHash: pack.sha256) }
-        let archive = try ZIMArchive(fileURL: stagedFile)
-        guard archive.entryCount > 0 else { throw ImportError.emptyArchive }
-        let values = try stagedFile.resourceValues(forKeys: [.fileSizeKey])
-        let entry = InstalledArchive(
-            id: id,
-            title: pack?.title ?? archive.title ?? source.deletingPathExtension().lastPathComponent,
-            byteCount: Int64(values.fileSize ?? 0),
-            pack: pack
-        )
-        let manifest = try JSONEncoder().encode(entry)
-        try manifest.write(to: staging.appendingPathComponent("manifest.json"))
-        try files.moveItem(at: staging, to: directory.appendingPathComponent(id.uuidString))
-        return entry
+        let stagedFile = staging.appendingPathComponent("archive.zim")
+        let storage = directory
+        let work = Task.detached(priority: .userInitiated) { () throws -> String? in
+            try Task.checkCancellation()
+            let candidate: URL
+            if moving {
+                try Self.checkRegularFile(source)
+                candidate = source
+            } else {
+                try Self.stageCopy(source, to: stagedFile, storage: storage, progress: progress)
+                candidate = stagedFile
+            }
+            if let pack { try Self.verify(candidate, expectedHash: pack.sha256) }
+            try Task.checkCancellation()
+            let archive = try ZIMArchive(fileURL: candidate)
+            guard archive.entryCount > 0 else { throw ImportError.emptyArchive }
+            return archive.title
+        }
+        let archiveTitle = try await withTaskCancellationHandler {
+            try await work.value
+        } onCancel: {
+            work.cancel()
+        }
+        try Task.checkCancellation()
+        if moving { try files.moveItem(at: source, to: stagedFile) }
+        return try publish(stagedFile, archiveTitle)
     }
 
     public func fileURL(for id: UUID) -> URL {
         directory.appendingPathComponent(id.uuidString).appendingPathComponent("archive.zim")
     }
 
-    private func copyArchive(_ file: URL, to destination: URL) throws {
+    private func manifestURL(for id: UUID) -> URL {
+        directory.appendingPathComponent(id.uuidString).appendingPathComponent("manifest.json")
+    }
+
+    public func removeArchive(_ id: UUID) throws {
+        guard !busyArchives.contains(id) else { throw ImportError.busy }
+        let folder = directory.appendingPathComponent(id.uuidString)
+        guard files.fileExists(atPath: folder.path) else { return }
+        let removed = directory.appendingPathComponent(".\(id.uuidString).removed")
+        try files.moveItem(at: folder, to: removed)
+        try? files.removeItem(at: removed)
+    }
+
+    public func verifyArchive(_ entry: InstalledArchive) async throws {
+        let file = fileURL(for: entry.id)
+        let verification = Task.detached(priority: .utility) {
+            if let pack = entry.pack {
+                try Self.verify(file, expectedHash: pack.sha256)
+            }
+            let archive = try ZIMArchive(fileURL: file)
+            guard archive.entryCount > 0 else { throw ImportError.emptyArchive }
+        }
+        try await withTaskCancellationHandler {
+            try await verification.value
+        } onCancel: {
+            verification.cancel()
+        }
+    }
+
+    /// Bytes an archive of this size needs: its copy plus room for a search index of similar size.
+    public static func requiredBytes(forArchiveOf size: Int64) -> Int64 {
+        let margin: Int64 = 64 * 1024 * 1024
+        return min(max(0, size), (Int64.max - margin) / 2) * 2 + margin
+    }
+
+    private static func stageCopy(
+        _ source: URL, to destination: URL, storage: URL,
+        progress: @escaping @Sendable (Double) -> Void
+    ) throws {
+        let accessed = source.startAccessingSecurityScopedResource()
+        defer { if accessed { source.stopAccessingSecurityScopedResource() } }
+        guard accessed else {
+            try copy(source, to: destination, storage: storage, progress: progress)
+            return
+        }
+        var coordinationError: NSError?
+        var copyError: Error?
+        NSFileCoordinator().coordinate(readingItemAt: source, options: .withoutChanges, error: &coordinationError) { file in
+            do {
+                try copy(file, to: destination, storage: storage, progress: progress)
+            } catch {
+                copyError = error
+            }
+        }
+        if let error = coordinationError { throw error }
+        if let error = copyError { throw error }
+    }
+
+    private static func checkRegularFile(_ file: URL) throws {
         let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
         guard values.isRegularFile == true, values.isSymbolicLink != true else {
             throw ImportError.invalidFile
         }
-        try files.copyItem(at: file, to: destination)
     }
 
-    private func verify(_ file: URL, expectedHash: String) throws {
+    private static func copy(
+        _ file: URL, to destination: URL, storage: URL, progress: @escaping @Sendable (Double) -> Void
+    ) throws {
+        try checkRegularFile(file)
+        let size = Int64(try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+        let available = try storage.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            .volumeAvailableCapacityForImportantUsage
+        let required = requiredBytes(forArchiveOf: size)
+        if let available, available < required {
+            throw InsufficientStorage(shortfall: required - available)
+        }
+
+        guard FileManager.default.createFile(atPath: destination.path, contents: nil) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        let input = try FileHandle(forReadingFrom: file)
+        defer { try? input.close() }
+        let output = try FileHandle(forWritingTo: destination)
+        defer { try? output.close() }
+        var copied: Int64 = 0
+        var reported = -1.0
+        progress(0)
+        while let chunk = try input.read(upToCount: 4 * 1024 * 1024), !chunk.isEmpty {
+            try Task.checkCancellation()
+            try output.write(contentsOf: chunk)
+            copied += Int64(chunk.count)
+            let fraction = size > 0 ? min(1, Double(copied) / Double(size)) : 1
+            if fraction - reported >= 0.01 {
+                reported = fraction
+                progress(fraction)
+            }
+        }
+        progress(1)
+    }
+
+    private static func verify(_ file: URL, expectedHash: String) throws {
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
         var hasher = SHA256()
@@ -130,20 +353,39 @@ public actor InstalledLibrary {
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try url.setResourceValues(values)
+        let entries = try files.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        for entry in entries where entry.pathExtension == "removed" || entry.pathExtension == "partial" {
+            let stem = entry.deletingPathExtension().lastPathComponent
+            guard stem.hasPrefix("."), let id = UUID(uuidString: String(stem.dropFirst())),
+                  !activeStaging.contains(id) else { continue }
+            try? files.removeItem(at: entry)
+        }
+    }
+
+    private struct InsufficientStorage: LocalizedError {
+        let shortfall: Int64
+
+        var errorDescription: String? {
+            "Free up at least \(shortfall.formatted(.byteCount(style: .file))) to import and index this archive."
+        }
     }
 
     private enum ImportError: LocalizedError {
         case invalidFile
         case emptyArchive
-        case invalidManifest
+        case busy
         case checksumMismatch
+        case invalidRepair
+        case invalidUpdate
 
         var errorDescription: String? {
             switch self {
             case .invalidFile: "Choose a single .zim archive from Files."
             case .emptyArchive: "This archive has no entries."
-            case .invalidManifest: "The installed archive manifest is invalid."
+            case .busy: "An archive operation is already in progress. Try again when it finishes."
             case .checksumMismatch: "The download does not match the publisher’s checksum."
+            case .invalidRepair: "This edition is no longer installed. Download it from Content packs."
+            case .invalidUpdate: "This archive can no longer be updated to the selected edition."
             }
         }
     }

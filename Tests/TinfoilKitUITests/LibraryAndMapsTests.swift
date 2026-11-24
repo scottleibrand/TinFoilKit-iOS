@@ -5,14 +5,43 @@ final class LibraryAndMapsTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testHouseholdNotesSurviveSwitchingTabsAndRelaunch() {
+        let app = XCUIApplication()
+        let tab = app.tabBars.buttons["Household"]
+        let editor = app.textViews["Household notes"]
+        let note = "Household fixture " + UUID().uuidString
+        app.launch()
+
+        tab.tap()
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        editor.tap()
+        editor.typeText("\n" + note)
+        app.tabBars.buttons["Library"].tap()
+
+        app.terminate()
+        app.launch()
+        tab.tap()
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertTrue((editor.value as? String)?.contains(note) == true)
+    }
+
     func testLibraryCatalogAndRegionalMap() {
         let app = XCUIApplication()
         app.launch()
 
         XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
         app.buttons["Content packs"].tap()
-        XCTAssertTrue(app.staticTexts["Wikipedia Climate Change"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Wikipedia Chemistry"].exists)
+        XCTAssertTrue(app.buttons["Download all"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Essentials"].waitForExistence(timeout: 5))
+        let packTitles = [
+            "Water Treatment Library", "Appropedia", "Field Medicine Library",
+            "Simple English Wikipedia", "Wikipedia Climate Change", "Wikipedia Chemistry"
+        ]
+        for title in packTitles {
+            let label = app.staticTexts[title]
+            for _ in 0..<4 where !label.exists { app.swipeUp(velocity: .slow) }
+            XCTAssertTrue(label.exists, "Missing content pack: \(title)")
+        }
 
         app.tabBars.buttons["Map"].tap()
         XCTAssertTrue(app.staticTexts["Seattle area"].waitForExistence(timeout: 10))
@@ -54,6 +83,7 @@ final class LibraryAndMapsTests: XCTestCase {
 
     func testImportsAndFindsArticleAfterRelaunch() {
         let app = XCUIApplication()
+        app.launchArguments = ["-askUsesOnDeviceModel", "NO"]
         app.launch()
         XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
 
@@ -89,5 +119,18 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertTrue(excerpt.waitForExistence(timeout: 70))
         excerpt.tap()
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+
+        app.tabBars.buttons["Ask"].tap()
+        let question = app.descendants(matching: .any)["ask-question"].firstMatch
+        XCTAssertTrue(question.waitForExistence(timeout: 10))
+        question.tap()
+        question.typeText("What is anthropogenic climate change?")
+        let done = app.buttons["ask-dismiss-keyboard"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        done.tap()
+        XCTAssertTrue(app.tabBars.buttons["Library"].isHittable)
+        app.buttons["ask-submit"].tap()
+        XCTAssertTrue(app.staticTexts["Matching passages"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.staticTexts["Answer"].exists)
     }
 }

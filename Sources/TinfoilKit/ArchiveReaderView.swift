@@ -1,3 +1,4 @@
+import PDFKit
 import SwiftUI
 import WebKit
 import ZIMArchive
@@ -8,11 +9,25 @@ struct ArchiveReaderView: View {
     var articlePath: String? = nil
     @State private var reader: ArchiveReader?
     @State private var page: URL?
+    @State private var documents: [ZIMArchive.PDFEntry]?
+    @State private var pdfReference: ArchivePDFReference?
     @State private var errorMessage: String?
 
     var body: some View {
         Group {
-            if let reader, let page {
+            if let reader, let pdfReference {
+                ArchivePDFReader(reader: reader, path: pdfReference.path, initialPage: pdfReference.pageIndex)
+            } else if let reader, let documents {
+                if documents.isEmpty {
+                    ContentUnavailableView("No documents", systemImage: "doc")
+                } else {
+                    List(documents) { document in
+                        NavigationLink(document.title) {
+                            ArchivePDFReader(reader: reader, path: document.path, title: document.title)
+                        }
+                    }
+                }
+            } else if let reader, let page {
                 ArchiveWebView(reader: reader, page: page)
             } else if let errorMessage {
                 ContentUnavailableView("Can't open archive", systemImage: "book.closed", description: Text(errorMessage))
@@ -26,6 +41,18 @@ struct ArchiveReaderView: View {
             do {
                 let file = await library.fileURL(for: archive.id)
                 let reader = ArchiveReader(file: file)
+                if let articlePath, let reference = ArchivePDFReference(articlePath: articlePath) {
+                    pdfReference = reference
+                    self.reader = reader
+                    return
+                }
+                if articlePath == nil, let pack = archive.pack, PackDownloads.usesPDFDirectory(pack) {
+                    documents = try await reader.pdfEntries().sorted {
+                        $0.title.localizedStandardCompare($1.title) == .orderedAscending
+                    }
+                    self.reader = reader
+                    return
+                }
                 let path: String
                 if let articlePath {
                     path = articlePath
@@ -58,11 +85,76 @@ private actor ArchiveReader {
         try open().resource(at: path)
     }
 
+    func pdfEntries() throws -> [ZIMArchive.PDFEntry] {
+        try open().pdfEntries()
+    }
+
     private func open() throws -> ZIMArchive {
         if let archive { return archive }
         let archive = try ZIMArchive(fileURL: file)
         self.archive = archive
         return archive
+    }
+}
+
+private struct ArchivePDFReader: View {
+    let reader: ArchiveReader
+    let path: String
+    var title: String?
+    var initialPage: Int?
+    @State private var document: PDFDocument?
+    @State private var resourceTitle: String?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if let document {
+                PDFSurface(document: document, initialPage: initialPage)
+            } else if let errorMessage {
+                ContentUnavailableView("Can't open document", systemImage: "doc", description: Text(errorMessage))
+            } else {
+                ProgressView("Opening document")
+            }
+        }
+        .navigationTitle(title ?? resourceTitle ?? "Document")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            do {
+                let resource = try await reader.resource(at: path)
+                guard resource.mimeType == "application/pdf", let document = PDFDocument(data: resource.data) else {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
+                resourceTitle = resource.title.isEmpty ? nil : resource.title
+                self.document = document
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private struct PDFSurface: UIViewRepresentable {
+        let document: PDFDocument
+        let initialPage: Int?
+
+        func makeCoordinator() -> Coordinator { Coordinator() }
+
+        func makeUIView(context: Context) -> PDFView {
+            let view = PDFView()
+            view.delegate = context.coordinator
+            view.document = document
+            view.autoScales = true
+            if let initialPage, let page = document.page(at: initialPage) {
+                view.go(to: page)
+            }
+            return view
+        }
+
+        func updateUIView(_ uiView: PDFView, context: Context) {}
+
+        final class Coordinator: NSObject, PDFViewDelegate {
+            // Keep archive-linked navigation local, as in the HTML reader.
+            func pdfViewWillClick(onLink sender: PDFView, with url: URL) {}
+        }
     }
 }
 
