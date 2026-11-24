@@ -38,6 +38,8 @@ Use **Map → + → Import map tiles** to add a regional PMTiles basemap from Fi
 
 Use **Map → + → Import regional bundle** and select a folder containing `manifest.json`, `places.sqlite`, and `routing.tfkroute`. A version 2 bundle also contains `basemap.pmtiles`. The app verifies and installs the files together and selects a basemap included in the bundle. Use **Installed regional bundles** to see the editions and sources or remove the bundle. You can still import a basemap separately for a version 1 bundle. [Regional bundle builder](Scripts/routing/README.md#regional-catalog-bundle)
 
+Use **Map → + → Download regional bundle** when you have the manifest's HTTPS URL and a trusted SHA-256 for that manifest. Review the edition, size and terms before downloading. Cellular data is off by default. Keep the download screen open to retry after cancelling or an interruption. If the publisher supplies a strong ETag and supports byte ranges, the retry continues from the saved bytes. The app verifies all files before installing the bundle.
+
 In Map, press and hold a location to copy its coordinates, set it as home, or save a named pin. Map search accepts saved place names and coordinates in decimal or degrees, minutes, and seconds. The Household tab keeps notes, home, and pins on the device.
 
 In **Household → Import and export**, save a household backup to Files or restore one on another iPhone. The same screen imports and exports the desktop kit’s `notes.txt` and `places.json` files individually. If the local household file is damaged, restoring a backup or starting a new household keeps a separate copy of the damaged file.

@@ -42,6 +42,13 @@ struct RegionalBundleManifest: Codable, Equatable, Sendable {
             self.routing = routing
             self.basemap = basemap
         }
+
+        var downloadFiles: [Asset] {
+            if let basemap { return [places, routing, basemap.asset] }
+            return [places, routing]
+        }
+
+        var downloadByteCount: Int64 { downloadFiles.reduce(0) { $0 + $1.byteCount } }
     }
 
     enum Error: LocalizedError, Equatable {
@@ -64,7 +71,7 @@ struct RegionalBundleManifest: Codable, Equatable, Sendable {
         }
     }
 
-    private static let maximumManifestBytes = 65_536
+    static let maximumManifestBytes = 65_536
 
     let schemaVersion: Int
     let region: String
@@ -161,12 +168,12 @@ struct RegionalBundleManifest: Codable, Equatable, Sendable {
         }
     }
 
-    private static func isHTTPS(_ url: URL) -> Bool {
+    static func isHTTPS(_ url: URL) -> Bool {
         url.scheme == "https" && url.host?.isEmpty == false
             && url.user == nil && url.password == nil && url.fragment == nil
     }
 
-    private static func isSHA256(_ value: String) -> Bool {
+    static func isSHA256(_ value: String) -> Bool {
         value.utf8.count == 64 && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }
 }
