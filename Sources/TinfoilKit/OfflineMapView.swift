@@ -3,9 +3,25 @@ import MapLibre
 import SwiftUI
 import UniformTypeIdentifiers
 
+struct MapOpenRequest: Identifiable {
+    struct Route {
+        let origin: HouseholdPlace
+        let mode: MapTravelMode
+    }
+
+    let id = UUID()
+    let place: MapPlace
+    let route: Route?
+
+    init(place: MapPlace, route: Route? = nil) {
+        self.place = place
+        self.route = route
+    }
+}
+
 struct OfflineMapView: View {
     @ObservedObject var household: HouseholdStore
-    @Binding var pendingPlace: MapPlace?
+    @Binding var pendingMapRequest: MapOpenRequest?
     @Environment(\.openURL) private var openURL
     @State private var storage = MapStorage()
     @State private var regionStorage = RegionalPlaceStorage()
@@ -151,13 +167,16 @@ struct OfflineMapView: View {
                 location.setVisible(true, centerInitially: savedPosition.isEmpty)
                 exploration.setVisible(true)
             }
-            .task(id: pendingPlace?.id) {
-                if let place = pendingPlace {
-                    pendingPlace = nil
+            .task(id: loading ? nil : pendingMapRequest?.id) {
+                if !loading, let request = pendingMapRequest {
+                    pendingMapRequest = nil
                     if location.following { location.toggleFollowing() }
                     routeRequest = nil
                     route = nil
-                    show(place)
+                    show(request.place)
+                    if let route = request.route {
+                        startRoute(from: route.origin.coordinate, to: request.place.coordinate, mode: route.mode)
+                    }
                 }
             }
             .onDisappear {
