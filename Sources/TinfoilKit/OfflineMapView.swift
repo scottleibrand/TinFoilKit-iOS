@@ -12,12 +12,14 @@ struct OfflineMapView: View {
     @State private var placeRegions: [RegionalPlaceStorage.Installed] = []
     @State private var routeStorage = RegionalRouteStore()
     @State private var routingRegions: [RegionalRouteStore.Installed] = []
+    @State private var bundleStorage = RegionalBundleStorage()
     @StateObject private var location = MapLocation()
     @StateObject private var exploration = MapExploration()
     @AppStorage("lastOfflineMapPosition") private var savedPosition = ""
     @State private var map: OfflineMap?
     @State private var style: OfflineMapStyle?
     @State private var choosing = false
+    @State private var choosingBundle = false
     @State private var importKind = MapImportKind.tiles
     @State private var searchingPlaces = false
     @State private var loading = true
@@ -30,12 +32,15 @@ struct OfflineMapView: View {
     @State private var route: DisplayedRoute?
     @State private var routeRequest: RouteRequest?
     @State private var showingSteps = false
-    @State private var importingRouting = false
+    @State private var activeImport: MapImportKind?
+    @State private var importTask: Task<Void, Never>?
+    @State private var cancellingImport = false
     @State private var pointActions: HouseholdPlace?
     @State private var editingPin: HouseholdPlace?
     @State private var showingBasemaps = false
     @State private var showingPlaceRegions = false
     @State private var showingRoutingPacks = false
+    @State private var showingRegionalBundles = false
     @State private var showingMapDownloads = false
 
     private var savedPlaces: [HouseholdPlace] {
@@ -124,6 +129,9 @@ struct OfflineMapView: View {
             .sheet(isPresented: $showingRoutingPacks) {
                 InstalledRoutingPacksView(storage: routeStorage, packs: $routingRegions)
             }
+            .sheet(isPresented: $showingRegionalBundles) {
+                InstalledRegionalBundlesView(storage: bundleStorage, onRemove: regionalBundlesChanged)
+            }
             .sheet(isPresented: $showingMapDownloads) {
                 MapDownloadsView(exploration: exploration)
             }
@@ -153,8 +161,13 @@ struct OfflineMapView: View {
                 isPresented: $choosing,
                 allowedContentTypes: importKind.contentTypes
             ) { result in
-                let kind = importKind
-                Task { await install(result, kind: kind) }
+                beginImport(result, kind: importKind)
+            }
+            .sheet(isPresented: $choosingBundle) {
+                RegionalBundleFolderPicker { folder in
+                    choosingBundle = false
+                    if let folder { beginImport(.success(folder), kind: .bundle) }
+                }
             }
             .alert("Map error", isPresented: Binding(
                 get: { errorMessage != nil },
@@ -217,6 +230,7 @@ struct OfflineMapView: View {
                         if !placeRegions.isEmpty {
                             Button("Installed place data") { showingPlaceRegions = true }
                                 .font(.caption)
+                                .disabled(importTask != nil)
                         }
                         Group {
                             switch exploration.status {
@@ -234,9 +248,7 @@ struct OfflineMapView: View {
                         }
                         .font(.caption)
                         .frame(height: 20)
-                        if importingRouting {
-                            ProgressView("Installing routing pack")
-                        }
+                        importProgress
                         if let routeRequest {
                             ProgressView("Finding \(routeRequest.mode.title.lowercased()) route")
                         } else if let route {
@@ -275,8 +287,14 @@ struct OfflineMapView: View {
                 } description: {
                     Text("Import a Protomaps PMTiles vector archive to use it offline.")
                 } actions: {
-                    Button("Import map") { chooseImport(.tiles) }
-                        .buttonStyle(.borderedProminent)
+                    if importTask == nil {
+                        Button("Import map") { chooseImport(.tiles) }
+                            .buttonStyle(.borderedProminent)
+                        Button("Import regional bundle") { chooseImport(.bundle) }
+                        Button("Installed regional bundles") { showingRegionalBundles = true }
+                    } else {
+                        importProgress
+                    }
                 }
             }
         }
@@ -295,23 +313,23 @@ struct OfflineMapView: View {
                     Button("Map downloads", systemImage: "arrow.down.circle") { showingMapDownloads = true }
                     Button("Installed basemaps", systemImage: "map") { showingBasemaps = true }
                     Button("Installed place data", systemImage: "list.bullet") { showingPlaceRegions = true }
+                    Button("Installed regional bundles", systemImage: "square.stack") { showingRegionalBundles = true }
                     Button("Import map tiles", systemImage: "map") { chooseImport(.tiles) }
+                    Button("Import regional bundle", systemImage: "folder") { chooseImport(.bundle) }
                     Button("Import regional place data", systemImage: "magnifyingglass") {
                         chooseImport(.places)
                     }
                     Button("Import offline routing pack", systemImage: "signpost.right") { chooseImport(.routing) }
-                        .disabled(importingRouting)
                     ForEach(bundledRoutingPacks, id: \.self) { pack in
                         Button("Install \(pack.deletingPathExtension().lastPathComponent) routing", systemImage: "signpost.right") {
-                            Task { await install(.success(pack), kind: .routing) }
+                            beginImport(.success(pack), kind: .routing)
                         }
-                        .disabled(importingRouting)
                     }
                     Button("Installed routing packs", systemImage: "signpost.right") { showingRoutingPacks = true }
-                        .disabled(importingRouting)
                 } label: {
                     Label("Import map data", systemImage: "plus")
                 }
+                .disabled(importTask != nil)
                 Menu {
                     if let position = MapPosition(savedPosition) {
                         Button("Save map center", systemImage: "mappin") {
@@ -356,8 +374,39 @@ struct OfflineMapView: View {
     }
 
     private func chooseImport(_ kind: MapImportKind) {
+        guard importTask == nil else { return }
+        if kind == .bundle {
+            choosingBundle = true
+            return
+        }
         importKind = kind
         choosing = true
+    }
+
+    @ViewBuilder
+    private var importProgress: some View {
+        if let activeImport {
+            ProgressView(cancellingImport ? "Cancelling import" : activeImport.progressLabel)
+            Button("Cancel import", role: .cancel) {
+                cancellingImport = true
+                importTask?.cancel()
+            }
+            .font(.caption)
+            .disabled(cancellingImport)
+        }
+    }
+
+    private func beginImport(_ result: Result<URL, Error>, kind: MapImportKind) {
+        guard importTask == nil else { return }
+        activeImport = kind
+        importTask = Task {
+            defer {
+                activeImport = nil
+                importTask = nil
+                cancellingImport = false
+            }
+            await install(result, kind: kind)
+        }
     }
 
     private func install(_ result: Result<URL, Error>, kind: MapImportKind) async {
@@ -372,18 +421,30 @@ struct OfflineMapView: View {
                 _ = try await regionStorage.install(file)
                 placeRegions = try await regionStorage.installedIndexes()
             case .routing:
-                importingRouting = true
-                defer { importingRouting = false }
                 routeRequest = nil
                 _ = try await routeStorage.install(file)
-                routingRegions = try await routeStorage.installedPacks()
+                routingRegions = try await Task { try await routeStorage.installedPacks() }.value
                 route = nil
+            case .bundle:
+                _ = try await bundleStorage.install(file)
+                try await Task { try await regionalBundlesChanged() }.value
             }
+        } catch is CancellationError {
         } catch {
             if (error as? CocoaError)?.code != .userCancelled {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func regionalBundlesChanged() async throws {
+        routeRequest = nil
+        route = nil
+        async let places = regionStorage.installedIndexes()
+        async let routes = routeStorage.installedPacks()
+        let (newPlaces, newRoutes) = try await (places, routes)
+        placeRegions = newPlaces
+        routingRegions = newRoutes
     }
 
     private func handleLocationButton() {
@@ -507,7 +568,7 @@ struct OfflineMapView: View {
     }
 
     private enum MapImportKind {
-        case tiles, places, routing
+        case tiles, places, routing, bundle
 
         var contentTypes: [UTType] {
             let extensions: [String]
@@ -515,8 +576,18 @@ struct OfflineMapView: View {
             case .tiles: extensions = ["pmtiles"]
             case .places: extensions = ["sqlite", "sqlite3"]
             case .routing: extensions = ["tfkroute"]
+            case .bundle: return []
             }
             return extensions.map { UTType(filenameExtension: $0) ?? .data }
+        }
+
+        var progressLabel: String {
+            switch self {
+            case .tiles: "Installing map tiles"
+            case .places: "Installing place data"
+            case .routing: "Installing routing pack"
+            case .bundle: "Installing regional bundle"
+            }
         }
     }
 
@@ -525,6 +596,38 @@ struct OfflineMapView: View {
         let origin: MapRoute.Point
         let destination: MapRoute.Point
         let mode: MapTravelMode
+    }
+}
+
+private struct RegionalBundleFolderPicker: UIViewControllerRepresentable {
+    let completion: (URL?) -> Void
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(completion: completion)
+    }
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let completion: (URL?) -> Void
+
+        init(completion: @escaping (URL?) -> Void) {
+            self.completion = completion
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            completion(urls.first)
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            completion(nil)
+        }
     }
 }
 

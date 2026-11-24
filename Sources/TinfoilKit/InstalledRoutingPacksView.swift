@@ -19,7 +19,11 @@ struct InstalledRoutingPacksView: View {
                         Text(coverage(pack.bounds)).font(.caption).foregroundStyle(.secondary)
                         Link("Data source", destination: pack.source)
                         Link("\(pack.attribution) · \(pack.license)", destination: pack.licenseURL)
-                        Button("Remove routing pack", role: .destructive) { pendingRemoval = installed }
+                        if installed.bundleID == nil {
+                            Button("Remove routing pack", role: .destructive) { pendingRemoval = installed }
+                        } else {
+                            Text("Managed in Installed regional bundles.").foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
