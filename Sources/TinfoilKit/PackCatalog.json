@@ -188,6 +188,7 @@
     "isDefault": true,
     "usesPDFDirectory": false,
     "allowsArchiveSharing": false,
+    "fallbackMirror": "https://dumps.wikimedia.org/kiwix/zim/wikipedia/wikipedia_es_top_mini_2026-10.zim",
     "detail": "Consulta las introducciones y fichas de una selección de artículos populares en español.",
     "termsURL": "https://es.wikipedia.org/wiki/Wikipedia:Derechos_de_autor"
   },

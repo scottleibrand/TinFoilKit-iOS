@@ -3,6 +3,18 @@ import XCTest
 @testable import TinfoilKit
 
 final class PackCatalogTests: XCTestCase {
+    func testFallbackMirrorIsPinnedToOneEdition() throws {
+        let catalog = try XCTUnwrap(Bundle.main.url(forResource: "PackCatalog", withExtension: "json"))
+        let entries = try PackCatalog.load(from: catalog)
+        let mirrored = try XCTUnwrap(entries.first { $0.pack.id == "wikipedia-es-top-mini" && $0.isDefault })
+        XCTAssertEqual(mirrored.pack.version, "2026-10")
+        XCTAssertEqual(mirrored.pack.source.host, "ftp.fau.de")
+        XCTAssertEqual(mirrored.fallbackMirror?.host, "dumps.wikimedia.org")
+        XCTAssertEqual(mirrored.fallbackMirror?.lastPathComponent, mirrored.pack.source.lastPathComponent)
+        XCTAssertTrue(entries.filter { $0.pack.id == mirrored.pack.id && $0.id != mirrored.id }
+            .allSatisfy { $0.fallbackMirror == nil })
+    }
+
     func testCompleteEnglishWikipediaIsCurrentAndIndividualOnly() throws {
         let catalog = try XCTUnwrap(Bundle.main.url(forResource: "PackCatalog", withExtension: "json"))
         let entries = try PackCatalog.load(from: catalog)
