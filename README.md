@@ -52,7 +52,7 @@ Import compatible `.tfkroute` packs from Map to plan offline walks and drives an
 
 To make a graph available for installation from the app bundle, place its `.tfkroute` file in `.build/routing-packs/` before running XcodeGen. Routing preparation creates this folder even when no graphs are bundled.
 
-Open **Offline readiness** from the Library toolbar to check storage, installed content, indexing progress, model availability, and map coverage before a trip.
+Open **Offline readiness** from the Library toolbar to check storage, installed content, indexing progress, model availability, installed regional bundle status, and coverage at saved Home before a trip.
 
 Open **Library → Find nearby** to see nearby devices. Enable **Sync public references** on both devices to automatically receive and relay the verified household check-in worksheet while using any part of the app. The standard build supplies the worksheet, and the lightweight build can receive it for offline reading. Switching apps pauses discovery and lets an active transfer finish if iOS grants it time. [Nearby sharing plan](DISASTER-SHARING.md) · [Apple background execution](https://developer.apple.com/documentation/uikit/extending-your-app-s-background-execution-time)
 
