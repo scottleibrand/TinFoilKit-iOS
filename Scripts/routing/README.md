@@ -60,3 +60,15 @@ python Tests/RegionalBundleFixture/run.py
 ```
 
 The test converts the pinned, original MIT-licensed synthetic network to PBF with an invented pharmacy and address. It uses reserved fixture URLs and exercises the production attribution fields. It checks source pinning, both artifact hashes and rejection of a modified manifest or routing payload. The temporary build stays under the ignored `.build/` directory.
+
+### Download a published bundle
+
+Use the HTTPS manifest URL and the SHA-256 supplied by a trusted catalog. The manifest pins each asset's URL, byte count, and SHA-256. The downloader stages assets next to the destination. Repeat the same command after an interruption to continue from the saved byte offset. A server that ignores the range causes the affected asset to restart. The folder becomes available for Files import after every asset and the bundle format pass verification.
+
+```sh
+python3 Scripts/download-regional-bundle.py \
+  https://publisher.example/bundles/region-edition/manifest.json \
+  YOUR_TRUSTED_MANIFEST_SHA256 .build/downloaded-region
+```
+
+The URL is illustrative. Before publishing a real region, confirm its attribution and redistribution terms, host the artifacts and manifest, and publish the manifest's stable HTTPS URL and SHA-256 in the regional catalog. The downloader uses the checked-out bundle verifier, so its supported manifest versions follow that verifier.

@@ -11,6 +11,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 
 import osmium
+from verify_download import verify_download
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -53,6 +54,7 @@ def main():
         source_digest = hashlib.sha256(pbf.read_bytes()).hexdigest()
         subprocess.run([*build, "--source-sha256", source_digest], check=True)
         subprocess.run([*TOOL, "verify", output], check=True)
+        verify_download(output, work / "downloaded-bundle")
 
         with sqlite3.connect(output / "places.sqlite") as db:
             assert db.execute("SELECT category, address FROM places WHERE title = ?", ("Fixture Pharmacy",)
