@@ -56,6 +56,11 @@ final class LibraryAndMapsTests: XCTestCase {
         screenshot.name = "Seattle offline map"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+
+        app.buttons["Import map data"].tap()
+        app.buttons["Installed basemaps"].tap()
+        XCTAssertTrue(app.navigationBars["Installed basemaps"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Seattle area"].exists)
     }
 
     func testSeattleWalkingPreview() throws {

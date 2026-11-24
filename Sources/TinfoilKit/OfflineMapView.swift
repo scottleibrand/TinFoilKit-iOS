@@ -31,6 +31,7 @@ struct OfflineMapView: View {
     @State private var importingRouting = false
     @State private var pointActions: HouseholdPlace?
     @State private var editingPin: HouseholdPlace?
+    @State private var showingBasemaps = false
 
     private var savedPlaces: [HouseholdPlace] {
         (household.snapshot.home.map { [$0] } ?? []) + household.snapshot.pins
@@ -102,6 +103,12 @@ struct OfflineMapView: View {
             }
             .sheet(isPresented: $showingSteps) {
                 if let route { steps(for: route) }
+            }
+            .sheet(isPresented: $showingBasemaps) {
+                InstalledBasemapsView(storage: storage, activeMapID: map?.id) { selected in
+                    savedPosition = ""
+                    setMap(selected)
+                }
             }
             .onChange(of: location.fix?.timestamp) {
                 if let fix = location.fix {
@@ -248,6 +255,7 @@ struct OfflineMapView: View {
                     systemImage: location.following ? "location.fill" : "location"
                 ) { handleLocationButton() }
                 Menu {
+                    Button("Installed basemaps", systemImage: "map") { showingBasemaps = true }
                     Button("Import map tiles", systemImage: "map") { chooseImport(.tiles) }
                     Button("Import regional place data", systemImage: "magnifyingglass") {
                         chooseImport(.places)

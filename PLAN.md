@@ -41,7 +41,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 
 ### Maps
 
-- **Beta.** Regions can't be installed from inside the app. The Seattle tiles, place index and walking graph (about 100 MB) are bundled into the app. Other regions need the Python scripts and a Files import, and there's room for only one imported tile region. Publish region packs (tiles, places and routing data) in the catalog with explicit coverage, and support more than one region.
+- **Beta.** The map keeps multiple imported basemaps with coverage and a saved selection. Publish region packs (tiles, places and routing data) in the catalog for direct installation, and let users manage multiple regional place indexes and routing graphs.
 - **Beta.** The tile cache:
   - reveals the areas a user views to the Source Cooperative host, which needs a privacy disclosure and an off switch;
   - downloads over cellular;
