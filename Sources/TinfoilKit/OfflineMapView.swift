@@ -108,7 +108,7 @@ struct OfflineMapView: View {
                     marker = MapMarker(coordinate: fix.coordinate, title: "Current position")
                 }
             }
-            .onAppear { location.setVisible(true) }
+            .onAppear { location.setVisible(true, centerInitially: savedPosition.isEmpty) }
             .onDisappear { location.setVisible(false) }
             .fileImporter(
                 isPresented: $choosing,
@@ -354,10 +354,11 @@ struct OfflineMapView: View {
     }
 
     private func setMap(_ map: OfflineMap?) {
+        let initialMarker = style == nil ? marker : nil
         self.map = map
         style = OfflineMapStyle(seed: map, downloadedTiles: ExploredMapTiles.directory)
         viewport = nil
-        marker = nil
+        marker = initialMarker
         selectedPlace = nil
         route = nil
         routeRequest = nil
@@ -665,6 +666,10 @@ private final class MapLocation: NSObject, ObservableObject, @preconcurrency CLL
     @Published private(set) var following = false
     private let manager = CLLocationManager()
     private var visible = false
+    private var hasOpenedMap = false
+    private var needsInitialFix = false
+    private var requestedAuthorization = false
+    private var requestingFix = false
 
     override init() {
         super.init()
@@ -674,18 +679,24 @@ private final class MapLocation: NSObject, ObservableObject, @preconcurrency CLL
     }
 
     func toggleFollowing() {
+        needsInitialFix = false
         following.toggle()
         if following {
             message = "Finding your position"
             updateTracking()
         } else {
             manager.stopUpdatingLocation()
+            requestingFix = false
             message = nil
         }
     }
 
-    func setVisible(_ visible: Bool) {
+    func setVisible(_ visible: Bool, centerInitially: Bool = false) {
         self.visible = visible
+        if visible, !hasOpenedMap {
+            hasOpenedMap = true
+            needsInitialFix = centerInitially || manager.authorizationStatus == .notDetermined
+        }
         updateTracking()
     }
 
@@ -694,27 +705,42 @@ private final class MapLocation: NSObject, ObservableObject, @preconcurrency CLL
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard following, visible else { return }
+        requestingFix = false
+        guard visible, following || needsInitialFix else { return }
+        needsInitialFix = false
         fix = locations.last(where: { $0.horizontalAccuracy >= 0 })
         message = fix == nil ? "Could not get a location." : nil
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        guard following, visible else { return }
+        requestingFix = false
+        guard visible, following || needsInitialFix else { return }
+        needsInitialFix = false
         message = "Could not get a location."
     }
 
     private func updateTracking() {
-        guard visible, following else {
+        guard visible, following || needsInitialFix else {
             manager.stopUpdatingLocation()
+            requestingFix = false
             return
         }
         switch manager.authorizationStatus {
         case .notDetermined:
-            manager.requestWhenInUseAuthorization()
+            if !requestedAuthorization {
+                requestedAuthorization = true
+                manager.requestWhenInUseAuthorization()
+            }
         case .authorizedAlways, .authorizedWhenInUse:
-            manager.startUpdatingLocation()
+            if following {
+                requestingFix = false
+                manager.startUpdatingLocation()
+            } else if !requestingFix {
+                requestingFix = true
+                manager.requestLocation()
+            }
         default:
+            needsInitialFix = false
             following = false
             message = "Location access is off."
         }
