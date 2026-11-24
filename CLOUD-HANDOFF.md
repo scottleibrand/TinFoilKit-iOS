@@ -4,7 +4,7 @@ The goal is desktop feature parity for Tinfoil Kit on iOS. [PLAN.md](PLAN.md) tr
 
 ## Start here
 
-Fetch `origin` and check both `origin/develop` and `origin/main`. Both branches were synced at `fd5aeab` after PR #14. Recheck the branch tips and the work below before starting an overlapping change.
+Fetch `origin` and check both `origin/develop` and `origin/main`. Both branches were synced at `d6e7caf` after PR #15. Recheck the branch tips and the work below before starting an overlapping change.
 
 Use a fresh `codex/` feature branch from the current `origin/develop` for work awaiting Apple tests. Keep each feature in its own commits so it can move to `develop` after verification. Push the feature branch for the Mac session to retrieve. Open and merge one tested feature at a time through a `develop` → `main` PR.
 
@@ -19,14 +19,16 @@ The upstream desktop checkout and generated build inputs are ignored. For parity
 - Both app profiles include the app and ZIMArchive privacy manifests required for distribution. All 62 simulator unit tests passed and the signed standard build was installed on the iPhone. The one-time TestFlight upload still needs a confirmed App Store Connect team and signing access on the Mac. [PR #12](https://github.com/scottleibrand/TinFoilKit-iOS/pull/12)
 - Both profiles now supply version `1.0.0` and build `1` through shared build settings. The signed app's packaged version fields were verified and the build was installed on the iPhone. [PR #13](https://github.com/scottleibrand/TinFoilKit-iOS/pull/13)
 - Version 2 bundles include a verified basemap with its own edition and publisher credit. The pinned producer built the fixture, the Files UI imported, selected, and removed it, and 65 app unit tests passed. The signed build was installed on the iPhone. [PR #14](https://github.com/scottleibrand/TinFoilKit-iOS/pull/14)
+- Content Packs offers complete English Wikipedia in separate text-only and illustrated downloads. Publisher manifests and range probes confirmed both byte counts and checksums. All 66 app tests, 18 reader tests and the catalog UI test passed. The signed phone build succeeded, with installation pending when the phone is reachable. Full-archive indexing remains a device check. [PR #15](https://github.com/scottleibrand/TinFoilKit-iOS/pull/15)
 
 ## Cloud branches awaiting integration
 
-- `codex/regional-download-fixture` adds a resumable Python downloader and interrupted-transfer fixture for version 2 bundles. Use it to test manifest pinning and recovery before wiring production regional downloads in iOS.
-- `codex/ask-offline-directions` and `codex/ask-saved-pin-directions` touch related Ask and Map paths. Compare their intent handling before combining the changes.
+- `codex/regional-download-fixture` adds a resumable Python downloader and interrupted-transfer fixture. Compare `codex/ios-regional-download` and `codex/persistent-regional-download` before landing the iOS flow. `codex/regional-data-candidate` documents a candidate production region and its provenance.
+- `codex/ask-offline-directions`, `codex/ask-saved-pin-directions`, and `codex/ask-address-directions` touch related Ask and Map paths. Compare their intent handling before combining the changes. `codex/offline-ask-retrieval-fixture` adds coverage for retrieval across installed PDF archives.
 - `codex/nearby-public-admission` adds catalog and storage admission checks. `codex/nearby-public-resume` and `codex/nearby-public-transfer-recovery` overlap on worksheet download resume. Review their shared transfer paths and verify the combined behavior.
 - `codex/map-range-validation` adds validation for remote PMTiles range responses. `codex/desktop-starter-packs` and `codex/catalog-audit` carry the same climate pack byte count correction. Verify any publisher metadata before integrating it.
-- `codex/full-english-wikipedia` adds the complete English Wikipedia as an individual download. `codex/household-share-link-controls` adds link rotation and a QR code to the local household sharing screen. Review these branches for their separate PRs.
+- `codex/optional-health-library` adds an individual WikiMed download. `codex/print-essentials-edition-audit` tracks exact printable editions and page ranges. `codex/archive-directory-paths` addresses resource paths ending in a slash.
+- `codex/household-share-link-controls` adds link rotation and a locally rendered QR code. `codex/household-share-public-worksheet` adds the verified worksheet to the household browser share. Review the access controls and expiration on a second device.
 
 ## Work that can move in the cloud
 
