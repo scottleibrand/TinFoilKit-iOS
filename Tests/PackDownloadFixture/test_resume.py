@@ -11,7 +11,7 @@ import threading
 
 
 BODY = bytes(range(256)) * 8192
-CUT = len(BODY) // 2
+CUTS = (len(BODY) // 3, 2 * len(BODY) // 3)
 ETAG = '"pack-fixture-v1"'
 
 
@@ -47,10 +47,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(BODY) - start))
         self.send_header("Connection", "close")
         self.end_headers()
-        self.wfile.write(BODY[start:] if byte_range else BODY[:CUT])
+        end = next((cut for cut in CUTS if cut > start), len(BODY))
+        self.wfile.write(BODY[start:end])
         self.wfile.flush()
-        if not byte_range:
-            # End the first response before its advertised length. Repeat on any full retry.
+        if end < len(BODY):
+            # End each response before its advertised length until both cuts have been crossed.
             self.connection.shutdown(socket.SHUT_RDWR)
         self.close_connection = True
 
@@ -69,8 +70,10 @@ def main():
             try:
                 url = f"http://127.0.0.1:{server.server_port}/sample.zim"
                 subprocess.run([client, url, root], check=True, timeout=30, cwd=root)
-                if not server.offsets:
-                    raise RuntimeError("The client never requested a nonzero byte range")
+                if not any(0 < offset <= CUTS[0] for offset in server.offsets) or not any(
+                    CUTS[0] < offset <= CUTS[1] for offset in server.offsets
+                ):
+                    raise RuntimeError("The client did not advance its byte range across both interruptions")
                 print(f"ETag-validated range offsets served: {server.offsets}")
             finally:
                 server.shutdown()

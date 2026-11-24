@@ -61,7 +61,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 
 ### Tests and build
 
-- No tests cover interrupted or resumed downloads, low storage, checksum failure, edition replacement, Ask retrieval, or the walking router. The regional place index fixture runs as a separate script.
+- The pack download fixture cuts a real HTTP transfer and checks that URLSession requests the remaining bytes and reconstructs the original file. The regional place index fixture runs as a separate script.
 - The UI tests need a fixture copied into the simulator by hand. Automate that, and run the unit and UI tests in CI.
 
 ## 1. Offline library
