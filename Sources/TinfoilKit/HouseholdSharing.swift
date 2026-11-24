@@ -139,6 +139,8 @@ final class HouseholdShareServer: @unchecked Sendable {
         guard status == errSecSuccess else { throw ShareError.tokenUnavailable }
         resourcePath = "/household/" + entropy.map { String(format: "%02x", $0) }.joined()
         let parameters = NWParameters.tcp
+        parameters.acceptLocalOnly = true
+        parameters.prohibitedInterfaceTypes = [.cellular]
         parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(address.host), port: .any)
         listener = try NWListener(using: parameters)
     }

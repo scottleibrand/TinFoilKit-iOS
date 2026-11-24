@@ -110,7 +110,7 @@ Original iOS work is MIT. Review exact dependency and distribution terms before 
 
 - Publish with the current Tinfoil Kit name, adapted icon and bundle identifier. The owner will ask the upstream author whether to adopt this port or keep it as a separately branded fork. Revisit the branding before an App Store release.
 - Verify the README's build and test instructions from a fresh clone, including Valhalla preparation. Reuse the tested long-lived Seattle basemap source.
-- Review the phone-hosted household sharing listener before inviting people to run the app from source. Online Ask sends the question to the selected provider. Local library passages stay on the phone.
+- The household listener is scoped to the local link and requires a user-selected snapshot and an expiring link. The UI and README describe its unencrypted HTTP transport. Online Ask sends the question to the selected provider. Local library passages stay on the phone.
 - Retain the notices and update them when dependencies or content change. [Third-party notices](THIRD-PARTY.md)
 
 ## Desktop feature parity
