@@ -27,5 +27,6 @@ PY
     --bounds -180 -90 180 90
 
 swiftc -module-cache-path "$scratch/module-cache" Sources/TinfoilKit/RegionalPlaceIndex.swift \
+    Sources/TinfoilKit/RegionalServiceCategory.swift \
     Tests/RegionalPlaceIndexFixture/VerifyRegionalPlaceIndex.swift -lsqlite3 -o "$scratch/verify"
 "$scratch/verify" "$scratch/places.sqlite" "$scratch/old.sqlite"

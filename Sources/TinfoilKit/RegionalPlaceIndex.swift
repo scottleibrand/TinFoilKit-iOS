@@ -46,12 +46,7 @@ struct RegionalPlaceIndex: Sendable {
         var id: Place.ID { place.id }
     }
 
-    enum Category: String, CaseIterable, Identifiable, Sendable {
-        case hospital, urgentCare = "urgent_care", pharmacy, police, fireStation = "fire_station"
-        case shelter, gas, grocery, hardware, drinkingWater = "drinking_water"
-
-        var id: String { rawValue }
-    }
+    typealias Category = RegionalServiceCategory
 
     enum IndexError: LocalizedError {
         case unreadable
