@@ -30,7 +30,7 @@ struct InstalledBasemapsView: View {
                         }
                     }
                     .swipeActions {
-                        if !map.isBundled {
+                        if map.canRemove {
                             Button("Remove", systemImage: "trash", role: .destructive) { pendingRemoval = map }
                         }
                     }

@@ -10,6 +10,7 @@ actor RegionalBundleStorage {
     struct Edition: Sendable {
         let folder: URL
         let installed: Installed
+        let basemap: OfflineMap?
 
         var places: URL { folder.appendingPathComponent("places.sqlite") }
         var routing: URL { folder.appendingPathComponent("routing", isDirectory: true) }
@@ -62,7 +63,10 @@ actor RegionalBundleStorage {
                 guard let id = UUID(uuidString: folder.lastPathComponent), Self.isDirectory(folder),
                       let manifest = try? RegionalBundleManifest.read(from: folder.appendingPathComponent("manifest.json"))
                 else { return nil }
-                let edition = Edition(folder: folder, installed: Installed(id: id, manifest: manifest))
+                let installed = Installed(id: id, manifest: manifest)
+                let basemap = try? Self.validatedBasemap(in: folder, installed: installed)
+                guard manifest.assets.basemap == nil || basemap != nil else { return nil }
+                let edition = Edition(folder: folder, installed: installed, basemap: basemap)
                 guard Self.isDirectory(edition.routing),
                       (try? Self.regularFileSize(edition.places)) == manifest.assets.places.byteCount,
                       (try? Self.regularFileSize(edition.routing.appendingPathComponent("manifest.json"))) != nil,
@@ -99,16 +103,24 @@ actor RegionalBundleStorage {
             try removeInterruptedImports()
             let assets = manifest.assets
             let (routeSpace, routeOverflow) = assets.routing.byteCount.multipliedReportingOverflow(by: 2)
-            let (needed, totalOverflow) = assets.places.byteCount.addingReportingOverflow(routeSpace)
-            guard !routeOverflow, !totalOverflow else { throw RegionalBundleManifest.Error.invalidManifest }
+            let (placeAndRoute, placeAndRouteOverflow) = assets.places.byteCount.addingReportingOverflow(routeSpace)
+            let (needed, totalOverflow) = placeAndRoute.addingReportingOverflow(assets.basemap?.byteCount ?? 0)
+            guard !routeOverflow, !placeAndRouteOverflow, !totalOverflow else {
+                throw RegionalBundleManifest.Error.invalidManifest
+            }
             if let available = try root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
                 .volumeAvailableCapacityForImportantUsage, available < needed { throw RouteError.storage }
 
             let id = UUID()
+            let installed = Installed(id: id, manifest: manifest)
             let ready = root.appendingPathComponent(id.uuidString, isDirectory: true)
             let staging = ready.appendingPathExtension("partial")
             try files.createDirectory(at: staging, withIntermediateDirectories: false)
             defer { try? files.removeItem(at: staging) }
+            if let basemap = assets.basemap {
+                _ = try Self.copyVerified(basemap.asset, from: sourceFile(basemap.filename), to: staging)
+                _ = try Self.validatedBasemap(in: staging, installed: installed)
+            }
             let placeFile = try Self.copyVerified(assets.places, from: sourceFile(assets.places.filename), to: staging)
             let placeMetadata = try RegionalPlaceStorage.validateIndex(at: placeFile)
             try manifest.validate(places: placeMetadata)
@@ -121,8 +133,20 @@ actor RegionalBundleStorage {
             try Task.checkCancellation()
             if let existing = try installedBundles().first(where: { $0.manifest == manifest }) { return existing }
             try files.moveItem(at: staging, to: ready)
-            return Installed(id: id, manifest: manifest)
+            return installed
         }
+    }
+
+    private static func validatedBasemap(in folder: URL, installed: Installed) throws -> OfflineMap? {
+        guard let basemap = installed.manifest.assets.basemap else { return nil }
+        let file = folder.appendingPathComponent(basemap.filename)
+        try basemap.asset.validateFile(at: file)
+        guard let map = try? OfflineMap(archive: file, title: installed.manifest.region,
+                                         regionalBundleID: installed.id, attribution: basemap.attribution) else {
+            throw RegionalBundleManifest.Error.invalidArtifact(basemap.filename)
+        }
+        try installed.manifest.validate(basemapBounds: map.bounds)
+        return map
     }
 
     private func removeInterruptedImports() throws {
