@@ -130,7 +130,7 @@ struct OfflineMapView: View {
                 InstalledRoutingPacksView(storage: routeStorage, packs: $routingRegions)
             }
             .sheet(isPresented: $showingRegionalBundles) {
-                InstalledRegionalBundlesView(storage: bundleStorage, onRemove: regionalBundlesChanged)
+                InstalledRegionalBundlesView(storage: bundleStorage) { try await regionalBundlesChanged() }
             }
             .sheet(isPresented: $showingMapDownloads) {
                 MapDownloadsView(exploration: exploration)
@@ -270,6 +270,10 @@ struct OfflineMapView: View {
                             if supportsOfflineRoute(from: selectedPlace.coordinate) {
                                 Button("Start drive here") { findDestination(from: selectedPlace, mode: .driving) }
                             }
+                        }
+                        if let attribution = map?.attribution, let license = map?.licenseURL {
+                            Link(attribution, destination: license)
+                                .font(.caption)
                         }
                         Link("© OpenStreetMap contributors", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
                             .font(.caption)
@@ -426,8 +430,11 @@ struct OfflineMapView: View {
                 routingRegions = try await Task { try await routeStorage.installedPacks() }.value
                 route = nil
             case .bundle:
-                _ = try await bundleStorage.install(file)
-                try await Task { try await regionalBundlesChanged() }.value
+                let installed = try await bundleStorage.install(file)
+                try await Task {
+                    let basemapID = installed.manifest.assets.basemap.map { _ in OfflineMap.regionalID(installed.id) }
+                    try await regionalBundlesChanged(selecting: basemapID)
+                }.value
             }
         } catch is CancellationError {
         } catch {
@@ -437,7 +444,7 @@ struct OfflineMapView: View {
         }
     }
 
-    private func regionalBundlesChanged() async throws {
+    private func regionalBundlesChanged(selecting basemapID: OfflineMap.ID? = nil) async throws {
         routeRequest = nil
         route = nil
         async let places = regionStorage.installedIndexes()
@@ -445,6 +452,16 @@ struct OfflineMapView: View {
         let (newPlaces, newRoutes) = try await (places, routes)
         placeRegions = newPlaces
         routingRegions = newRoutes
+        let currentMap: OfflineMap?
+        if let basemapID {
+            currentMap = try await storage.selectMap(basemapID)
+        } else {
+            currentMap = try await storage.current()
+        }
+        if map != currentMap {
+            savedPosition = ""
+            setMap(currentMap)
+        }
     }
 
     private func handleLocationButton() {

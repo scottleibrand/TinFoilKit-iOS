@@ -9,8 +9,18 @@ struct OfflineMap: Equatable, Identifiable, Sendable {
     let maxLongitude: Double
     let maxLatitude: Double
     let maxZoom: UInt8
-    var id: String { archive.lastPathComponent }
+    var id: String { regionalBundleID.map(Self.regionalID) ?? archive.lastPathComponent }
     let isBundled: Bool
+    let regionalBundleID: UUID?
+    let attribution: String?
+    let licenseURL: URL?
+
+    var canRemove: Bool { !isBundled && regionalBundleID == nil }
+    var bounds: RoutingPack.Bounds {
+        .init(west: minLongitude, south: minLatitude, east: maxLongitude, north: maxLatitude)
+    }
+
+    static func regionalID(_ bundleID: UUID) -> String { "regional-\(bundleID.uuidString)" }
 
     var center: CLLocationCoordinate2D {
         CLLocationCoordinate2D(
@@ -19,7 +29,8 @@ struct OfflineMap: Equatable, Identifiable, Sendable {
         )
     }
 
-    init(archive: URL, title: String, isBundled: Bool = false) throws {
+    init(archive: URL, title: String, isBundled: Bool = false, regionalBundleID: UUID? = nil,
+         attribution: String? = nil, licenseURL: URL? = nil) throws {
         let file = try FileHandle(forReadingFrom: archive)
         defer { try? file.close() }
         guard let header = try file.read(upToCount: 127), header.count == 127,
@@ -40,9 +51,37 @@ struct OfflineMap: Equatable, Identifiable, Sendable {
               minLatitude >= -90, maxLatitude <= 90, minLatitude < maxLatitude else {
             throw MapError.invalidArchive
         }
+        if regionalBundleID != nil {
+            try Self.validateLayout(header, fileSize: file.seekToEnd())
+        }
         self.archive = archive
         self.title = title
         self.isBundled = isBundled
+        self.regionalBundleID = regionalBundleID
+        self.attribution = attribution
+        self.licenseURL = licenseURL
+    }
+
+    private static func validateLayout(_ header: Data, fileSize: UInt64) throws {
+        guard header[97...98].allSatisfy({ $0 == 1 || $0 == 2 }) else {
+            throw MapError.invalidArchive
+        }
+        func integer(_ offset: Int) -> UInt64 {
+            header.withUnsafeBytes { UInt64(littleEndian: $0.loadUnaligned(fromByteOffset: offset, as: UInt64.self)) }
+        }
+        let rootOffset = integer(8)
+        let rootLength = integer(16)
+        guard rootOffset < 16_384, rootLength > 0, rootLength <= 16_384 - rootOffset, integer(64) > 0 else {
+            throw MapError.invalidArchive
+        }
+        // The header lists root, metadata, leaf and tile sections as offset/length pairs.
+        let sections = [8, 24, 40, 56].map { (offset: integer($0), length: integer($0 + 8)) }
+        var previousEnd: UInt64 = 127
+        for section in sections.filter({ $0.length > 0 }).sorted(by: { $0.offset < $1.offset }) {
+            guard section.offset >= previousEnd, section.offset <= fileSize,
+                  section.length <= fileSize - section.offset else { throw MapError.invalidArchive }
+            previousEnd = section.offset + section.length
+        }
     }
 
     func contains(_ coordinate: CLLocationCoordinate2D) -> Bool {
@@ -74,7 +113,10 @@ struct OfflineMapStyle: Identifiable {
             downloadedSource: ["type": "vector", "tiles": [tileTemplate], "maxzoom": 15, "attribution": attributes]
         ]
         if let seed {
-            sources["installed"] = ["type": "vector", "url": "pmtiles://" + seed.archive.absoluteString, "attribution": attributes]
+            let attribution = seed.attribution?.replacingOccurrences(of: "&", with: "&amp;")
+                .replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;") ?? attributes
+            sources["installed"] = ["type": "vector", "url": "pmtiles://" + seed.archive.absoluteString,
+                                    "attribution": attribution]
         }
         var style: [String: Any] = [
             "version": 8,
@@ -139,17 +181,21 @@ struct OfflineMapStyle: Identifiable {
 }
 
 actor MapStorage {
+    private static let defaultDirectory = URL.applicationSupportDirectory.appendingPathComponent("Maps", isDirectory: true)
     private let directory: URL
     private let bundledMap: URL?
+    private let bundleDirectory: URL?
     private var legacyArchive: URL { directory.appendingPathComponent("imported.pmtiles") }
     private var selection: URL { directory.appendingPathComponent("current-basemap") }
 
     init(
-        directory: URL = URL.applicationSupportDirectory.appendingPathComponent("Maps", isDirectory: true),
-        bundledMap: URL? = Bundle.main.url(forResource: "seattle", withExtension: "pmtiles", subdirectory: "map-assets")
+        directory: URL? = nil,
+        bundledMap: URL? = Bundle.main.url(forResource: "seattle", withExtension: "pmtiles", subdirectory: "map-assets"),
+        bundleDirectory: URL? = nil
     ) {
-        self.directory = directory
+        self.directory = directory ?? Self.defaultDirectory
         self.bundledMap = bundledMap
+        self.bundleDirectory = bundleDirectory ?? (directory == nil ? RegionalBundleStorage.defaultDirectory : nil)
     }
 
     func current() throws -> OfflineMap? {
@@ -167,17 +213,19 @@ actor MapStorage {
         if let bundledMap, let map = try? OfflineMap(archive: bundledMap, title: "Seattle area", isBundled: true) {
             maps.append(map)
         }
-        guard FileManager.default.fileExists(atPath: directory.path) else { return maps }
-        if let legacy = try? OfflineMap(archive: legacyArchive, title: "Imported map") { maps.append(legacy) }
-        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isRegularFileKey])
-        let imports = files.compactMap { archive -> OfflineMap? in
-            let stem = archive.deletingPathExtension().lastPathComponent
-            guard archive.pathExtension == "pmtiles", stem.count > 37,
-                  UUID(uuidString: String(stem.prefix(36))) != nil, stem.dropFirst(36).first == "-",
-                  (try? archive.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return nil }
-            return try? OfflineMap(archive: archive, title: String(stem.dropFirst(37)))
+        if FileManager.default.fileExists(atPath: directory.path) {
+            if let legacy = try? OfflineMap(archive: legacyArchive, title: "Imported map") { maps.append(legacy) }
+            let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isRegularFileKey])
+            let imports = files.compactMap { archive -> OfflineMap? in
+                let stem = archive.deletingPathExtension().lastPathComponent
+                guard archive.pathExtension == "pmtiles", stem.count > 37,
+                      UUID(uuidString: String(stem.prefix(36))) != nil, stem.dropFirst(36).first == "-",
+                      (try? archive.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return nil }
+                return try? OfflineMap(archive: archive, title: String(stem.dropFirst(37)))
+            }
+            maps += imports.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         }
-        return maps + imports.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        return maps + (try RegionalBundleStorage.editions(in: bundleDirectory).compactMap(\.basemap))
     }
 
     func selectMap(_ id: OfflineMap.ID) throws -> OfflineMap {
@@ -190,7 +238,7 @@ actor MapStorage {
     }
 
     func removeMap(_ id: OfflineMap.ID) throws {
-        guard let map = try installedMaps().first(where: { $0.id == id }), !map.isBundled else { return }
+        guard let map = try installedMaps().first(where: { $0.id == id }), map.canRemove else { return }
         try FileManager.default.removeItem(at: map.archive)
     }
 

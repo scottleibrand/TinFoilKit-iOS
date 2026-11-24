@@ -17,9 +17,31 @@ struct RegionalBundleManifest: Codable, Equatable, Sendable {
         }
     }
 
+    struct Basemap: Codable, Equatable, Sendable {
+        let filename: String
+        let url: URL
+        let byteCount: Int64
+        let sha256: String
+        let dataVersion: String
+        let source: URL
+        let license: String
+        let licenseURL: URL
+        let attribution: String
+        let bounds: RoutingPack.Bounds
+
+        var asset: Asset { Asset(filename: filename, url: url, byteCount: byteCount, sha256: sha256) }
+    }
+
     struct Assets: Codable, Equatable, Sendable {
         let places: Asset
         let routing: Asset
+        let basemap: Basemap?
+
+        init(places: Asset, routing: Asset, basemap: Basemap? = nil) {
+            self.places = places
+            self.routing = routing
+            self.basemap = basemap
+        }
     }
 
     enum Error: LocalizedError, Equatable {
@@ -92,18 +114,43 @@ struct RegionalBundleManifest: Codable, Equatable, Sendable {
         }
     }
 
+    func validate(basemapBounds: RoutingPack.Bounds) throws {
+        guard let basemap = assets.basemap, basemap.bounds == basemapBounds else {
+            throw Error.metadataMismatch(Self.basemapFilename)
+        }
+    }
+
+    static let basemapFilename = "basemap.pmtiles"
+
     private func validate() throws {
-        guard schemaVersion == 1, !region.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+        guard (schemaVersion == 1 && assets.basemap == nil) || (schemaVersion == 2 && assets.basemap != nil),
+              !region.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               region.unicodeScalars.count <= 120, !dataVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               bounds.isValid, !(bounds.west == 180 && bounds.east == -180),
               Self.isHTTPS(source), Self.isHTTPS(artifactBaseURL), artifactBaseURL.query == nil,
               Self.isSHA256(sourceSHA256), attribution == "© OpenStreetMap contributors",
-              license == "ODbL-1.0", licenseURL.absoluteString == "https://www.openstreetmap.org/copyright",
-              !assets.places.byteCount.addingReportingOverflow(assets.routing.byteCount).overflow else {
+              license == "ODbL-1.0", licenseURL.absoluteString == "https://www.openstreetmap.org/copyright" else {
             throw Error.invalidManifest
         }
         try validate(assets.places, filename: "places.sqlite")
         try validate(assets.routing, filename: "routing.tfkroute")
+        let (placeAndRoute, overflow) = assets.places.byteCount.addingReportingOverflow(assets.routing.byteCount)
+        guard !overflow, !placeAndRoute.addingReportingOverflow(assets.basemap?.byteCount ?? 0).overflow else {
+            throw Error.invalidManifest
+        }
+        if let basemap = assets.basemap {
+            try validate(basemap.asset, filename: Self.basemapFilename)
+            let area = basemap.bounds
+            let (west, east) = bounds.west < bounds.east ? (bounds.west, bounds.east) : (-180, 180)
+            guard basemap.byteCount > 127, Self.isHTTPS(basemap.source), Self.isHTTPS(basemap.licenseURL),
+                  !basemap.dataVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !basemap.license.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !basemap.attribution.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  area.isValid, area.west < area.east,
+                  area.west <= west, area.east >= east, area.south <= bounds.south, area.north >= bounds.north else {
+                throw Error.metadataMismatch(Self.basemapFilename)
+            }
+        }
     }
 
     private func validate(_ asset: Asset, filename: String) throws {
