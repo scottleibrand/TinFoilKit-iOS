@@ -114,7 +114,7 @@ public struct ArticleIndex: Sendable {
                         progress(Double(cursor) / Double(total))
                         try Task.checkCancellation()
                         try checkFreeSpace(in: directory)
-                        let end = min(cursor + Self.batchSize, total)
+                        let end = cursor + min(Self.batchSize, total - cursor)
                         try execute("BEGIN", on: db)
                         for index in cursor..<end {
                             try Task.checkCancellation()
