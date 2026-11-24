@@ -14,6 +14,19 @@ final class LibraryAnswerPromptTests: XCTestCase {
         XCTAssertEqual(decoded.passages.first?.excerpt, excerpt)
     }
 
+    func testHouseholdNotesAreOmittedByDefaultAndNeverNumbered() throws {
+        let passages = [(title: "Inventory", excerpt: "Bring a lantern.")]
+        let standard = LibraryAnswerPrompt(question: "What should I pack?", passages: passages)
+        XCTAssertFalse(try standard.encode().contains("householdNotes"))
+
+        let notes = "We already own a lantern.\n" + String(repeating: "é", count: 4_000)
+        let optedIn = LibraryAnswerPrompt(question: "What should I pack?", passages: passages, householdNotes: notes)
+        let decoded = try JSONDecoder().decode(LibraryAnswerPrompt.self, from: Data(optedIn.encode().utf8))
+        XCTAssertEqual(decoded.householdNotes, String(notes.prefix(4_000)))
+        XCTAssertEqual(decoded.passages, standard.passages)
+        XCTAssertEqual(decoded.passages.map(\.sourceNumber), [1])
+    }
+
     func testEnforcesExistingQuestionAndPassageLimits() {
         let text = String(repeating: "é", count: 600)
         let prompt = LibraryAnswerPrompt(question: text, passages: [(title: text, excerpt: text)])

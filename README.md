@@ -14,7 +14,7 @@ Pack downloads retry after temporary connection failures and publisher errors. A
 
 Press and hold an installed archive in Library to verify its checksum or remove it. Catalog packs use the publisher’s SHA-256 checksum. Files imports use the ZIM’s embedded checksum to check for corruption. Catalog packs also support repair and updates. Repair replaces a same-edition copy after checksum verification. An update keeps the earlier edition and its index available until the new one is verified and searchable.
 
-Library and Ask can search article text and PDF pages as indexes build. Indexing resumes after an interruption when storage is available. Results from PDFs open to the matching page. Ask can stream a cited answer on devices with Apple Intelligence, and you can turn its on-device model off from the options menu.
+Library and Ask can search article text and PDF pages as indexes build. Indexing resumes after an interruption when storage is available. Results from PDFs open to the matching page. Ask can stream a cited answer on devices with Apple Intelligence, and you can turn its on-device model off from the options menu. Choose **Include household notes in the on-device answer** to use your notes for one local answer.
 
 Open **Ask options → Offline Chat** for a conversation with the model on your phone. It needs Apple Intelligence and iOS 26 or later. The conversation lasts while the chat is open. Use Ask for answers that cite your saved references. [Apple’s on-device models](https://developer.apple.com/foundation-models-framework/)
 
