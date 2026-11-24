@@ -67,23 +67,26 @@ actor RegionalRouteStore {
     struct Installed: Identifiable, Equatable, Sendable {
         let id: UUID
         let pack: RoutingPack
+        let bundleID: UUID?
     }
 
     private static let maximumManifestBytes = 65_536
     private static let importLock = NSLock()
     private let directory: URL
+    private let bundleDirectory: URL?
     private var loadedEngine: (id: UUID, engine: RouteEngine)?
     private var graphs: URL { directory.appendingPathComponent("Installed", isDirectory: true) }
     private var legacySelection: URL { directory.appendingPathComponent("current") }
 
-    init(directory: URL = URL.applicationSupportDirectory.appendingPathComponent("RoutingGraphs", isDirectory: true)) {
-        self.directory = directory
+    init(directory: URL? = nil, bundleDirectory: URL? = nil) {
+        self.directory = directory ?? URL.applicationSupportDirectory.appendingPathComponent("RoutingGraphs", isDirectory: true)
+        self.bundleDirectory = bundleDirectory ?? (directory == nil ? RegionalBundleStorage.defaultDirectory : nil)
     }
 
     func current() throws -> Installed? {
         try installedPacks().max { lhs, rhs in
-            let a = installDate(lhs.id)
-            let b = installDate(rhs.id)
+            let a = installDate(lhs)
+            let b = installDate(rhs)
             return a == b ? lhs.id.uuidString < rhs.id.uuidString : a < b
         }
     }
@@ -101,6 +104,13 @@ actor RegionalRouteStore {
                 packs.append(pack)
             }
         }
+        for edition in try RegionalBundleStorage.editions(in: bundleDirectory) {
+            let bundle = edition.installed
+            guard !packs.contains(where: { $0.id == bundle.id }),
+                  let pack = try? readPack(bundle.id, folder: edition.routing, bundleID: bundle.id),
+                  (try? bundle.manifest.validate(routing: pack.pack)) != nil else { continue }
+            packs.append(pack)
+        }
         return packs.sorted { lhs, rhs in
             let order = lhs.pack.region.localizedStandardCompare(rhs.pack.region)
             return order == .orderedSame ? lhs.id.uuidString < rhs.id.uuidString : order == .orderedAscending
@@ -109,7 +119,7 @@ actor RegionalRouteStore {
 
     func remove(_ id: Installed.ID) throws {
         try Self.importLock.withLock {
-            guard try installedPacks().contains(where: { $0.id == id }) else { return }
+            guard try installedPacks().contains(where: { $0.id == id && $0.bundleID == nil }) else { return }
             if loadedEngine?.id == id { loadedEngine = nil }
             try FileManager.default.removeItem(at: installedFolder(id))
         }
@@ -132,10 +142,10 @@ actor RegionalRouteStore {
 
     func route(_ installed: Installed, from origin: MapRoute.Point, to destination: MapRoute.Point,
                mode: MapTravelMode) throws -> MapRoute {
-        guard try readPack(installed.id) == installed, covers(installed, origin, destination) else {
+        guard try installedPacks().contains(installed), covers(installed, origin, destination) else {
             throw RouteError.outsideRegion
         }
-        return try calculate(using: installed.id, from: origin, to: destination, mode: mode)
+        return try calculate(using: installed, from: origin, to: destination, mode: mode)
     }
 
     func route(from origin: MapRoute.Point, to destination: MapRoute.Point, mode: MapTravelMode) throws -> MapRoute {
@@ -144,14 +154,14 @@ actor RegionalRouteStore {
             let a = lhs.pack.bounds.area
             let b = rhs.pack.bounds.area
             if a != b { return a < b }
-            let aDate = installDate(lhs.id)
-            let bDate = installDate(rhs.id)
+            let aDate = installDate(lhs)
+            let bDate = installDate(rhs)
             return aDate == bDate ? lhs.id.uuidString < rhs.id.uuidString : aDate > bDate
         }
         guard !candidates.isEmpty else { throw RouteError.outsideRegion }
         var failure: Error?
         for candidate in candidates {
-            do { return try calculate(using: candidate.id, from: origin, to: destination, mode: mode) }
+            do { return try calculate(using: candidate, from: origin, to: destination, mode: mode) }
             catch is CancellationError { throw CancellationError() }
             catch {
                 try Task.checkCancellation()
@@ -166,12 +176,12 @@ actor RegionalRouteStore {
         installed.pack.bounds.contains(origin) && installed.pack.bounds.contains(destination)
     }
 
-    private func calculate(using id: UUID, from origin: MapRoute.Point, to destination: MapRoute.Point,
+    private func calculate(using installed: Installed, from origin: MapRoute.Point, to destination: MapRoute.Point,
                            mode: MapTravelMode) throws -> MapRoute {
         try Task.checkCancellation()
-        if loadedEngine?.id != id {
+        if loadedEngine?.id != installed.id {
             loadedEngine = nil
-            loadedEngine = (id, try RouteEngine(folder: installedFolder(id)))
+            loadedEngine = (installed.id, try RouteEngine(folder: routingFolder(installed)))
         }
         guard let engine = loadedEngine?.engine else { throw RouteError.engineUnavailable }
         let route = try engine.route(from: origin, to: destination, mode: mode)
@@ -184,6 +194,14 @@ actor RegionalRouteStore {
         return graphs.appendingPathComponent(id.uuidString, isDirectory: true)
     }
 
+    private func routingFolder(_ installed: Installed) -> URL {
+        if let bundleID = installed.bundleID, let bundleDirectory {
+            return bundleDirectory.appendingPathComponent(bundleID.uuidString, isDirectory: true)
+                .appendingPathComponent("routing", isDirectory: true)
+        }
+        return installedFolder(installed.id)
+    }
+
     private func legacyID() -> UUID? {
         guard let handle = try? FileHandle(forReadingFrom: legacySelection) else { return nil }
         defer { try? handle.close() }
@@ -192,12 +210,12 @@ actor RegionalRouteStore {
         return UUID(uuidString: value)
     }
 
-    private func installDate(_ id: UUID) -> Date {
-        (try? installedFolder(id).resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+    private func installDate(_ installed: Installed) -> Date {
+        (try? routingFolder(installed).resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
     }
 
-    private func readPack(_ id: UUID) throws -> Installed {
-        let folder = installedFolder(id)
+    private func readPack(_ id: UUID, folder override: URL? = nil, bundleID: UUID? = nil) throws -> Installed {
+        let folder = override ?? installedFolder(id)
         let folderValues = try folder.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         guard folderValues.isDirectory == true, folderValues.isSymbolicLink != true else { throw RouteError.invalidPack }
         let manifest = folder.appendingPathComponent("manifest.json")
@@ -215,7 +233,7 @@ actor RegionalRouteStore {
         let graphValues = try graph.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
         guard graphValues.isRegularFile == true, graphValues.isSymbolicLink != true,
               Int64(graphValues.fileSize ?? 0) == pack.graphByteCount else { throw RouteError.invalidPack }
-        return Installed(id: id, pack: pack)
+        return Installed(id: id, pack: pack, bundleID: bundleID)
     }
 
     private func importFile(_ source: URL) throws -> Installed {
@@ -233,7 +251,7 @@ actor RegionalRouteStore {
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try root.setResourceValues(values)
-        if let existing = try installedPacks().first(where: { $0.pack == pack }) {
+        if let existing = try installedPacks().first(where: { $0.bundleID == nil && $0.pack == pack }) {
             try Self.consumeGraph(from: input, pack: pack)
             return existing
         }
@@ -244,17 +262,28 @@ actor RegionalRouteStore {
 
         let id = UUID()
         let staging = graphs.appendingPathComponent(id.uuidString).appendingPathExtension("partial")
-        try files.createDirectory(at: staging, withIntermediateDirectories: false)
         defer { try? files.removeItem(at: staging) }
-        try Self.consumeGraph(from: input, pack: pack, writingTo: staging.appendingPathComponent("tiles.tar"))
-        try manifest.write(to: staging.appendingPathComponent("manifest.json"), options: .atomic)
         loadedEngine = nil
-        _ = try RouteEngine(folder: staging)
-        // The probe writes absolute staging paths. A route opens a fresh config after publication.
-        try? files.removeItem(at: staging.appendingPathComponent("engine.json"))
+        try Self.stageGraph(pack, manifest: manifest, input: input, at: staging)
         try Task.checkCancellation()
         try files.moveItem(at: staging, to: installedFolder(id))
-        return Installed(id: id, pack: pack)
+        return Installed(id: id, pack: pack, bundleID: nil)
+    }
+
+    static func stagePack(_ source: URL, at folder: URL, validate: (RoutingPack) throws -> Void) throws {
+        let (pack, manifest, input) = try openPack(source)
+        defer { try? input.close() }
+        try validate(pack)
+        try stageGraph(pack, manifest: manifest, input: input, at: folder)
+    }
+
+    private static func stageGraph(_ pack: RoutingPack, manifest: Data, input: FileHandle, at folder: URL) throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        try consumeGraph(from: input, pack: pack, writingTo: folder.appendingPathComponent("tiles.tar"))
+        try manifest.write(to: folder.appendingPathComponent("manifest.json"), options: .atomic)
+        _ = try RouteEngine(folder: folder)
+        // The probe writes absolute staging paths. A route opens a fresh config after publication.
+        try? FileManager.default.removeItem(at: folder.appendingPathComponent("engine.json"))
     }
 
     private func removeInterruptedImports() throws {

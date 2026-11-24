@@ -49,7 +49,7 @@ python Scripts/build-regional-bundle.py build region.osm.pbf .build/region-bundl
 python Scripts/build-regional-bundle.py verify .build/region-bundle
 ```
 
-The output directory contains `places.sqlite`, `routing.tfkroute` and `manifest.json`. The catalog manifest records the source hash, edition, bounds, attribution, license and the URL, SHA-256 and byte count of each installable artifact. Verification checks the local files against that manifest, including the embedded graph digest and matching place and route metadata. Publish the files and reviewed manifest through a trusted catalog channel. The manifest itself carries no signature. Use a separately sourced basemap and import the two files with the app's existing place and routing import flows.
+The output directory contains `places.sqlite`, `routing.tfkroute` and `manifest.json`. The catalog manifest records the source hash, edition, bounds, attribution, license and the URL, SHA-256 and byte count of each installable artifact. Verification checks the local files against that manifest, including the embedded graph digest and matching place and route metadata. Publish the files and reviewed manifest through a trusted catalog channel. The manifest itself carries no signature. In the app, choose **Map → + → Import regional bundle** and select the output folder in Files. Import the basemap separately.
 
 Production extracts use OpenStreetMap data. Preserve the copyright notice, ODbL terms and source edition when redistributing the files. Verify additional publisher terms before publishing. Keep downloaded extracts, generated indexes and routing graphs out of Git.
 

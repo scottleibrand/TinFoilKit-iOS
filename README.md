@@ -36,6 +36,8 @@ Open **Map → + → Map downloads** to limit automatic downloads to Wi-Fi or tu
 
 Use **Map → + → Import map tiles** to add a regional PMTiles basemap from Files. **Installed basemaps** shows each map’s coverage and lets you switch between regions offline. Swipe an imported basemap to remove it.
 
+Use **Map → + → Import regional bundle** and select a folder containing `manifest.json`, `places.sqlite`, and `routing.tfkroute`. The app verifies the files and installs the place search index and walking and driving graph together. Use **Installed regional bundles** to see the edition and source or remove both files together. Add the region’s basemap separately. [Regional bundle builder](Scripts/routing/README.md#regional-catalog-bundle)
+
 In Map, press and hold a location to copy its coordinates, set it as home, or save a named pin. Map search accepts saved place names and coordinates in decimal or degrees, minutes, and seconds. The Household tab keeps notes, home, and pins on the device.
 
 In **Household → Import and export**, save a household backup to Files or restore one on another iPhone. The same screen imports and exports the desktop kit’s `notes.txt` and `places.json` files individually. If the local household file is damaged, restoring a backup or starting a new household keeps a separate copy of the damaged file.
@@ -100,6 +102,8 @@ The local ZIP measures this build. Use App Store Connect device-specific size re
 Run the `ZIMArchive` scheme on a dedicated simulator for library and search tests. For the `TinfoilKit` UI test scheme, install the debug app in a dedicated simulator and copy `.build/fixtures/climate.zim` into its Documents folder as `Climate Test.zim`. The test uses the Files picker to import it on a fresh install.
 
 For the nearby-service Ask UI test, build an index from `Tests/RegionalPlaceIndexFixture/places.osm` with `Scripts/build-regional-place-index.py`. Import it from Files using **Map → + → Import regional place data** on the dedicated simulator and set Home at latitude 47.610, longitude −122.330. The synthetic fixture should resolve to Central Hospital.
+
+For the regional bundle import UI test, copy a valid synthetic bundle folder named `Synthetic Regional Fixture` into the app’s Documents folder on the dedicated simulator. Set the dataset region to `Routing test fixture` when preparing the bundle. The test imports and removes that edition.
 
 Run `bash Tests/NearbyPublicFixture/run.sh` on a Mac with local networking access to exercise discovery, opt-in, relay, and completion of existing transfers after discovery stops.
 
