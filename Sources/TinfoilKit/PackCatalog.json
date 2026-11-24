@@ -119,6 +119,25 @@
   },
   {
     "pack": {
+      "id": "wikipedia-en-all-maxi",
+      "title": "Complete English Wikipedia",
+      "version": "2026-08",
+      "source": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-08.zim",
+      "sha256": "34162d18b9f96f494eac48a73a309c72e0bc95d85f76be405d0f5de795854aa6",
+      "sizeEstimate": 127418087648,
+      "attribution": "Wikipedia contributors · CC BY-SA · Packaged by Kiwix"
+    },
+    "section": "extended",
+    "language": "en",
+    "isDefault": true,
+    "individualDownloadOnly": true,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false,
+    "detail": "Search all English Wikipedia articles with images. Download this archive separately.",
+    "termsURL": "https://en.wikipedia.org/wiki/Wikipedia:Copyrights"
+  },
+  {
+    "pack": {
       "id": "ifixit-en-all",
       "title": "iFixit Repair Guides",
       "version": "2025-12",
