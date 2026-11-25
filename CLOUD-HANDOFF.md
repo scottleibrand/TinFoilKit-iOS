@@ -53,7 +53,9 @@ Deferred Online Ask shipped for approved GPT and Claude questions. Requests wait
 
 Offline Chat photo input shipped for the vision-capable on-device model on iOS 27. The simulator passed 213 unit tests and the Offline Chat UI entry test. The signed build installed on the paired iPhone running iOS 27.0.1. A real photo response in airplane mode and an older-Xcode build remain to be verified. [PR #31](https://github.com/scottleibrand/TinFoilKit-iOS/pull/31)
 
-Regional publication staging still needs its own acceptance checks. General queries over eligible installed references and guest-browser route generation remain open.
+The first named regional package shipped for Seattle area. All three hosted assets support byte ranges with strong validators. A clean lightweight simulator downloaded the public 318 MB edition, relaunched, resolved an address and hospital, and opened walking and driving steps. The signed app installed on the paired iPhone. Physical airplane-mode verification, more published regions, and Nearby exchange of cleared regional assets remain open. [PR #32](https://github.com/scottleibrand/TinFoilKit-iOS/pull/32) · [Versioned data release](https://github.com/scottleibrand/TinFoilKit-iOS/releases/tag/region-seattle-2026-11-21)
+
+General queries over eligible installed references and guest-browser route generation remain open.
 
 ## Cloud branches awaiting integration
 
@@ -97,6 +99,6 @@ Public web snapshots must have verified rights, provenance and no personal conte
 
 - Prepare the linked reader, maps and routing assets and run XcodeGen using the [README](README.md#build-locally). Run the app and library tests on explicit simulators with isolated DerivedData and synthetic fixtures. Build both profiles when packaging changes.
 - For downloads, run `python3 Tests/PackDownloadFixture/test_resume.py` on macOS. Test the app with an interrupted background pack transfer on the phone, reconnect on the same allowed network, and confirm the publisher is asked for the remaining bytes and the final checksum passes. Cover pause, relaunch, longer outages and cellular consent. Map tiles already saved should survive an interruption.
-- For regional packages, publish a checked edition and surface it in a built-in catalog backed by the verified downloader. Exercise interrupted HTTPS with the simulator fixture in README.md. Test addresses, services, and walking and driving routes after an iPhone cold launch in airplane mode. For Ask, verify external map handoff in airplane mode and the real on-device model on an eligible phone.
+- For regional packages, extend the first named edition to more reviewed areas. Exercise interrupted HTTPS with the simulator fixture in README.md. Test addresses, services, and walking and driving routes after an iPhone cold launch in airplane mode. For Ask, verify external map handoff in airplane mode and the real on-device model on an eligible phone.
 - For Nearby, use two iPhones with Wi-Fi enabled and no access point, then repeat on a LAN without internet. Check permission, storage limits, progress after interruption, notification behavior, and consent on real devices. The cloud cannot verify iOS suspension, direct peer discovery or Wi-Fi Aware.
 - Run each PR’s signed standard iPhone build alongside simulator testing in separate DerivedData directories. Install on the paired iPhone when reachable, and report any remaining device checks before merging. The requested TestFlight upload is a separate one-time lightweight release.
