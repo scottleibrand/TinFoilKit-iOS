@@ -158,6 +158,9 @@ def main():
         for key, value in (("amenity", "pharmacy"), ("name", "Fixture Pharmacy"),
                            ("addr:housenumber", "10"), ("addr:street", "East Main")):
             ET.SubElement(place, "tag", {"k": key, "v": value})
+        address = network.find("./node[@id='5']")
+        for key, value in (("addr:housenumber", "24"), ("addr:street", "West Bypass")):
+            ET.SubElement(address, "tag", {"k": key, "v": value})
         network.write(osm, encoding="utf-8")
         pbf = work / "regional-fixture.osm.pbf"
         with osmium.SimpleWriter(pbf) as writer:
@@ -181,6 +184,8 @@ def main():
         with sqlite3.connect(output / "places.sqlite") as db:
             assert db.execute("SELECT category, address FROM places WHERE title = ?", ("Fixture Pharmacy",)
                               ).fetchone() == ("pharmacy", "10 East Main")
+            assert db.execute("SELECT category, latitude, longitude FROM places WHERE title = ?", ("24 West Bypass",)
+                              ).fetchone() == ("address", 47.503, -122.004)
 
         manifest_path = output / "manifest.json"
         original = manifest_path.read_text(encoding="utf-8")

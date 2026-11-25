@@ -3,22 +3,31 @@ import ZIMArchive
 
 struct OfflineReadinessView: View {
     @ObservedObject var indexing: LibraryIndexing
+    @ObservedObject var household: HouseholdStore
     @AppStorage("askUsesOnDeviceModel") private var useModel = true
     @State private var availableBytes: Int64?
     @State private var map: Result<OfflineMap?, Error>?
     @State private var places: Result<[RegionalPlaceStorage.Installed]?, Error>?
     @State private var routing: Result<[RegionalRouteStore.Installed]?, Error>?
+    @State private var bundles: Result<[RegionalBundleStorage.Installed]?, Error>?
 
     var body: some View {
         List {
+            Section {
+                NavigationLink("Run offline checks", destination: OfflineFunctionalChecksView(indexing: indexing))
+            } footer: {
+                Text("Open installed content, search locally, and calculate a route. To rehearse a disconnect, turn on Airplane Mode and turn Wi-Fi off first.")
+            }
             Section("Storage") {
                 LabeledContent("Available", value: availableBytes?.formatted(.byteCount(style: .file)) ?? "Unknown")
                 LabeledContent("Installed archives", value: indexing.archives.reduce(Int64(0)) {
                     $0 + $1.byteCount
                 }.formatted(.byteCount(style: .file)))
             }
+            homeCoverageSection
             librarySection
             mapSection
+            regionalBundlesSection
             Section("Before you go offline") {
                 NavigationLink("Offline setup and troubleshooting", destination: OfflineHelpView())
             }
@@ -78,6 +87,65 @@ struct OfflineReadinessView: View {
             Label("Search index ready", systemImage: "checkmark.circle").foregroundStyle(.secondary)
         } else {
             Text("Waiting to index").foregroundStyle(.secondary)
+        }
+    }
+
+    private var homeCoverageSection: some View {
+        Section {
+            if let home = household.snapshot.home {
+                let point = MapRoute.Point(latitude: home.latitude, longitude: home.longitude)
+                LabeledContent("Active basemap", value: homeCoverage(map, missing: "No active basemap") {
+                    [$0.contains(home.coordinate)]
+                })
+                LabeledContent("Regional places", value: homeCoverage(places, missing: "No regional place data") {
+                    $0.map { $0.metadata.bounds?.contains(home.coordinate) }
+                })
+                LabeledContent("Offline routing", value: homeCoverage(routing, missing: "No regional routing pack") {
+                    $0.map { $0.pack.bounds.contains(point) }
+                })
+            } else {
+                Text("Set Home in Map to check coverage for that location.").foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Coverage at Home")
+        } footer: {
+            if household.snapshot.home != nil {
+                Text("These checks use installed coverage bounds. Offline routes also need coverage at the destination.")
+            }
+        }
+    }
+
+    private var regionalBundlesSection: some View {
+        Section("Regional bundles") {
+            switch bundles {
+            case let .success(installed?):
+                ForEach(installed) { bundle in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(bundle.manifest.region).font(.headline)
+                        Text("Edition \(bundle.manifest.dataVersion)").font(.subheadline)
+                        if bundle.isUsable {
+                            Text(bundle.manifest.assets.basemap == nil ? "Places and routing files present" :
+                                    "Basemap, places and routing files present")
+                        } else {
+                            Text("Missing or damaged files. Reinstall this bundle from Map.")
+                        }
+                    }
+                }
+            case .success(nil): Text("No regional bundles installed")
+            case let .failure(error): Text(error.localizedDescription)
+            case nil: Text("Checking installed bundles…")
+            }
+        }
+    }
+
+    private func homeCoverage<Value>(
+        _ state: Result<Value?, Error>?, missing: String, candidates: (Value) -> [Bool?]
+    ) -> String {
+        switch state {
+        case let .success(value?): OfflineCoverageStatus(candidates: candidates(value)).title
+        case .success(nil): missing
+        case .failure: "Could not check"
+        case nil: "Checking…"
         }
     }
 
@@ -176,6 +244,11 @@ struct OfflineReadinessView: View {
             routing = .success(packs.isEmpty ? nil : packs)
         }
         catch { routing = .failure(error) }
+        do {
+            let installed = try await RegionalBundleStorage().installedBundles()
+            bundles = .success(installed.isEmpty ? nil : installed)
+        }
+        catch { bundles = .failure(error) }
         await indexing.refresh()
     }
 
@@ -191,7 +264,7 @@ private struct OfflineHelpView: View {
             }
             Section("Prepare your map") {
                 Text("Open Map while connected and browse the areas and zoom levels you expect to use. Wait until the map reports the area is available offline.")
-                Text("Use the plus menu in Map to import a basemap, regional place data, or a routing pack. Regional place data enables address and nearby service search. Routing requires a graph that covers both endpoints.")
+                Text("Use the plus menu in Map to import a regional bundle or add its map, places, and routing files separately. Regional place data enables address and nearby service search. Routing requires a graph that covers both endpoints.")
             }
             Section("Verify on this phone") {
                 Text("Turn on Airplane Mode and turn Wi-Fi off. Reopen Tinfoil Kit, open a saved article, try Search, and check the areas you plan to use in Map.")

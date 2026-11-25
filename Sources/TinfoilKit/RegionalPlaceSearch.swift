@@ -30,7 +30,25 @@ struct RegionalPlaceSearch: Sendable {
         return match.map(InstalledLookup.match) ?? .noMatch
     }
 
+    static func destinationsInstalled(matching question: HomeRouteQuestion, from home: HouseholdPlace,
+                                      storage: RegionalPlaceStorage) async throws -> [Match]? {
+        let regions = try await storage.installedIndexes()
+        guard !regions.isEmpty else { return nil }
+        let lookup = Task.detached {
+            try RegionalPlaceSearch(regions: regions)
+                .search(near: home.coordinate, limit: 40) { region in
+                    try region.index.destinations(matching: question, limit: 40)
+                }
+        }
+        return try await withTaskCancellationHandler { try await lookup.value } onCancel: { lookup.cancel() }
+    }
+
     func search(_ query: String, near origin: CLLocationCoordinate2D?, limit: Int = 40) throws -> [Match] {
+        try search(near: origin, limit: limit) { try $0.index.search(query, limit: limit) }
+    }
+
+    private func search(near origin: CLLocationCoordinate2D?, limit: Int,
+                        places: (RegionalPlaceStorage.Installed) throws -> [RegionalPlaceIndex.Place]) throws -> [Match] {
         guard limit > 0 else { return [] }
         let ordered = regions.enumerated().sorted { lhs, rhs in
             let a = origin.map { lhs.element.metadata.bounds?.contains($0) == true } ?? false
@@ -38,7 +56,7 @@ struct RegionalPlaceSearch: Sendable {
             return a == b ? lhs.offset < rhs.offset : a
         }.map(\.element)
         let groups = try collect(ordered) { region in
-            try region.index.search(query, limit: limit).map { Match(region: region, place: $0) }
+            try places(region).map { Match(region: region, place: $0) }
         }
         var seen = Set<PlaceKey>()
         var matches: [Match] = []

@@ -26,13 +26,29 @@ final class NearbyDiscovery: ObservableObject {
     @Published private(set) var state: State = .idle
     @Published private(set) var localID: String?
     @Published private(set) var peers: [Peer] = []
-    @Published private(set) var publicReferenceText: String?
+    struct PublicReference: Identifiable {
+        let id: String
+        let title: String
+        let text: String
+    }
+
+    @Published private(set) var publicReferences: [PublicReference] = []
     var isRunning: Bool { browser != nil }
-    var hasActivePublicTransfer: Bool { publicTransfer?.hasActiveTransfers == true }
-    var hasActivePublicReceive: Bool { publicTransfer?.hasActiveReceive == true }
+    var hasActivePublicTransfer: Bool {
+        publicTransfer?.hasActiveTransfers == true || archiveTransfer?.hasActiveTransfers == true
+    }
+    var activePublicReceiveIDs: [String] {
+        [archiveTransfer?.activeReceiveID, publicTransfer?.activeReceiveID].compactMap { $0 }
+    }
+
+    func receivedPublicItem(_ id: String) -> Bool {
+        publicReferences.contains(where: { $0.id == id }) || archiveTransfer?.receivedIDs.contains(id) == true
+    }
     var activityDidChange: ((Bool) -> Void)?
 
-    private let publicReference: NearbyPublicReference
+    private let references: [NearbyPublicReference]
+    private let archiveTransfer: NearbyArchiveTransfer?
+    private var reportedActivity = false
     private var publicSyncEnabled = false
     private var publicTransfer: NearbyPublicTransfer?
     private let queue = DispatchQueue(label: "org.tinfoilkit.nearby-discovery")
@@ -44,9 +60,15 @@ final class NearbyDiscovery: ObservableObject {
     private var waiting: [Phase: State] = [:]
     private var recentLocalIDs: [String] = []
 
-    init(publicReference: NearbyPublicReference = NearbyPublicReference()) {
-        self.publicReference = publicReference
-        publicReferenceText = publicReference.loadVerified().flatMap { String(data: $0, encoding: .utf8) }
+    init(publicReferences: [NearbyPublicReference] = NearbyPublicReference.catalogReferences,
+         archiveTransfer: NearbyArchiveTransfer? = nil) {
+        references = publicReferences
+        self.archiveTransfer = archiveTransfer
+        self.publicReferences = publicReferences.compactMap { reference in
+            guard let data = reference.loadVerified(), let text = String(data: data, encoding: .utf8) else { return nil }
+            return PublicReference(id: reference.entry.id, title: reference.entry.title, text: text)
+        }
+        archiveTransfer?.activityDidChange = { [weak self] in self?.notifyActivity() }
     }
 
     deinit {
@@ -66,7 +88,7 @@ final class NearbyDiscovery: ObservableObject {
 
         let listener: NWListener
         do {
-            let parameters = try publicSyncEnabled ? NearbyPublicTLS.listenerParameters() : Self.localParameters()
+            let parameters = try publicSyncEnabled ? NearbyPublicTLS.listenerParameters(archives: archiveTransfer != nil) : Self.localParameters()
             parameters.acceptLocalOnly = true
             listener = try NWListener(using: parameters)
         } catch {
@@ -106,13 +128,19 @@ final class NearbyDiscovery: ObservableObject {
         self.listener = listener
         self.browser = browser
         if publicSyncEnabled {
+            archiveTransfer?.resume()
             if let publicTransfer {
                 publicTransfer.resume()
             } else {
-                let transfer = NearbyPublicTransfer(reference: publicReference) { [weak self] bytes in
-                    self?.publicReferenceText = String(data: bytes, encoding: .utf8)
+                let transfer = NearbyPublicTransfer(
+                    references: references, acceptArchive: archiveTransfer?.acceptReady
+                ) { [weak self] entry, bytes in
+                    guard let self, let text = String(data: bytes, encoding: .utf8),
+                          !publicReferences.contains(where: { $0.id == entry.id }) else { return }
+                    publicReferences.append(PublicReference(id: entry.id, title: entry.title, text: text))
+                    publicReferences.sort { $0.id < $1.id }
                 }
-                transfer.activityDidChange = { [weak self] active in self?.activityDidChange?(active) }
+                transfer.activityDidChange = { [weak self] _ in self?.notifyActivity() }
                 publicTransfer = transfer
             }
         }
@@ -135,13 +163,14 @@ final class NearbyDiscovery: ObservableObject {
     }
 
     func finishTransfersWithoutDiscovery() {
-        guard let publicTransfer, publicTransfer.hasActiveTransfers else {
+        guard hasActivePublicTransfer else {
             stop()
             return
         }
         closeDiscovery()
         state = .idle
-        publicTransfer.beginDraining()
+        publicTransfer?.beginDraining()
+        archiveTransfer?.beginDraining()
     }
 
     func rotate() {
@@ -191,6 +220,7 @@ final class NearbyDiscovery: ObservableObject {
         case let .waiting(error):
             peers.removeAll()
             publicTransfer?.updateTargets([:])
+            archiveTransfer?.updateTargets([:])
             mark(.browser, waitingFor: Self.problem(for: error, terminal: false))
         case let .failed(error):
             end(Self.problem(for: error, terminal: true))
@@ -238,6 +268,7 @@ final class NearbyDiscovery: ObservableObject {
         let updated = endpoints.keys.sorted().map(Peer.init(id:))
         if updated != peers { peers = updated }
         publicTransfer?.updateTargets(endpoints)
+        if publicSyncEnabled { archiveTransfer?.updateTargets(endpoints) }
     }
 
     private static func peerID(for endpoint: NWEndpoint) -> String? {
@@ -273,7 +304,16 @@ final class NearbyDiscovery: ObservableObject {
         let transfer = publicTransfer
         publicTransfer = nil
         transfer?.stop()
+        archiveTransfer?.stop()
         state = nextState
+        notifyActivity()
+    }
+
+    private func notifyActivity() {
+        let active = hasActivePublicTransfer
+        guard reportedActivity != active else { return }
+        reportedActivity = active
+        activityDidChange?(active)
     }
 
     private func closeDiscovery() {

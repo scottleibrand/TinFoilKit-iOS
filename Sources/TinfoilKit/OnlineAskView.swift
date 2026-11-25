@@ -8,10 +8,12 @@ struct OnlineAskView: View {
     let onSaved: () -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @EnvironmentObject private var deferredAsk: DeferredAskController
     @State private var configured: Set<OnlineAskProvider> = []
     @State private var editing: OnlineAskProvider?
     @State private var key = ""
     @State private var pending: OnlineAskProvider?
+    @State private var deferredDraft: DeferredAskDraft?
     @State private var result: OnlineAskSavedAnswer?
     @State private var searchEntryPoint: String?
     @State private var status: String?
@@ -41,17 +43,24 @@ struct OnlineAskView: View {
                     } footer: {
                         Text("Google Search receives the question. For chat, paste the copied question into the provider. Results open outside Tinfoil Kit.")
                     }
-                    if !configured.isEmpty {
-                        Section {
-                            ForEach(OnlineAskProvider.allCases.filter { configured.contains($0) }) { provider in
-                                Button("Ask \(provider.title)", systemImage: "globe") { pending = provider }
-                                    .disabled(pending != nil)
-                            }
-                        } header: {
-                            Text("Ask in Tinfoil Kit")
-                        } footer: {
-                            Text("Only this question is sent to the selected provider. Provider charges may apply.")
+                    Section {
+                        ForEach(OnlineAskProvider.allCases.filter { configured.contains($0) }) { provider in
+                            Button("Ask \(provider.title)", systemImage: "globe") { pending = provider }
+                                .disabled(pending != nil)
                         }
+                        ForEach([OnlineAskProvider.gpt, .claude]) { provider in
+                            Button("Queue for \(provider.title)", systemImage: "clock") {
+                                deferredDraft = DeferredAskDraft(
+                                    question: question.trimmingCharacters(in: .whitespacesAndNewlines),
+                                    provider: provider
+                                )
+                            }
+                            .disabled(pending != nil)
+                        }
+                    } header: {
+                        Text("Ask in Tinfoil Kit")
+                    } footer: {
+                        Text("Requests need an API key for the selected provider. Only the question is sent. Provider charges may apply.")
                     }
                 }
                 if let status { Section { Text(status).foregroundStyle(.secondary) } }
@@ -64,6 +73,7 @@ struct OnlineAskView: View {
                         }
                     }
                 }
+                DeferredAskQueueSection()
                 Section {
                     ForEach(OnlineAskProvider.allCases) { provider in
                         Button(configured.contains(provider) ? "Manage \(provider.title) key" : "Add \(provider.title) key") {
@@ -86,6 +96,9 @@ struct OnlineAskView: View {
             }
             .sheet(isPresented: $showingSavedSources) {
                 SavedWebSourcesView(onChange: onSaved)
+            }
+            .sheet(item: $deferredDraft) { draft in
+                DeferredAskConfirmationView(draft: draft)
             }
             .sheet(item: $editing) { provider in
                 NavigationStack {
@@ -129,6 +142,7 @@ struct OnlineAskView: View {
         do {
             try OnlineAskKeys.save(value, for: provider)
             refreshKeys()
+            deferredAsk.keysChanged()
         } catch {
             self.error = error.localizedDescription
         }

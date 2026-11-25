@@ -8,6 +8,8 @@ struct HouseholdPlace: Codable, Equatable, Identifiable, Sendable {
     var note = ""
     var latitude: Double
     var longitude: Double
+    var desktopPinID: String?
+    var desktopHomeZoom: Double?
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
@@ -56,6 +58,12 @@ final class HouseholdStore: ObservableObject {
         var next = snapshot
         next.notes = notes
         try save(next)
+    }
+
+    func appendGuestNote(_ note: String) throws {
+        let entry = "Guest note\n" + note
+        let existing = snapshot.notes
+        try saveNotes(existing.isEmpty ? entry : existing + "\n\n" + entry)
     }
 
     func setHome(_ home: HouseholdPlace?) throws {

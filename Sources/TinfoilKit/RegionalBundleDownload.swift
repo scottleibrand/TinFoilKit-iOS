@@ -18,7 +18,7 @@ struct RegionalBundleDownloadSource: Sendable {
 }
 
 enum RegionalBundleDownloadError: LocalizedError, Equatable {
-    case invalidSource, busy, manifestDigest, size, response, incomplete, storage
+    case invalidSource, busy, manifestDigest, catalogMismatch, size, response, incomplete, storage
     case pendingDownload, invalidCheckpoint
     case http(Int)
 
@@ -30,6 +30,8 @@ enum RegionalBundleDownloadError: LocalizedError, Equatable {
             "A regional download is already running."
         case .manifestDigest:
             "The downloaded manifest did not match the trusted SHA-256."
+        case .catalogMismatch:
+            "The verified manifest does not match this catalog region, edition, or download size."
         case .size:
             "The response is larger than the permitted download or has the wrong size."
         case .response:
@@ -76,6 +78,15 @@ actor RegionalBundleDownload {
     }
 
     func load(_ source: RegionalBundleDownloadSource, cellular: Bool) async throws -> Pending {
+        try await load(source, cellular: cellular, catalogEntry: nil)
+    }
+
+    func load(_ entry: RegionalBundleCatalog.Entry, cellular: Bool) async throws -> Pending {
+        try await load(entry.source, cellular: cellular, catalogEntry: entry)
+    }
+
+    private func load(_ source: RegionalBundleDownloadSource, cellular: Bool,
+                      catalogEntry: RegionalBundleCatalog.Entry?) async throws -> Pending {
         guard !busy else { throw RegionalBundleDownloadError.busy }
         guard try state.job() == nil else { throw RegionalBundleDownloadError.pendingDownload }
         busy = true
@@ -92,6 +103,9 @@ actor RegionalBundleDownload {
         if let error = outcome.error { throw error }
         let job = RegionalDownloadState.Job(source: source, cellular: cellular)
         let pending = try pending(for: job)
+        if let catalogEntry, !catalogEntry.matches(pending.manifest) {
+            throw RegionalBundleDownloadError.catalogMismatch
+        }
         try state.save(job)
         committed = true
         return pending
