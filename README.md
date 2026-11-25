@@ -26,7 +26,7 @@ When local evidence is insufficient, use **Ask online** to search Google or copy
 
 After finding an article or PDF in your browser, copy its link and paste it into **Ask online → Save a web source**. You can also open **Saved web sources** from Ask options. Ask can cite readable text the publisher allows the app to save, and you can reopen or remove the source from that list. These copies stay on the device.
 
-Use **Library → Content packs → Find publisher books** to search Kiwix for more offline archives. This sends your typed search to Kiwix. Open a result to see its creator, catalog date, and estimated size. Choose **Check publisher file** to get the exact size and SHA-256. Save the archive to Files using the Kiwix download link, then use **Verify and import downloaded ZIM** to check it and add it to Library for offline reading and search.
+Use **Library → Content packs → Find publisher books** to search Kiwix for more offline archives. This sends your typed search to Kiwix. Open a result and choose **Check publisher file** for the exact size and SHA-256. Choose **Download** for Wi-Fi or explicitly allow cellular in the download options. **Publisher downloads** in Content Packs shows approved transfers after relaunch, with pause, resume, and retry controls. The app installs the archive for offline reading and search after verification. You can also save the archive from Kiwix to Files and choose **Verify and import downloaded ZIM**.
 
 For questions about water service during a power outage, include your utility or service area. Ask looks for a saved reference that matches the area and quotes the passage if it gives an operating duration. The cited source shows which facilities and conditions the statement covers.
 

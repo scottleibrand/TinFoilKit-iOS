@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 import ZIMArchive
 
 struct KiwixDiscoveryView: View {
+    @ObservedObject var downloads: PackDownloads
     let library: InstalledLibrary
     let onImport: () async -> Void
     @State private var query = ""
@@ -33,7 +34,7 @@ struct KiwixDiscoveryView: View {
                     if books.isEmpty { Text("No matching downloadable books.").foregroundStyle(.secondary) }
                     ForEach(books) { book in
                         NavigationLink {
-                            KiwixBookView(book: book, library: library, onImport: onImport)
+                            KiwixBookView(book: book, downloads: downloads, library: library, onImport: onImport)
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(book.title).font(.headline)
@@ -81,6 +82,7 @@ struct KiwixDiscoveryView: View {
 
 private struct KiwixBookView: View {
     let book: KiwixCatalog.Book
+    @ObservedObject var downloads: PackDownloads
     let library: InstalledLibrary
     let onImport: () async -> Void
     @State private var metadata: KiwixMetalink?
@@ -105,7 +107,8 @@ private struct KiwixBookView: View {
             Section {
                 Link("Open archive download at Kiwix", destination: book.archiveURL)
                     .disabled(importTask != nil)
-                if let metadata {
+                if let metadata, let candidate = KiwixDownloadApproval.pack(for: book, metadata: metadata) {
+                    let pack = downloads.publisherEdition(for: candidate)
                     LabeledContent("Archive file", value: metadata.filename)
                     LabeledContent("Publisher size", value: metadata.byteCount.formatted(.byteCount(style: .file)))
                     LabeledContent {
@@ -113,8 +116,14 @@ private struct KiwixBookView: View {
                     } label: {
                         Text("Publisher SHA-256")
                     }
-                    Button("Verify and import downloaded ZIM", systemImage: "folder") { choosing = true }
-                        .disabled(importTask != nil || message != nil)
+                    if message == nil {
+                        PackDownloadControls(downloads: downloads, pack: pack)
+                            .disabled(importTask != nil || choosing)
+                        if canImport(for: pack) {
+                            Button("Verify and import downloaded ZIM", systemImage: "folder") { choosing = true }
+                                .disabled(importTask != nil)
+                        }
+                    }
                 } else if reviewTask != nil {
                     ProgressView("Checking publisher file")
                     Button("Cancel check", role: .cancel) { reviewTask?.cancel() }
@@ -134,7 +143,7 @@ private struct KiwixBookView: View {
             } header: {
                 Text("Offline archive")
             } footer: {
-                Text("Check the publisher’s terms before reusing any content. Save the ZIM to Files, then select it here to check the publisher’s size and SHA-256 before importing.")
+                Text("Downloads use Wi-Fi unless you allow cellular data. The app checks the publisher’s exact size and SHA-256 before installation. You can also verify a ZIM from Files. Check the publisher’s terms before reusing content.")
             }
         }
         .navigationTitle("Publisher book")
@@ -155,6 +164,9 @@ private struct KiwixBookView: View {
             do {
                 let checkedFile = try await KiwixPublisherClient.metadata(for: book)
                 try Task.checkCancellation()
+                guard KiwixDownloadApproval.pack(for: book, metadata: checkedFile) != nil else {
+                    throw KiwixMetalink.ParseError.invalidMetadata
+                }
                 metadata = checkedFile
             } catch where Task.isCancelled {
             } catch {
@@ -163,17 +175,18 @@ private struct KiwixBookView: View {
         }
     }
 
+    private func canImport(for pack: PublishedPack) -> Bool {
+        switch downloads.status(for: pack) {
+        case nil, .failed: return true
+        default: return false
+        }
+    }
+
     private func importFile(_ result: Result<URL, Error>) {
-        guard importTask == nil, let metadata else { return }
-        let stem = book.archiveURL.deletingPathExtension().lastPathComponent
-        let version = String(stem.suffix(7))
-        let edition = version.range(of: #"^[0-9]{4}-[0-9]{2}$"#, options: .regularExpression) == nil
-            ? "publisher-edition" : version
-        let attribution = book.creator.isEmpty ? "Archive distributed by Kiwix"
-            : "\(book.creator) · archive distributed by Kiwix"
-        let pack = PublishedPack(id: "kiwix-\(metadata.sha256)", title: book.title, version: edition,
-                                 source: book.archiveURL, sha256: metadata.sha256,
-                                 sizeEstimate: metadata.byteCount, attribution: attribution)
+        guard importTask == nil, let metadata,
+              let candidate = KiwixDownloadApproval.pack(for: book, metadata: metadata) else { return }
+        let pack = downloads.publisherEdition(for: candidate)
+        guard canImport(for: pack) else { return }
         let attempt = UUID()
         importAttempt = attempt
         progress = 0
@@ -184,11 +197,12 @@ private struct KiwixBookView: View {
                 importTask = nil
             }
             do {
-                _ = try await library.importPublishedPack(pack, from: result.get()) { fraction in
+                let archive = try await library.importPublishedPack(pack, from: result.get()) { fraction in
                     Task { @MainActor in
                         if importAttempt == attempt { progress = max(progress, fraction) }
                     }
                 }
+                downloads.publisherFileImported(archive, as: pack)
                 await onImport()
                 message = "Verified and added to Library."
             } catch where Task.isCancelled {

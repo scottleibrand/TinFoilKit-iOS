@@ -504,6 +504,43 @@ final class ZIMArchiveTests: XCTestCase {
         try await library.verifyArchive(imported)
     }
 
+    func testDownloadedPublisherFileVerifiesBeforeMovingAndReusesInstalledBytes() async throws {
+        let root = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "climate", withExtension: "zim"))
+        let data = try Data(contentsOf: fixture)
+        let pack = publisherFixture(fixture, byteCount: Int64(data.count))
+        let file = root.appendingPathComponent("download.zim")
+        let directory = root.appendingPathComponent("Library")
+        let library = InstalledLibrary(directory: directory)
+        var wrongBytes = data
+        wrongBytes[wrongBytes.count - 1] ^= 1
+        for (bytes, reason) in [(Data(data.dropLast()), "byte count"), (wrongBytes, "checksum")] {
+            try bytes.write(to: file)
+            do {
+                try await library.installDownloadedPublishedPack(pack, from: file)
+                XCTFail("Expected verification to reject the staged download")
+            } catch {
+                XCTAssertTrue(error.localizedDescription.contains(reason))
+            }
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        }
+        let failedInventory = try await library.archives()
+        XCTAssertTrue(failedInventory.isEmpty)
+        try data.write(to: file)
+        let installed = try await library.installDownloadedPublishedPack(pack, from: file)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+
+        try data.write(to: file)
+        let reopened = InstalledLibrary(directory: directory)
+        let differentMetadata = publisherFixture(fixture, id: "other-record", byteCount: Int64(data.count))
+        let reused = try await reopened.installDownloadedPublishedPack(differentMetadata, from: file)
+        XCTAssertEqual(reused, installed)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        try await reopened.verifyArchive(installed)
+    }
+
     private func publisherFixture(_ source: URL, id: String = "publisher-climate", byteCount: Int64) -> PublishedPack {
         PublishedPack(id: id, title: "Climate test pack", version: "2024-06", source: source,
                       sha256: "448327659c3981918da00f12f8427996f6bbc4efb4d5c14ba39704122483f0f4",
