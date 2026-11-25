@@ -7,6 +7,7 @@ import ZIMArchive
 struct TinfoilKitApp: App {
     @UIApplicationDelegateAdaptor(DownloadAppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var wsdotClosures = WSDOTClosureStore()
     @StateObject private var packs = PackDownloads.shared
     @StateObject private var indexing = LibraryIndexing(library: .standard)
     @StateObject private var household = HouseholdStore()
@@ -41,6 +42,7 @@ struct TinfoilKitApp: App {
                     .tag(Tab.household)
             }
             .task { await packs.restore() }
+            .onChange(of: scenePhase, initial: true) { wsdotClosures.setForeground(scenePhase == .active) }
             .task(id: packs.installedRevision) { await indexing.refresh() }
             .task {
                 if Bundle.main.object(forInfoDictionaryKey: "TFKLightweightProfile") as? Bool == true,
@@ -69,6 +71,7 @@ struct TinfoilKitApp: App {
             .onChange(of: scenePhase, initial: true) { nearby.updatePhase(scenePhase) }
             .environmentObject(nearby)
             .environmentObject(nearby.discovery)
+            .environmentObject(wsdotClosures)
             .environmentObject(nearby.notifications)
             .environmentObject(readingShelf)
         }

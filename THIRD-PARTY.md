@@ -57,6 +57,7 @@ Valhalla Mobile packages Valhalla and its dependencies. [Scripts/routing/README.
   - Wikipedia packs and Appropedia: CC BY-SA. Images carry their own licenses.
   - iFixit: CC BY-NC-SA 3.0, which prohibits commercial use.
   - The water and field medicine libraries: collections of documents under their authors' individual terms.
+- **Road closure advisories** use the Washington State Department of Transportation’s public Road Closures layer for low-volume, direct requests and local display. The app keeps the last successful snapshot on the device. Confirm redistribution terms before republishing or relaying this feed. [WSDOT closure layer](https://data.wsdot.wa.gov/arcgis/rest/services/TravelInformation/TravelInfoRoadAlerts/FeatureServer/2) · [Dataset terms](https://data.wsdot.wa.gov/arcgis/rest/services/TravelInformation/TravelInfoRoadAlerts/FeatureServer/info/iteminfo)
 - **Printable references:** Household prints page ranges from installed packs. They include *Where There Is No Doctor* (Hesperian Health Guides) and Washington State Department of Health guidance, under their publishers' terms.
 
 ## Build and test tools

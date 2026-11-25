@@ -49,6 +49,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 - Region coverage is a bounding box. Show coverage as the region's actual outline where it isn't rectangular.
 - Regional place indexes are excluded from device backup.
 - Installed routing packs support walking and driving directions with individual steps. Verify each mode on a physical iPhone in airplane mode.
+- Map can cache WSDOT’s reported Puget Sound closures after opt-in and flag a closure near an offline route. Verify overlay restoration after a style reload, bounded reconnect updates, source freshness, and offline reopening on iPhone. A proximity match provides an advisory. Matching closures to graph edges and travel directions is a separate milestone. [WSDOT Road Closures](https://data.wsdot.wa.gov/arcgis/rest/services/TravelInformation/TravelInfoRoadAlerts/FeatureServer/2)
 
 ### Ask
 
