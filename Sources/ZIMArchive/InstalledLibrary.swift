@@ -177,7 +177,8 @@ public actor InstalledLibrary {
 
     /// Verify the replacement's bytes before replacing the installed archive of the same edition.
     public func repairPack(
-        _ pack: PublishedPack, archiveID: UUID, from source: URL, movingSource: Bool = false
+        _ pack: PublishedPack, archiveID: UUID, from source: URL, movingSource: Bool = false,
+        expectedByteCount: Int64? = nil
     ) async throws {
         guard source.isFileURL, source.pathExtension.lowercased() == "zim",
               try archives().contains(where: { $0.id == archiveID && $0.pack == pack }) else {
@@ -186,7 +187,9 @@ public actor InstalledLibrary {
         guard busyArchives.insert(archiveID).inserted else { throw ImportError.busy }
         defer { busyArchives.remove(archiveID) }
 
-        try await withStagedArchive(id: UUID(), source: source, pack: pack, moving: movingSource) { staged, _ in
+        try await withStagedArchive(
+            id: UUID(), source: source, pack: pack, moving: movingSource, expectedByteCount: expectedByteCount
+        ) { staged, _ in
             let original = fileURL(for: archiveID)
             try staged.withUnsafeFileSystemRepresentation { source in
                 try original.withUnsafeFileSystemRepresentation { destination in

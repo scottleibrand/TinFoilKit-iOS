@@ -205,7 +205,18 @@ final class ZIMArchiveTests: XCTestCase {
         try (payload + Data([0])).write(to: installedURL)
         let downloaded = directory.appendingPathComponent("downloaded.zim")
         try FileManager.default.copyItem(at: fixture, to: downloaded)
-        try await library.repairPack(pack, archiveID: archive.id, from: downloaded, movingSource: true)
+        do {
+            try await library.repairPack(
+                pack, archiveID: archive.id, from: downloaded, expectedByteCount: Int64(payload.count) + 1
+            )
+            XCTFail("Expected repair to reject the wrong publisher size")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("exact byte count"))
+        }
+        XCTAssertEqual(try Data(contentsOf: installedURL), payload + Data([0]))
+        try await library.repairPack(
+            pack, archiveID: archive.id, from: downloaded, movingSource: true, expectedByteCount: Int64(payload.count)
+        )
         XCTAssertFalse(FileManager.default.fileExists(atPath: downloaded.path))
         try await library.verifyArchive(archive)
         let entries = try await library.archives()

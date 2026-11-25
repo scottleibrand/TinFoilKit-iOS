@@ -60,7 +60,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 - **Beta.** Catalog pack rows can check Kiwix for newer editions with the same filename series and content variant. After review, a matching update targets the installed archive and preserves it through download, verification, and replacement indexing. Refreshing bundled defaults and expanding language, size, and preset choices remain open.
 - **Beta.** Add device acceptance checks for an interrupted edition update and for recovery after failed indexing. The old archive stays in the library until the new index is ready.
 - **Beta.** Bulk pack downloads use Wi-Fi. Individual transfers can allow cellular data after size confirmation. Temporary connection failures retry on the original network policy, using resume data when iOS supplies it. Verify pause and resume on a physical phone and evaluate discretionary transfers for Download All.
-- Editions with a verified fallback mirror retry on that mirror after eligible origin failures. Checksum failures get one clean retry. Verify publisher recovery and installed-edition preservation on a device.
+- Editions with a verified fallback mirror retry on that mirror after eligible origin failures. Checksum failures get one clean retry. Reviewed Kiwix downloads can also be repaired in place over Wi-Fi with exact size and SHA-256 verification. Verify publisher recovery and installed-edition preservation on a device.
 
 ### Maps
 

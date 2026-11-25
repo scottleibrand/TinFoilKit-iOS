@@ -205,18 +205,20 @@ struct PackDownloadControls: View {
             Button(resumesOnCellular ? "\(title) · cellular allowed" : title) {
                 downloads.start(pack, replacing: replacementTarget)
             }
-            Menu {
-                if resumesOnCellular {
-                    Button("Start over on Wi-Fi", systemImage: "wifi") {
-                        downloads.start(pack, network: .wifiOnly, replacing: replacementTarget)
+            if !downloads.hasPendingRepair(pack) {
+                Menu {
+                    if resumesOnCellular {
+                        Button("Start over on Wi-Fi", systemImage: "wifi") {
+                            downloads.start(pack, network: .wifiOnly, replacing: replacementTarget)
+                        }
+                    } else {
+                        Button("Allow cellular data…", systemImage: "antenna.radiowaves.left.and.right") {
+                            confirmingCellular = true
+                        }
                     }
-                } else {
-                    Button("Allow cellular data…", systemImage: "antenna.radiowaves.left.and.right") {
-                        confirmingCellular = true
-                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle").accessibilityLabel("Download options")
                 }
-            } label: {
-                Image(systemName: "ellipsis.circle").accessibilityLabel("Download options")
             }
         }
         .buttonStyle(.borderless)
