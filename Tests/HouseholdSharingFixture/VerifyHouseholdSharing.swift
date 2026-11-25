@@ -65,6 +65,7 @@ enum VerifyHouseholdSharing {
         precondition(policy?.contains("default-src 'none'") == true)
         precondition(policy?.contains("script-src 'nonce-") == true)
         precondition(received.contains("Find in shared information"))
+        precondition(!received.contains("Ask shared public references"))
         precondition(received.contains("<script nonce="))
         let waypoints = downloadURL(link)
         let (gpx, gpxResponse) = try await browser.data(from: waypoints)
@@ -239,11 +240,17 @@ enum VerifyHouseholdSharing {
         precondition(publicHTML.contains("(the &quot;Software&quot;)"))
         precondition(!publicHTML.contains("(the \"Software\")"))
         precondition(publicHTML.contains("Find in shared information"))
+        precondition(publicHTML.contains("Ask shared public references"))
+        precondition(publicHTML.contains("id=\"reference-household-check-in-v1-1\" data-reference-passage"))
+        precondition(!publicOnly.contentSecurityPolicy.contains("connect-src"))
 
         if let outputPath = CommandLine.arguments.dropFirst().first {
             let output = URL(fileURLWithPath: outputPath, isDirectory: true)
             try publicOnly.body.write(to: output.appendingPathComponent("public-references.html"))
             try onePage.body.write(to: output.appendingPathComponent("selected-reference.html"))
+            let mixed = HouseholdSharePage(snapshot: HouseholdSnapshot(notes: "Secret pantry inventory"),
+                                           publicReferences: selected)
+            try mixed.body.write(to: output.appendingPathComponent("mixed-reference.html"))
         }
         return references
     }
