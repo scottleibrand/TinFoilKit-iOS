@@ -1,7 +1,7 @@
 import Foundation
 import Network
 
-/// Exchanges a single catalog-pinned public reference. This channel has no private payloads.
+/// Exchanges catalog-pinned public references. This channel has no private payloads.
 @MainActor
 final class NearbyPublicTransfer {
     private struct ActiveConnection {
@@ -11,16 +11,24 @@ final class NearbyPublicTransfer {
         var isTransferring: Bool { phase == .transferring }
     }
 
+    private struct OutboundConnection {
+        let id: UUID
+        let peer: String
+        let reference: NearbyPublicReference
+        var active: ActiveConnection
+    }
+
     private enum ConnectionPhase { case preparing, readingRequest, transferring }
     private enum Lifecycle { case running, draining, stopped }
 
     private static let request = Data(("TFK-PUBLIC-1 " + NearbyPublicReference.id).utf8)
-    private let reference: NearbyPublicReference
-    private let didReceive: (Data) -> Void
+    private let references: [NearbyPublicReference]
+    private let didReceive: (NearbyPublicReference.Entry, Data) -> Void
     private var inbound: [UUID: ActiveConnection] = [:]
-    private var outbound: (id: UUID, active: ActiveConnection)?
+    private var outbound: OutboundConnection?
     private var targets: [String: NWEndpoint] = [:]
-    private var attempted: [String: ContinuousClock.Instant] = [:]
+    private var attempted: [String: [String: ContinuousClock.Instant]] = [:]
+    private var legacyPeers: Set<String> = []
     private var retry: Task<Void, Never>?
     private var lifecycle = Lifecycle.running
 
@@ -30,8 +38,8 @@ final class NearbyPublicTransfer {
         hasActiveReceive || inbound.values.contains(where: \.isTransferring)
     }
 
-    init(reference: NearbyPublicReference, didReceive: @escaping (Data) -> Void) {
-        self.reference = reference
+    init(references: [NearbyPublicReference], didReceive: @escaping (NearbyPublicReference.Entry, Data) -> Void) {
+        self.references = references
         self.didReceive = didReceive
     }
 
@@ -49,11 +57,12 @@ final class NearbyPublicTransfer {
         guard lifecycle == .running else { return }
         targets = next
         attempted = attempted.filter { targets[$0.key] != nil }
+        legacyPeers.formIntersection(targets.keys)
         fetchNext()
     }
 
     func accept(_ connection: NWConnection) {
-        guard lifecycle == .running, inbound.count < 4, let body = reference.loadVerified() else {
+        guard lifecycle == .running, inbound.count < 4 else {
             connection.cancel()
             return
         }
@@ -64,7 +73,7 @@ final class NearbyPublicTransfer {
                 switch state {
                 case .ready:
                     if let connection, let version = NearbyPublicTLS.version(connection) {
-                        self?.readRequest(id, body: body, version: version)
+                        self?.readRequest(id, version: version)
                     } else { self?.finishInbound(id) }
                 case .failed, .cancelled: self?.finishInbound(id)
                 default: break
@@ -101,49 +110,69 @@ final class NearbyPublicTransfer {
         retry = nil
         targets.removeAll()
         attempted.removeAll()
+        legacyPeers.removeAll()
     }
 
     private func fetchNext() {
         retry?.cancel()
         retry = nil
-        guard lifecycle == .running, outbound == nil, !targets.isEmpty,
-              reference.admission() == .receive else { return }
+        guard lifecycle == .running, outbound == nil, !targets.isEmpty else { return }
         let now = ContinuousClock.now
         let minimumInterval: Duration = .seconds(30)
-        if let peer = targets.keys.sorted().first(where: { attempted[$0].map { now - $0 >= minimumInterval } ?? true }),
-           let endpoint = targets[peer] {
-            attempted[peer] = now
-            let connection = NWConnection(to: endpoint, using: NearbyPublicTLS.clientParameters())
-            let id = UUID()
-            outbound = (id, track(connection) { [weak self] in self?.finishOutbound(id) })
-            connection.stateUpdateHandler = { [weak self, weak connection] state in
-                DispatchQueue.main.async {
-                    switch state {
-                    case .ready:
-                        if let connection, let version = NearbyPublicTLS.version(connection) {
-                            self?.sendRequest(id, version: version)
-                        } else { self?.finishOutbound(id) }
-                    case .failed, .cancelled: self?.finishOutbound(id)
-                    default: break
-                    }
+        let peers = targets.keys.sorted()
+        var retryAt: ContinuousClock.Instant?
+        for reference in references where reference.admission() == .receive {
+            for peer in peers where reference.entry.id == NearbyPublicReference.id || !legacyPeers.contains(peer) {
+                guard let endpoint = targets[peer] else { continue }
+                if let previous = attempted[peer]?[reference.entry.id], now - previous < minimumInterval {
+                    let deadline = previous + minimumInterval
+                    retryAt = retryAt.map { min($0, deadline) } ?? deadline
+                    continue
                 }
+                attempted[peer, default: [:]][reference.entry.id] = now
+                connect(to: endpoint, peer: peer, reference: reference)
+                return
             }
-            connection.start(queue: .main)
-        } else if let oldest = attempted.values.min() {
+        }
+        if let retryAt {
             retry = Task { [weak self] in
-                do { try await Task.sleep(until: oldest + minimumInterval, clock: .continuous) }
+                do { try await Task.sleep(until: retryAt, clock: .continuous) }
                 catch { return }
                 self?.fetchNext()
             }
         }
     }
 
-    private func readRequest(_ id: UUID, body: Data, version: NearbyPublicTLS.Version) {
+    private func connect(to endpoint: NWEndpoint, peer: String, reference: NearbyPublicReference) {
+        let connection = NWConnection(to: endpoint, using: NearbyPublicTLS.clientParameters())
+        let id = UUID()
+        let active = track(connection) { [weak self] in self?.finishOutbound(id) }
+        outbound = OutboundConnection(id: id, peer: peer, reference: reference, active: active)
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            DispatchQueue.main.async {
+                switch state {
+                case .ready:
+                    if let connection, let version = NearbyPublicTLS.version(connection) {
+                        self?.sendRequest(id, version: version)
+                    } else { self?.finishOutbound(id) }
+                case .failed, .cancelled: self?.finishOutbound(id)
+                default: break
+                }
+            }
+        }
+        connection.start(queue: .main)
+    }
+
+    private func readRequest(_ id: UUID, version: NearbyPublicTLS.Version) {
         guard lifecycle == .running, let active = inbound[id], active.phase == .preparing else { return }
         inbound[id]?.phase = .readingRequest
         let connection = active.connection
         let pin = NearbyPublicReference.resumePin
-        let length = version == .resumable ? NearbyPublicResume.requestLength(pin: pin) : Self.request.count
+        let length = switch version {
+        case .original: Self.request.count
+        case .resumable: NearbyPublicResume.requestLength(pin: pin)
+        case .catalog: NearbyPublicCatalogRequest.byteCount
+        }
         connection.receive(minimumIncompleteLength: length, maximumLength: length) {
             [weak self] request, _, _, error in
             DispatchQueue.main.async {
@@ -152,10 +181,7 @@ final class NearbyPublicTransfer {
                     self.finishInbound(id)
                     return
                 }
-                let offset = version == .resumable
-                    ? NearbyPublicResume.offset(from: request, pin: pin, byteCount: body.count)
-                    : (request == Self.request ? 0 : nil)
-                guard let offset else {
+                guard let (body, offset) = self.response(to: request, version: version) else {
                     self.finishInbound(id)
                     return
                 }
@@ -181,17 +207,51 @@ final class NearbyPublicTransfer {
         }
     }
 
+    private func response(to request: Data, version: NearbyPublicTLS.Version) -> (Data, Int)? {
+        let id: String
+        let offset: Int
+        switch version {
+        case .original:
+            guard request == Self.request else { return nil }
+            id = NearbyPublicReference.id
+            offset = 0
+        case .resumable:
+            guard let value = NearbyPublicResume.offset(from: request, pin: NearbyPublicReference.resumePin,
+                                                       byteCount: NearbyPublicReference.expectedByteCount) else { return nil }
+            id = NearbyPublicReference.id
+            offset = value
+        case .catalog:
+            guard let match = NearbyPublicCatalogRequest.match(request, in: references.map(\.entry.manifest)) else { return nil }
+            id = match.id
+            offset = match.offset
+        }
+        guard let reference = references.first(where: { $0.entry.id == id }),
+              let bytes = reference.loadVerified() else { return nil }
+        return (bytes, offset)
+    }
+
     private func sendRequest(_ id: UUID, version: NearbyPublicTLS.Version) {
         guard lifecycle == .running, let pending = outbound,
               pending.id == id, !pending.active.isTransferring else { return }
+        let reference = pending.reference
+        if version != .catalog {
+            legacyPeers.insert(pending.peer)
+            guard reference.entry.id == NearbyPublicReference.id else {
+                finishOutbound(id)
+                return
+            }
+        }
         let previouslyActive = hasActiveTransfers
         outbound?.active.phase = .transferring
         notifyActivity(previouslyActive: previouslyActive)
         guard let outbound, outbound.id == id else { return }
         let connection = outbound.active.connection
-        let prefix = version == .resumable ? reference.checkpoint() : Data()
-        let request = version == .resumable
-            ? NearbyPublicResume.request(pin: NearbyPublicReference.resumePin, offset: prefix.count) : Self.request
+        let prefix = version == .original ? Data() : reference.checkpoint()
+        let request = switch version {
+        case .original: Self.request
+        case .resumable: NearbyPublicResume.request(pin: NearbyPublicReference.resumePin, offset: prefix.count)
+        case .catalog: NearbyPublicCatalogRequest.request(for: reference.entry.manifest, offset: prefix.count)
+        }
         connection.send(content: request, completion: .contentProcessed { [weak self] error in
             DispatchQueue.main.async {
                 guard self?.outbound?.id == id else { return }
@@ -205,9 +265,11 @@ final class NearbyPublicTransfer {
 
     private func readReference(_ id: UUID, from connection: NWConnection, prefix: Data,
                                version: NearbyPublicTLS.Version) {
-        let size = NearbyPublicReference.expectedByteCount
+        guard let outbound, outbound.id == id else { return }
+        let reference = outbound.reference
+        let size = reference.entry.manifest.byteCount
         let remaining = size - prefix.count
-        let length = version == .resumable ? min(512, remaining) : remaining
+        let length = version == .original ? remaining : min(512, remaining)
         connection.receive(minimumIncompleteLength: length, maximumLength: length) {
             [weak self] bytes, _, isComplete, error in
             DispatchQueue.main.async {
@@ -219,24 +281,24 @@ final class NearbyPublicTransfer {
                 let data = prefix + bytes
                 if data.count == size {
                     do {
-                        let installed = try self.reference.receiveVerified(data)
-                        self.reference.removeCheckpoint()
-                        if installed { self.didReceive(data) }
+                        let installed = try reference.receiveVerified(data)
+                        reference.removeCheckpoint()
+                        if installed { self.didReceive(reference.entry, data) }
                     } catch NearbyPublicReference.StoreError.invalidReference {
                         // A bad prefix must not make every later attempt fail.
-                        if version == .resumable { self.reference.removeCheckpoint() }
+                        if version != .original { reference.removeCheckpoint() }
                     } catch {
                         // Keep the last prefix so an interrupted or low-space receive can retry.
                     }
                     self.finishOutbound(id)
                     return
                 }
-                guard version == .resumable else {
+                guard version != .original else {
                     self.finishOutbound(id)
                     return
                 }
                 do {
-                    try self.reference.saveCheckpoint(data)
+                    try reference.saveCheckpoint(data)
                 } catch {
                     self.finishOutbound(id)
                     return
