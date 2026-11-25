@@ -32,7 +32,7 @@ basemap_url='https://data.source.coop/protomaps/openstreetmap/v4.pmtiles?version
 .build/seattle/pmtiles verify .build/seattle/Seattle-v4.pmtiles
 ```
 
-The bundle command checks the verified PMTiles size and SHA-256. The reserved artifact URL below is suitable for a local Files import. For a download edition, replace it with an authorized versioned HTTPS directory and compute the final manifest SHA-256 after setting the release URLs.
+The bundle command checks the verified PMTiles size and SHA-256. The reserved artifact URL below is suitable for a local Files import. Use the [release staging command](README.md#stage-an-edition-for-publication) to prepare the checked artifacts, exact BBBike extract, and data notice for an authorized versioned HTTPS directory. The resulting manifest pin is specific to that directory.
 
 ```sh
 python3 Scripts/build-regional-bundle.py build .build/seattle/Seattle.osm.pbf .build/seattle/bundle \
@@ -62,4 +62,4 @@ The version 2 manifest and all three artifacts passed the regional bundle verifi
 
 - The 554,730-record place index returned `325 9th Avenue, Seattle, 98104` from an address search and Swedish First Hill Medical Center from a Swedish hospital search. This edition tags the Harborview Medical Center way as `amenity=doctors` and `healthcare=doctor`, so the current builder groups it with urgent care. Its name and address remain searchable. Review important service classifications for the release edition. [OSM way 169511257](https://www.openstreetmap.org/way/169511257)
 - The 183-tile graph returned walking and driving instructions in Valhalla's network-disabled one-shot mode. Pike Place Market to Swedish First Hill Medical Center was 1.941 km walking with 31 maneuvers and 2.189 km driving with 7 maneuvers.
-- A public download needs an authorized HTTPS release location and a trusted final manifest digest. Run the three-asset Files import, map rendering, search, route steps and removal on an iPhone in airplane mode before release.
+- A public download needs an authorized HTTPS release location and a trusted final manifest digest. After staging, verify the served manifest and HTTP range support. Run the three-asset Files import, map rendering, search, route steps and removal on an iPhone in airplane mode before release.

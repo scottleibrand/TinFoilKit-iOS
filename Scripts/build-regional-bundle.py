@@ -270,6 +270,59 @@ def verify(directory):
     if bundle_manifest(directory, metadata, basemap) != actual:
         raise ValueError("The catalog manifest does not match the regional artifacts.")
     print(f"Verified {directory / 'manifest.json'} and all artifacts.")
+    return actual
+
+
+def stage_release(args):
+    manifest = verify(args.directory)
+    base = args.artifact_base_url.rstrip("/") + "/"
+    if not valid_https(base) or urlsplit(base).query or urlsplit(base).path == "/":
+        raise ValueError("Provide an HTTPS directory for the release edition without a query string.")
+    output = args.output.absolute()
+    if output.exists() or output.is_symlink():
+        raise ValueError("Choose a new output directory for this release edition.")
+
+    manifest["artifactBaseURL"] = base
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".regional-release-", dir=output.parent) as temporary:
+        files = Path(temporary) / "release"
+        files.mkdir()
+        for asset in manifest["assets"].values():
+            name = asset["filename"]
+            shutil.copyfile(args.directory / name, files / name)
+            asset["url"] = base + name
+        source = files / "source.osm.pbf"
+        shutil.copyfile(args.pbf, source)
+        if digest(source) != manifest["sourceSHA256"]:
+            raise ValueError("The source extract does not match the pinned SHA-256.")
+
+        notice = [
+            f"# {manifest['region']} regional data", "",
+            f"Edition {manifest['dataVersion']}. {manifest['attribution']}.", "",
+            "The machine-readable place index (`places.sqlite`), Valhalla routing",
+            "pack (`routing.tfkroute`) and exact input extract (`source.osm.pbf`)",
+            "are available alongside this notice under the Open Database License 1.0.",
+            "The routing pack contains a Valhalla tile archive after its TFKROUTE header.", "",
+            f"- Source publisher: <{manifest['source']}>",
+            f"- Source extract SHA-256: `{manifest['sourceSHA256']}`",
+            f"- Copyright and attribution: <{manifest['licenseURL']}>",
+            "- ODbL 1.0 text: <https://opendatacommons.org/licenses/odbl/1-0/>",
+        ]
+        if basemap := manifest["assets"].get("basemap"):
+            notice.extend([
+                "", "## Basemap", "", f"{basemap['attribution']}.", "",
+                f"- Edition: {basemap['dataVersion']}",
+                f"- Source: <{basemap['source']}>",
+                f"- Terms ({basemap['license']}): <{basemap['licenseURL']}>",
+            ])
+        (files / "NOTICE.md").write_text("\n".join(notice) + "\n", encoding="utf-8")
+        path = files / "manifest.json"
+        path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        verify(files)
+        manifest_hash = digest(path)
+        os.rename(files, output)
+    print(f"Staged release files in {output}.")
+    print(f"Manifest URL: {base}manifest.json\nManifest SHA-256: {manifest_hash}")
 
 
 def main():
@@ -296,10 +349,17 @@ def main():
     basemap.add_argument("--basemap-sha256", help="Pinned SHA-256 for the PMTiles file")
     verifier = commands.add_parser("verify")
     verifier.add_argument("directory", type=Path)
+    release = commands.add_parser("stage-release", help="Prepare local files for a verified release edition")
+    release.add_argument("directory", type=Path, help="Existing verified regional bundle")
+    release.add_argument("pbf", type=Path, help="Exact source extract pinned in the manifest")
+    release.add_argument("output", type=Path, help="New local release directory")
+    release.add_argument("--artifact-base-url", required=True, help="HTTPS directory for this immutable edition")
     args = parser.parse_args()
     try:
         if args.command == "build":
             build(args)
+        elif args.command == "stage-release":
+            stage_release(args)
         else:
             verify(args.directory)
     except (OSError, KeyError, TypeError, ValueError, sqlite3.Error, subprocess.CalledProcessError) as error:

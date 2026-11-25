@@ -65,6 +65,17 @@ Two-artifact bundles use schema version 1. A basemap adds `basemap.pmtiles` and 
 
 Production extracts use OpenStreetMap data. Preserve the copyright notice, ODbL terms and source edition when redistributing the files. Verify additional publisher terms before publishing. Keep downloaded extracts, generated indexes and routing graphs out of Git.
 
+### Stage an edition for publication
+
+After the artifacts pass verification, use `stage-release` to assign their final URLs without rebuilding. Pass the exact source extract and the authorized HTTPS directory for the immutable edition.
+
+```sh
+python Scripts/build-regional-bundle.py stage-release .build/region-bundle region.osm.pbf .build/region-release \
+  --artifact-base-url https://catalog.example/region/YYYY-MM-DD/
+```
+
+This command verifies the bundle before and after staging, checks the archived PBF against the manifest, and creates a data notice. Host the installable assets, `NOTICE.md` and `source.osm.pbf` alongside `manifest.json` in the edition directory. The source extract and notice are for database access and attribution. The app downloads only the files listed under `assets`. After uploading, fetch the manifest to compare its SHA-256 with the printed pin and confirm that each asset serves HTTP 206 with the requested range and the manifest's exact total size. Pin the final URL and hash through the app's trusted catalog after those checks.
+
 The [Seattle candidate](SEATTLE-CANDIDATE.md) records verified source editions, checksums and the procedure for building a real three-artifact bundle.
 
 Run the end-to-end producer fixture with the same Python and Docker setup.
@@ -73,4 +84,4 @@ Run the end-to-end producer fixture with the same Python and Docker setup.
 python Tests/RegionalBundleFixture/run.py
 ```
 
-The test converts the pinned, original MIT-licensed synthetic network to PBF with an invented pharmacy and address. It also generates a separate MIT-licensed PMTiles file with one synthetic vector tile. It checks both manifest versions, basemap provenance, coverage, size and hashes, and rejection of malformed or changed artifacts. The temporary builds stay under the ignored `.build/` directory.
+The test converts the pinned, original MIT-licensed synthetic network to PBF with an invented pharmacy and address. It also generates a separate MIT-licensed PMTiles file with one synthetic vector tile. It checks both manifest versions, basemap provenance, coverage, size and hashes, release URL rebasing and source retention, and rejection of malformed or changed artifacts. The temporary builds stay under the ignored `.build/` directory.

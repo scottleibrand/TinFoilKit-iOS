@@ -109,6 +109,40 @@ def check_basemap(work, pbf, options, metadata):
     return output
 
 
+def check_release(work, bundle, pbf):
+    manifest = bundle / "manifest.json"
+    original = manifest.read_bytes()
+    output = work / "release"
+    base = "https://catalog.example/regions/fixture-v2/"
+    command = [*TOOL, "stage-release", bundle, pbf, output, "--artifact-base-url"]
+    expect_failure([*command, "http://catalog.example/editions/fixture-v2/"], "Provide an HTTPS directory")
+    expect_failure([*command, "https://catalog.example/fixture?mutable=true"], "Provide an HTTPS directory")
+    wrong_source = work / "wrong.osm.pbf"
+    wrong_source.write_bytes(b"different source")
+    invalid = [*command]
+    invalid[invalid.index(pbf)] = wrong_source
+    expect_failure([*invalid, base], "source extract does not match")
+    assert not output.exists()
+    assert not list(work.glob(".regional-release-*"))
+
+    result = subprocess.run([*command, base.rstrip("/")], check=True, capture_output=True, text=True)
+    assert manifest.read_bytes() == original
+    expected = json.loads(original)
+    expected["artifactBaseURL"] = base
+    for asset in expected["assets"].values():
+        asset["url"] = base + asset["filename"]
+    payload = (output / "manifest.json").read_bytes()
+    assert json.loads(payload) == expected
+    assert f"Manifest URL: {base}manifest.json" in result.stdout
+    assert f"Manifest SHA-256: {hashlib.sha256(payload).hexdigest()}" in result.stdout
+    assert (output / "source.osm.pbf").read_bytes() == pbf.read_bytes()
+    notice = (output / "NOTICE.md").read_text(encoding="utf-8")
+    assert "© OpenStreetMap contributors" in notice and "Tinfoil Kit synthetic basemap fixture" in notice
+    assert expected["sourceSHA256"] in notice
+    subprocess.run([*TOOL, "verify", output], check=True)
+    expect_failure([*command, base], "Choose a new output directory")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ui-bundle", type=Path, help="Copy the verified version 2 fixture to a new directory.")
@@ -198,6 +232,7 @@ def main():
             "license": "MIT", "licenseURL": "https://opensource.org/license/mit",
             "attribution": "Tinfoil Kit synthetic basemap fixture",
         })
+        check_release(work, ui_bundle, pbf)
         if args.ui_bundle is not None:
             shutil.copytree(ui_bundle, args.ui_bundle)
     print("Regional bundle fixture passed.")
