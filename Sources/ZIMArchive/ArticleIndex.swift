@@ -58,6 +58,7 @@ public struct ArticleIndex: Sendable {
     private static let buildLock = NSLock()
     private static let publicationLock = NSLock()
     private static let batchSize: UInt32 = 256
+    private static let batchDuration: Duration = .seconds(1)
     private static let minimumFreeBytes: UInt64 = 128 * 1024 * 1024
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -121,12 +122,15 @@ public struct ArticleIndex: Sendable {
                         progress(Double(cursor) / Double(total))
                         try Task.checkCancellation()
                         try checkFreeSpace(in: directory)
-                        let end = cursor + min(Self.batchSize, total - cursor)
+                        let limit = cursor + min(Self.batchSize, total - cursor)
+                        let deadline = ContinuousClock.now + Self.batchDuration
+                        var end = cursor
                         try execute("BEGIN", on: db)
-                        for index in cursor..<end {
+                        while end < limit {
+                            if end > cursor, Task.isCancelled || ContinuousClock.now >= deadline { break }
                             try Task.checkCancellation()
                             try autoreleasepool {
-                                try Self.indexEntry(at: index, in: archive) { path, title, body, label in
+                                try Self.indexEntry(at: end, in: archive) { path, title, body, label in
                                     try bind(path, at: 1, to: insert, on: db)
                                     try bind(title, at: 2, to: insert, on: db)
                                     try bind(body, at: 3, to: insert, on: db)
@@ -136,6 +140,7 @@ public struct ArticleIndex: Sendable {
                                     sqlite3_clear_bindings(insert)
                                 }
                             }
+                            end += 1
                         }
                         try execute("UPDATE index_progress SET next_entry = \(end)", on: db)
                         try execute("COMMIT", on: db)
