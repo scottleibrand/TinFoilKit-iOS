@@ -38,7 +38,7 @@ struct PacksView: View {
                 }
             }
             Section {
-                Text("Essentials includes compact references. Recommended adds repair guides and a larger English Wikipedia selection. Download all includes every pack eligible for bulk download in the selected languages. Bulk downloads use Wi-Fi.")
+                Text("Essentials includes compact references. Recommended adds repair guides and a larger English Wikipedia selection. Download all includes all current catalog packs in the selected languages. Bulk downloads use Wi-Fi.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             if let error = PackCatalog.loadError {
@@ -90,7 +90,7 @@ struct PacksView: View {
             Text("\(pack.version) · \(pack.sizeEstimate.formatted(.byteCount(style: .file)))")
                 .font(.footnote)
             if entry.individualDownloadOnly == true, PackCatalog.bundledCopy(for: pack) == nil {
-                Text("Individual download").font(.footnote).foregroundStyle(.secondary)
+                Text("Included in Download all").font(.footnote).foregroundStyle(.secondary)
             }
             if !entry.isDefault {
                 Text("Earlier edition").font(.footnote).foregroundStyle(.secondary)

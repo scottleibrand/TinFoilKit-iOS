@@ -43,7 +43,8 @@ enum PackCatalog {
             $0.isBulkEligible && $0.pack.id == "wikipedia-en-top-nopic"
         }
         return entries.filter { entry in
-            guard entry.isBulkEligible, language == nil || entry.language == language else { return false }
+            guard entry.isDefault, language == nil || entry.language == language else { return false }
+            if preset != .all && !entry.isBulkEligible { return false }
             switch preset {
             case .essentials:
                 return entry.section == .essentials
