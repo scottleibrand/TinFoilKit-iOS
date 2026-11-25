@@ -4,6 +4,15 @@ import XCTest
 import ZIMArchive
 
 final class ArchivePDFIndexTests: XCTestCase {
+    func testPDFDirectoryCanInspectOnlyTheRequestedPrefix() throws {
+        try withArchive { file in
+            let archive = try ZIMArchive(fileURL: file)
+            XCTAssertTrue(try archive.pdfEntries(inspectingFirst: 0).isEmpty)
+            XCTAssertEqual(try archive.pdfEntries(inspectingFirst: 1).map(\.path), ["files/Knots.pdf"])
+            XCTAssertEqual(try archive.pdfEntries().map(\.path), ["files/Knots.pdf", "files/Water Guide.pdf"])
+        }
+    }
+
     func testMatchingPDFTextOpensItsPageAndHTMLIsAlsoIndexed() throws {
         try withArchive { file in
             let index = ArticleIndex(archiveURL: file)
