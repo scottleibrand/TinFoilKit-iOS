@@ -81,7 +81,9 @@ struct HouseholdSharePublicReference: Identifiable, Sendable {
 
 struct HouseholdSharePage: Sendable {
     static let basePolicy = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
+    static let waypointQuery = "download=waypoints"
     let body: Data
+    let waypointDownload: Data?
     let contentSecurityPolicy: String
     let acceptsNotes: Bool
     let acceptsPins: Bool
@@ -90,6 +92,8 @@ struct HouseholdSharePage: Sendable {
          acceptsNotes: Bool = false, acceptsPins: Bool = false) {
         self.acceptsNotes = acceptsNotes
         self.acceptsPins = acceptsPins
+        let sharedPlaces = [snapshot.home].compactMap { $0 } + snapshot.pins
+        waypointDownload = Self.waypoints(sharedPlaces)
         var content = ""
         if !snapshot.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             content += "<section><h2>Notes</h2><p>\(Self.escape(snapshot.notes))</p></section>"
@@ -126,6 +130,7 @@ struct HouseholdSharePage: Sendable {
         <p id="search-status" role="status"></p>
         </div>
         \(content)
+        \(waypointDownload == nil ? "" : Self.waypointLink)
         \(acceptsNotes ? Self.noteForm : "")
         \(acceptsPins ? Self.pinForm : "")
         </main>
@@ -134,6 +139,37 @@ struct HouseholdSharePage: Sendable {
         </html>
         """
         body = Data(html.utf8)
+    }
+
+    private static let waypointLink = """
+        <p><a href="?\(waypointQuery)" download="household-waypoints.gpx">Download shared locations (.gpx)</a></p>
+        """
+
+    private static func waypoints(_ places: [HouseholdPlace]) -> Data? {
+        let waypoints = places.compactMap { place -> String? in
+            guard (-90...90).contains(place.latitude), (-180...180).contains(place.longitude) else { return nil }
+            let locale = Locale(identifier: "en_US_POSIX")
+            let latitude = String(format: "%.8f", locale: locale, place.latitude)
+            let roundedLongitude = String(format: "%.8f", locale: locale, place.longitude)
+            let longitude = roundedLongitude == "180.00000000" ? "-180.00000000" : roundedLongitude
+            // XML 1.0 excludes most control characters. A location name is the only free-text field.
+            let scalars = place.name.unicodeScalars.filter { scalar in
+                switch scalar.value {
+                case 0x9, 0xA, 0xD, 0x20...0xD7FF, 0xE000...0xFFFD, 0x10000...0x10FFFF: true
+                default: false
+                }
+            }
+            let name = String(String.UnicodeScalarView(scalars))
+            return "<wpt lat=\"\(latitude)\" lon=\"\(longitude)\"><name>\(escape(name))</name></wpt>"
+        }
+        guard !waypoints.isEmpty else { return nil }
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" creator="Tinfoil Kit" xmlns="http://www.topografix.com/GPX/1/1">
+        \(waypoints.joined(separator: "\n"))
+        </gpx>
+        """
+        return Data(xml.utf8)
     }
 
     private static let searchScript = #"""
@@ -399,8 +435,25 @@ final class HouseholdShareServer: @unchecked Sendable {
         }
         guard let port = listener.port, request.count == 3,
               request[2] == "HTTP/1.1" || request[2] == "HTTP/1.0",
-              headers["host"] == ["\(address.host):\(port.rawValue)"], tokenMatches(request[1]) else {
+              headers["host"] == ["\(address.host):\(port.rawValue)"] else {
             send(connection, id: id, text: "Not found", status: "404 Not Found")
+            return
+        }
+        let target = request[1].split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let path = target.first, tokenMatches(path) else {
+            send(connection, id: id, text: "Not found", status: "404 Not Found")
+            return
+        }
+        if target.count == 2 {
+            if (request[0] == "GET" || request[0] == "HEAD"), target[1] == HouseholdSharePage.waypointQuery,
+               let waypoints = page.waypointDownload {
+                send(connection, id: id, data: response(
+                    status: "200 OK", type: "application/gpx+xml", body: waypoints,
+                    headOnly: request[0] == "HEAD", attachment: "household-waypoints.gpx"
+                ))
+            } else {
+                send(connection, id: id, text: "Not found", status: "404 Not Found")
+            }
             return
         }
         if request[0] == "GET" || request[0] == "HEAD" {
@@ -460,13 +513,14 @@ final class HouseholdShareServer: @unchecked Sendable {
     }
 
     private func response(status: String, type: String, body: Data, headOnly: Bool = false,
-                          contentSecurityPolicy: String = HouseholdSharePage.basePolicy) -> Data {
-        let headers = [
+                          contentSecurityPolicy: String = HouseholdSharePage.basePolicy, attachment: String? = nil) -> Data {
+        var headers = [
             "HTTP/1.1 \(status)", "Content-Type: \(type)", "Content-Length: \(body.count)",
             "Connection: close", "Cache-Control: no-store", "Referrer-Policy: no-referrer",
             "X-Content-Type-Options: nosniff", "X-Frame-Options: DENY",
             "Content-Security-Policy: \(contentSecurityPolicy)"
         ]
+        if let attachment { headers.append("Content-Disposition: attachment; filename=\"\(attachment)\"") }
         var response = Data((headers.joined(separator: "\r\n") + "\r\n\r\n").utf8)
         if !headOnly { response.append(body) }
         return response
