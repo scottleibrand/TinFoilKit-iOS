@@ -17,8 +17,9 @@ enum OfflineChatPhotoLimits {
 
     static func validate(file: URL) throws {
         try Task.checkCancellation()
-        let resources = try file.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-        guard resources.isRegularFile == true, let size = resources.fileSize, size > 0 else {
+        let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+        guard attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = (attributes[.size] as? NSNumber)?.int64Value, size > 0 else {
             throw ImportError.invalidPhoto
         }
         guard size <= maximumBytes else { throw ImportError.tooLarge }
