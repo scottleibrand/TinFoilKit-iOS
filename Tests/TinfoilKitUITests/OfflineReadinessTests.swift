@@ -1,6 +1,28 @@
 import XCTest
 
 final class OfflineReadinessTests: XCTestCase {
+    func testHomeCoverageFindsInstalledRegionalPlaceAndRouteData() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["TINFOILKIT_HOME_READINESS_FIXTURE"] == "1",
+                          "Requires a synthetic regional bundle and saved Home on the dedicated simulator.")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        let readiness = app.buttons["Offline readiness"]
+        XCTAssertTrue(readiness.waitForExistence(timeout: 10))
+        readiness.tap()
+        XCTAssertTrue(app.staticTexts["Coverage at Home"].waitForExistence(timeout: 5))
+        for label in ["Regional places", "Offline routing"] {
+            let covered = app.descendants(matching: .any).matching(
+                NSPredicate(format: "label CONTAINS %@ AND (label CONTAINS %@ OR value == %@)",
+                            label, "Inside coverage", "Inside coverage")
+            ).firstMatch
+            XCTAssertTrue(covered.waitForExistence(timeout: 10), label)
+        }
+        let regionalBundle = app.staticTexts["Basemap, places and routing files present"]
+        for _ in 0..<8 where !regionalBundle.exists { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(regionalBundle.waitForExistence(timeout: 5))
+    }
+
     func testOfflineReadinessOpensInstalledPDFAndItsIndexedPassage() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
