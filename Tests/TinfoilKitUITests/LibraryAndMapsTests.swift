@@ -6,6 +6,60 @@ final class LibraryAndMapsTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testDeferredQuestionSurvivesRelaunchWithoutAProviderKey() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-askUsesOnDeviceModel", "NO"]
+        app.launch()
+        app.tabBars.buttons["Ask"].tap()
+        func openProviders() {
+            let options = app.buttons["Ask options"]
+            XCTAssertTrue(options.waitForExistence(timeout: 10))
+            options.tap()
+            app.buttons["Online providers"].tap()
+        }
+        openProviders()
+        let gptKey = app.buttons["Add GPT key"]
+        XCTAssertTrue(gptKey.waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+
+        let text = "fixture" + UUID().uuidString.prefix(8).lowercased()
+        let question = app.descendants(matching: .any)["ask-question"].firstMatch
+        question.tap()
+        question.typeText(text)
+        app.buttons["ask-submit"].tap()
+        let online = app.buttons["Ask online"]
+        XCTAssertTrue(online.waitForExistence(timeout: 20))
+        online.tap()
+        let queue = app.buttons["Queue for GPT"]
+        XCTAssertTrue(queue.waitForExistence(timeout: 5))
+        queue.tap()
+        XCTAssertTrue(app.navigationBars["Confirm deferred question"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.switches["Allow metered connections"].value as? String, "0")
+        let confirm = app.buttons["Queue question"]
+        if !confirm.isHittable { app.swipeUp() }
+        confirm.tap()
+        XCTAssertTrue(app.navigationBars["Ask online"].waitForExistence(timeout: 5))
+
+        app.terminate()
+        app.launch()
+        app.tabBars.buttons["Ask"].tap()
+        openProviders()
+        let entry = app.staticTexts[text]
+        XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        entry.tap()
+        XCTAssertTrue(app.staticTexts["Add the provider’s API key in Online providers to send this question."].exists)
+        let cancel = app.buttons["Cancel request"]
+        if !cancel.isHittable { app.swipeUp() }
+        cancel.tap()
+        app.buttons["Cancel deferred request"].tap()
+        let remove = app.buttons["Remove queue entry"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 5))
+        remove.tap()
+        app.buttons["Remove from queue"].tap()
+        XCTAssertTrue(app.navigationBars["Online providers"].waitForExistence(timeout: 5))
+        XCTAssertFalse(entry.exists)
+    }
+
     func testOfflineChatOpensFromAskOptions() {
         let app = XCUIApplication()
         app.launch()
