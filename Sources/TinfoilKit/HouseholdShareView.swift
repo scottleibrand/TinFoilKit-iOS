@@ -14,6 +14,7 @@ struct HouseholdShareView: View {
     @State private var includeNotes = false
     @State private var includeHome = false
     @State private var includePins = false
+    @State private var includeDirections = false
     @State private var selectedReferenceIDs: Set<String> = []
     @State private var acceptGuestNotes = false
     @State private var acceptGuestPins = false
@@ -26,6 +27,9 @@ struct HouseholdShareView: View {
                 if hasNotes { Toggle("Notes", isOn: $includeNotes).disabled(session.running) }
                 if snapshot.home != nil { Toggle("Home location", isOn: $includeHome).disabled(session.running) }
                 if !snapshot.pins.isEmpty { Toggle("Saved pins", isOn: $includePins).disabled(session.running) }
+                if includeHome && includePins && snapshot.home != nil && !snapshot.pins.isEmpty {
+                    Toggle("Directions from Home to pins", isOn: $includeDirections).disabled(session.running)
+                }
                 if !hasNotes && snapshot.home == nil && snapshot.pins.isEmpty && publicReferences.isEmpty {
                     Text("Add household information before sharing.").foregroundStyle(.secondary)
                 }
@@ -34,6 +38,9 @@ struct HouseholdShareView: View {
             } footer: {
                 if snapshot.home != nil || !snapshot.pins.isEmpty {
                     Text("Guests can save the names and coordinates of shared locations as a GPX file.")
+                }
+                if includeHome && includePins && includeDirections {
+                    Text("Share walking and driving steps for up to the first three pins where installed routing data can calculate a route.")
                 }
             }
             if !publicReferences.isEmpty {
@@ -83,6 +90,9 @@ struct HouseholdShareView: View {
             Section {
                 switch session.state {
                 case .ready(let link):
+                    if session.foundDirections == false {
+                        Text("No directions were available from installed routing data.").foregroundStyle(.secondary)
+                    }
                     ShareLink(item: link) {
                         Label("Share local link", systemImage: "square.and.arrow.up")
                     }
@@ -101,7 +111,7 @@ struct HouseholdShareView: View {
                     Button("Replace link", systemImage: "arrow.clockwise") { session.replaceLink() }
                     Button("Stop sharing", role: .destructive) { session.stop() }
                 case .starting:
-                    ProgressView("Starting local sharing")
+                    ProgressView("Preparing local share")
                     Button("Cancel", role: .cancel) { session.stop() }
                 case .replacing:
                     ProgressView("Replacing link")
@@ -162,6 +172,7 @@ struct HouseholdShareView: View {
                 home: includeHome ? snapshot.home : nil,
                 pins: includePins ? snapshot.pins : []
             ), publicReferences: selectedReferences,
+               includesDirections: includeHome && includePins && includeDirections,
                acceptsNotes: acceptGuestNotes && canAcceptGuestProposals,
                acceptsPins: acceptGuestPins && canAcceptGuestProposals)
         }
@@ -179,6 +190,7 @@ private final class HouseholdShareSession: ObservableObject {
 
     @Published private(set) var state: State = .idle
     @Published private(set) var proposal: HouseholdGuestProposal?
+    @Published private(set) var foundDirections: Bool?
     private var server: HouseholdShareServer?
     private var monitor: NWPathMonitor?
     private var startup: Task<Void, Never>?
@@ -192,14 +204,23 @@ private final class HouseholdShareSession: ObservableObject {
         }
     }
 
-    func start(_ snapshot: HouseholdSnapshot, publicReferences: [HouseholdSharePublicReference], acceptsNotes: Bool,
-               acceptsPins: Bool) {
+    func start(_ snapshot: HouseholdSnapshot, publicReferences: [HouseholdSharePublicReference],
+               includesDirections: Bool, acceptsNotes: Bool, acceptsPins: Bool) {
         guard attempt == nil else { return }
         let id = UUID()
-        let page = HouseholdSharePage(snapshot: snapshot, publicReferences: publicReferences,
-                                     acceptsNotes: acceptsNotes, acceptsPins: acceptsPins)
         attempt = id
         state = .starting
+        startup = Task { [weak self] in
+            let directions = includesDirections ? await HouseholdShareDirections.prepare(for: snapshot) : []
+            guard let self, self.attempt == id, !Task.isCancelled else { return }
+            self.foundDirections = includesDirections ? !directions.isEmpty : nil
+            let page = HouseholdSharePage(snapshot: snapshot, publicReferences: publicReferences, directions: directions,
+                                         acceptsNotes: acceptsNotes, acceptsPins: acceptsPins)
+            self.publish(page, attempt: id)
+        }
+    }
+
+    private func publish(_ page: HouseholdSharePage, attempt id: UUID) {
         // Bound the wait even if path discovery does not report an interface.
         startup = Task { [weak self] in
             try? await Task.sleep(for: .seconds(5))
@@ -241,6 +262,7 @@ private final class HouseholdShareSession: ObservableObject {
         server = nil
         address = nil
         proposal = nil
+        foundDirections = nil
         state = newState
     }
 
