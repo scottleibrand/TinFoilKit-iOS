@@ -7,7 +7,7 @@ final class KiwixMetalinkTests: XCTestCase {
     private let digest = "2a3f2aa5a4c6011f9f73e5b119546763fff099f2c3bb8a1787e750236f555ae5"
     private let namespace = "urn:ietf:params:xml:ns:metalink"
     private var size: String { "<size>90260982</size>" }
-    private var hash: String { "<hash type=\"sha-256\">\(digest)</hash>" }
+    private var hashElement: String { "<hash type=\"sha-256\">\(digest)</hash>" }
 
     func testReadsWholeArchivePinAndIgnoresPiecesAndMirrors() throws {
         let archive = """
@@ -31,26 +31,26 @@ final class KiwixMetalinkTests: XCTestCase {
         </m:metalink>
         """
         XCTAssertEqual(try parse(xml).sha256, digest)
-        XCTAssertThrowsError(try parse(document(file(size + hash), namespace: "urn:example:other")))
+        XCTAssertThrowsError(try parse(document(file(size + hashElement), namespace: "urn:example:other")))
     }
 
     func testRejectsWrongOrMultipleDirectFiles() {
-        XCTAssertThrowsError(try parse(document(file(size + hash, name: "wrong.zim"))))
-        XCTAssertThrowsError(try parse(document(file(size + hash) + file(size + hash, name: "other.zim"))))
-        XCTAssertThrowsError(try parse(document("<extension>\(file(size + hash))</extension>")))
+        XCTAssertThrowsError(try parse(document(file(size + hashElement, name: "wrong.zim"))))
+        XCTAssertThrowsError(try parse(document(file(size + hashElement) + file(size + hashElement, name: "other.zim"))))
+        XCTAssertThrowsError(try parse(document("<extension>\(file(size + hashElement))</extension>")))
     }
 
     func testRequiresOneDirectSizeAndSHA256() {
         let invalid = [
             size,
-            hash,
-            size + size + hash,
-            size + hash + hash,
-            "<size>0</size>" + hash,
-            "<size>9223372036854775808</size>" + hash,
-            "<size><value>90260982</value></size>" + hash,
+            hashElement,
+            size + size + hashElement,
+            size + hashElement + hashElement,
+            "<size>0</size>" + hashElement,
+            "<size>9223372036854775808</size>" + hashElement,
+            "<size><value>90260982</value></size>" + hashElement,
             size + "<hash type=\"sha-256\">\(String(repeating: "g", count: 64))</hash>",
-            size + "<pieces type=\"sha-256\">\(hash)</pieces>",
+            size + "<pieces type=\"sha-256\">\(hashElement)</pieces>",
             size + "<hash type=\"sha-1\">\(digest)</hash>"
         ]
         for content in invalid {
@@ -59,7 +59,7 @@ final class KiwixMetalinkTests: XCTestCase {
     }
 
     func testRejectsDTDNonUTF8MalformedAndOversizedDocuments() throws {
-        let body = "<metalink xmlns=\"\(namespace)\">\(file(size + hash))</metalink>"
+        let body = "<metalink xmlns=\"\(namespace)\">\(file(size + hashElement))</metalink>"
         XCTAssertThrowsError(try parse("<!DOCTYPE metalink>" + body))
         XCTAssertThrowsError(try parse("<!DOCTYPE metalink SYSTEM \"file:///tmp/unused\">" + body))
         XCTAssertThrowsError(try parse("<?xml\nversion=\"1.0\" encoding=\"UTF-7\"?>" + body))
