@@ -31,7 +31,7 @@ Status as of 2026-11-24. "Built" means the feature exists in the app. It is comp
 | Area | Status | Remaining |
 | --- | --- | --- |
 | Offline library | Built | Run the milestone 1 acceptance checks on a device with a publisher archive. Measure PDF extraction time and search-index storage on the larger packs. |
-| Content packs | Partly built | The bundled catalog has English and Spanish choices and dated editions. Wi-Fi downloads, disk space checks, checksum verification, repair and replacement after indexing are implemented. Users can look up newer Kiwix editions for a catalog pack. Expand coverage and exercise real interrupted transfers. |
+| Content packs | Partly built | The bundled catalog has English and Spanish choices and dated editions. Wi-Fi downloads, disk space checks, checksum verification, repair and replacement after indexing are implemented. Users can review and download newer matching Kiwix editions as in-place updates. Expand coverage and exercise real interrupted transfers. |
 | Maps | Partly built | Imported basemaps, place indexes and Valhalla routing packs work offline. Resumable in-app downloads accept trusted manifests, and Map plans routes from separate endpoints. The catalog offers a verified Seattle area edition with a basemap, place index and routing graph. Verify a cold launch and both route modes on an iPhone. Add more reviewed regional editions. |
 | Situational updates | Partly built | Cache NWS alerts for a selected state or territory, opt-in Home forecasts and Puget Sound closure reports. Verify foreground reconnection and offline relaunch on iPhone, then expand coverage. |
 | Ask | Partly built | Ask searches installed articles and PDF pages, opens cited quotes without a model, and can hand local destinations to walking or driving directions from Home. Verify generated citations and the household-notes opt-in on an eligible iPhone. Deferred Online Ask saves approved questions for the original provider when an allowed connection returns. Verify the live provider flow on iPhone. Offline Chat supports local photo prompts with a vision-capable Apple model on iOS 27. Verify a photo response in airplane mode. A downloadable model remains open. |
@@ -57,7 +57,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 ### Content packs
 
 - Complete English Wikipedia is available in text-only and illustrated editions. Both are individual downloads. Measure download recovery, index size, and cold offline search on a device with space for the actual archives.
-- **Beta.** Catalog pack rows can check Kiwix for newer editions with the same filename series and content variant. Review and verify each individual download. Refreshing bundled defaults and expanding language, size, and preset choices remain open.
+- **Beta.** Catalog pack rows can check Kiwix for newer editions with the same filename series and content variant. After review, a matching update targets the installed archive and preserves it through download, verification, and replacement indexing. Refreshing bundled defaults and expanding language, size, and preset choices remain open.
 - **Beta.** Add device acceptance checks for an interrupted edition update and for recovery after failed indexing. The old archive stays in the library until the new index is ready.
 - **Beta.** Bulk pack downloads use Wi-Fi. Individual transfers can allow cellular data after size confirmation. Temporary connection failures retry on the original network policy, using resume data when iOS supplies it. Verify pause and resume on a physical phone and evaluate discretionary transfers for Download All.
 - Editions with a verified fallback mirror retry on that mirror after eligible origin failures. Checksum failures get one clean retry. Verify publisher recovery and installed-edition preservation on a device.
@@ -105,7 +105,7 @@ The optional Ready.gov download uses the pinned October 2026 edition. Verify the
 ### Tests and build
 
 - The pack download fixture cuts a real HTTP transfer and checks that URLSession requests the remaining bytes and reconstructs the original file. The regional place index fixture runs as a separate script.
-- The UI tests need a fixture copied into the simulator by hand. Automate that, and run the unit and UI tests in CI.
+- Pull requests to main run app and reader unit suites, household persistence, and offline readiness on a hosted iPhone simulator. The Files import test still uses a manually staged fixture on a dedicated simulator. [CI rollout](https://github.com/scottleibrand/TinFoilKit-iOS/pull/45)
 
 ## 1. Offline library
 

@@ -6,7 +6,10 @@ struct KiwixDiscoveryView: View {
     @ObservedObject var downloads: PackDownloads
     let library: InstalledLibrary
     let onImport: () async -> Void
-    var editionSeries: KiwixCatalog.EditionSeries? = nil
+    var seriesPack: PublishedPack? = nil
+    private var editionSeries: KiwixCatalog.EditionSeries? {
+        seriesPack.flatMap { KiwixCatalog.EditionSeries(archiveURL: $0.source) }
+    }
     @State private var query = ""
     @State private var books: [KiwixCatalog.Book]?
     @State private var searchTask: Task<Void, Never>?
@@ -33,7 +36,7 @@ struct KiwixDiscoveryView: View {
                 if let error { Text(error).foregroundStyle(.secondary) }
             } footer: {
                 if let editionSeries {
-                    Text("Checks Kiwix for editions newer than the catalog’s \(editionSeries.baseline) edition. Reviewed publisher downloads install separately.")
+                    Text("Checks Kiwix for editions newer than the catalog’s \(editionSeries.baseline) edition. Review the publisher’s file before downloading.")
                 } else {
                     Text("Search sends the words you enter to the online Kiwix catalog. Use Library to search your installed books offline.")
                 }
@@ -46,7 +49,8 @@ struct KiwixDiscoveryView: View {
                     }
                     ForEach(books) { book in
                         NavigationLink {
-                            KiwixBookView(book: book, downloads: downloads, library: library, onImport: onImport)
+                            KiwixBookView(book: book, downloads: downloads, library: library, onImport: onImport,
+                                          seriesPack: seriesPack)
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(book.title).font(.headline)
@@ -103,6 +107,7 @@ private struct KiwixBookView: View {
     @ObservedObject var downloads: PackDownloads
     let library: InstalledLibrary
     let onImport: () async -> Void
+    let seriesPack: PublishedPack?
     @State private var metadata: KiwixMetalink?
     @State private var reviewTask: Task<Void, Never>?
     @State private var importTask: Task<Void, Never>?
@@ -126,7 +131,8 @@ private struct KiwixBookView: View {
                 Link("Open archive download at Kiwix", destination: book.archiveURL)
                     .disabled(importTask != nil)
                 if let metadata, let candidate = KiwixDownloadApproval.pack(for: book, metadata: metadata) {
-                    let pack = downloads.publisherEdition(for: candidate)
+                    let replacement = seriesPack.flatMap { downloads.publisherReplacement(for: candidate, in: $0) }
+                    let pack = replacement?.pack ?? downloads.publisherEdition(for: candidate, in: seriesPack)
                     LabeledContent("Archive file", value: metadata.filename)
                     LabeledContent("Publisher size", value: metadata.byteCount.formatted(.byteCount(style: .file)))
                     LabeledContent {
@@ -135,9 +141,15 @@ private struct KiwixBookView: View {
                         Text("Publisher SHA-256")
                     }
                     if message == nil {
-                        PackDownloadControls(downloads: downloads, pack: pack)
+                        if let replacement, let installed = replacement.archive.pack {
+                            Text("Updates \(installed.title) from \(installed.version) to \(pack.version). The installed edition stays searchable until the new index is ready.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        PackDownloadControls(downloads: downloads, pack: pack, replacementTarget: replacement?.archive)
                             .disabled(importTask != nil || choosing)
-                        if canImport(for: pack) {
+                        if replacement == nil, KiwixDownloadApproval.isValid(pack) || PackDownloads.catalog.contains(pack),
+                           canImport(for: pack) {
                             Button("Verify and import downloaded ZIM", systemImage: "folder") { choosing = true }
                                 .disabled(importTask != nil)
                         }
@@ -203,8 +215,9 @@ private struct KiwixBookView: View {
     private func importFile(_ result: Result<URL, Error>) {
         guard importTask == nil, let metadata,
               let candidate = KiwixDownloadApproval.pack(for: book, metadata: metadata) else { return }
-        let pack = downloads.publisherEdition(for: candidate)
-        guard canImport(for: pack) else { return }
+        let pack = downloads.publisherEdition(for: candidate, in: seriesPack)
+        guard seriesPack.flatMap({ downloads.publisherReplacement(for: candidate, in: $0) }) == nil,
+              KiwixDownloadApproval.isValid(pack) || PackDownloads.catalog.contains(pack), canImport(for: pack) else { return }
         let attempt = UUID()
         importAttempt = attempt
         progress = 0

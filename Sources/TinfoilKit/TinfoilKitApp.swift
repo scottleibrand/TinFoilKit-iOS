@@ -68,10 +68,7 @@ struct TinfoilKitApp: App {
                 }
             }
             .onChange(of: indexing.archives) { previous, current in
-                let installed = Set(current.map(\.id))
-                for archive in previous where !installed.contains(archive.id) {
-                    packs.archiveRemoved(archive)
-                }
+                packs.archivesChanged(from: previous, to: current, damaged: indexing.damagedArchiveIDs)
             }
             .onChange(of: household.snapshot.home, initial: true) {
                 nwsAlerts.setForecastHome(household.snapshot.home)
