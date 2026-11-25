@@ -24,4 +24,41 @@ final class HouseholdPrintingTests: XCTestCase {
         XCTAssertTrue(pdf.page(at: 0)?.string?.contains("North entrance") == true)
         XCTAssertTrue(pdf.page(at: pdf.pageCount - 1)?.string?.contains("Last line of notes") == true)
     }
+
+    func testResourceInventoryIsOmittedByDefault() throws {
+        let snapshot = HouseholdSnapshot(resources: [
+            HouseholdResource(name: "Porch water jug", category: .water, quantity: 12, quantityUnit: .gallons,
+                              dailyUse: 3, dailyUseUnit: .gallons)
+        ])
+        let data = try HouseholdPrinting.householdPDF(for: snapshot, regions: [])
+        let pdf = try XCTUnwrap(PDFDocument(data: data))
+        let text = try XCTUnwrap(pdf.string)
+        XCTAssertEqual(pdf.pageCount, 1)
+        XCTAssertFalse(text.contains("Resource inventory"))
+        XCTAssertFalse(text.contains("Porch water jug"))
+    }
+
+    func testOptInPrintsResourceEstimatesAndMissingData() throws {
+        let snapshot = HouseholdSnapshot(resources: [
+            HouseholdResource(name: "Porch water jug", category: .water, quantity: 12, quantityUnit: .gallons,
+                              dailyUse: 3, dailyUseUnit: .gallons),
+            HouseholdResource(name: "Supper bin", category: .food, quantity: 5, quantityUnit: .meals,
+                              dailyUse: 2, dailyUseUnit: .meals),
+            HouseholdResource(name: "Travel medication", category: .medication, quantity: nil, quantityUnit: .doses,
+                              dailyUse: nil, dailyUseUnit: .doses)
+        ])
+        let data = try HouseholdPrinting.householdPDF(for: snapshot, regions: [], includeResourceRunway: true)
+        let pdf = try XCTUnwrap(PDFDocument(data: data))
+        let text = try XCTUnwrap(pdf.string)
+        XCTAssertTrue(text.contains("Resource inventory"))
+        XCTAssertTrue(text.contains("Shortest estimate · Supper bin · \(HouseholdResource.formatDays(2.5))"))
+        XCTAssertTrue(text.contains("Porch water jug · Water"))
+        XCTAssertTrue(text.contains("\(12.formatted()) US gallons"))
+        XCTAssertTrue(text.contains("\(3.formatted()) US gallons per day"))
+        XCTAssertTrue(text.contains("Estimated \(HouseholdResource.formatDays(4)) remaining"))
+        XCTAssertTrue(text.contains("Travel medication"))
+        XCTAssertTrue(text.contains("Quantity not recorded"))
+        XCTAssertTrue(text.contains("Daily use not recorded"))
+        XCTAssertTrue(text.contains("Runway estimate unavailable"))
+    }
 }

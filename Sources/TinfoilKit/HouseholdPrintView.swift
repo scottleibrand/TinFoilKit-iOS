@@ -7,13 +7,18 @@ struct HouseholdPrintView: View {
     let snapshot: HouseholdSnapshot
     @State private var references: [HouseholdPrinting.AvailableReference]?
     @State private var referenceError: String?
+    @State private var includeResourceRunway = false
 
     var body: some View {
         List {
             Section("Your household") {
+                if snapshot.resources?.isEmpty == false {
+                    Toggle("Include supply runway", isOn: $includeResourceRunway)
+                }
                 NavigationLink {
-                    PrintablePDFView(title: "Household essentials", allowsSharing: true) {
-                        try await HouseholdPrinting.householdPDF(for: snapshot)
+                    PrintablePDFView(title: "Household essentials", allowsSharing: true) { [includeResourceRunway] in
+                        try await HouseholdPrinting.householdPDF(for: snapshot,
+                                                                 includeResourceRunway: includeResourceRunway)
                     }
                 } label: {
                     Label("Open household sheet", systemImage: "doc.text")

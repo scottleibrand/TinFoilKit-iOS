@@ -7,5 +7,6 @@ xcrun swiftc -module-cache-path "$output/module-cache" -o "$output/verify" \
     Tests/HouseholdSharingFixture/VerifyHouseholdSharing.swift \
     Sources/TinfoilKit/HouseholdSharing.swift \
     Sources/TinfoilKit/Household.swift \
+    Sources/TinfoilKit/HouseholdResource.swift \
     Sources/TinfoilKit/MapCoordinateText.swift
 "$output/verify"

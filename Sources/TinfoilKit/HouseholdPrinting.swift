@@ -138,14 +138,16 @@ enum HouseholdPrinting {
         }
     }
 
-    static func householdPDF(for snapshot: HouseholdSnapshot) async throws -> Data {
+    static func householdPDF(for snapshot: HouseholdSnapshot, includeResourceRunway: Bool = false) async throws -> Data {
         let regions = (try? await RegionalPlaceStorage().installedIndexes()) ?? []
-        let task = Task.detached(priority: .userInitiated) { try householdPDF(for: snapshot, regions: regions) }
+        let task = Task.detached(priority: .userInitiated) {
+            try householdPDF(for: snapshot, regions: regions, includeResourceRunway: includeResourceRunway)
+        }
         return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
 
     static func householdPDF(for snapshot: HouseholdSnapshot, regions: [RegionalPlaceStorage.Installed],
-                             date: Date = .now) throws -> Data {
+                             includeResourceRunway: Bool = false, date: Date = .now) throws -> Data {
         let body = NSMutableAttributedString(string: "")
         appendHeading("Home", to: body)
         if let home = snapshot.home {
@@ -185,7 +187,32 @@ enum HouseholdPrinting {
         } else {
             append(notes, to: body)
         }
+        if includeResourceRunway, let resources = snapshot.resources, !resources.isEmpty {
+            try appendResourceRunway(resources, to: body)
+        }
         return try render(body: body, date: date)
+    }
+
+    private static func appendResourceRunway(_ resources: [HouseholdResource],
+                                             to body: NSMutableAttributedString) throws {
+        appendHeading("Resource inventory", to: body)
+        append("Estimates assume daily use stays the same.", to: body, size: 9)
+        if let shortest = HouseholdResource.shortest(in: resources), let days = shortest.estimatedDays {
+            append("Shortest estimate · \(shortest.name) · \(HouseholdResource.formatDays(days))", to: body)
+        }
+        for resource in resources {
+            try Task.checkCancellation()
+            let quantity = resource.quantity.map { "\(resourceAmount($0)) \(resource.quantityUnit.title)" }
+            let dailyUse = resource.dailyUse.map { "\(resourceAmount($0)) \(resource.dailyUseUnit.title) per day" }
+            let runway = resource.estimatedDays.map { "Estimated \(HouseholdResource.formatDays($0)) remaining" }
+            append("\(resource.name) · \(resource.category.title)", to: body, font: "Helvetica-Bold")
+            append("Quantity \(quantity ?? "not recorded") · Daily use \(dailyUse ?? "not recorded")", to: body)
+            append(runway ?? "Runway estimate unavailable", to: body)
+        }
+    }
+
+    private static func resourceAmount(_ value: Double) -> String {
+        value.formatted(.number.precision(.significantDigits(1...8)))
     }
 
     private static func appendServices(near home: CLLocationCoordinate2D, regions: [RegionalPlaceStorage.Installed],

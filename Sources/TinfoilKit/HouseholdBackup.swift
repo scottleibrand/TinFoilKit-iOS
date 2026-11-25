@@ -83,7 +83,7 @@ enum HouseholdBackup {
         var errorDescription: String? {
             switch self {
             case .invalidFile: "Choose a Tinfoil Kit household backup."
-            case .invalidHousehold: "The household backup contains invalid or duplicate locations."
+            case .invalidHousehold: "The household backup contains invalid or duplicate locations or supplies."
             case .unsupportedVersion: "This Tinfoil Kit household backup uses an unsupported version."
             case .tooLarge: "The household file is too large."
             }

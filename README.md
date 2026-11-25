@@ -42,7 +42,9 @@ Use **Map → + → Download regional bundle** when you have the manifest's HTTP
 
 In Map, press and hold a location to copy its coordinates, set it as home, or save a named pin. Map search accepts saved place names and coordinates in decimal or degrees, minutes, and seconds. The Household tab keeps notes, home, and pins on the device.
 
-In **Household → Import and export**, save a household backup to Files or restore one on another iPhone. The same screen imports and exports the desktop kit’s `notes.txt` and `places.json` files individually. If the local household file is damaged, restoring a backup or starting a new household keeps a separate copy of the damaged file.
+In **Household → Supplies and runway**, enter amounts on hand and your household’s daily use for water, food, fuel, electricity, and medication. The app estimates how many days each supply will last and shows the shortest known estimate. Leave unknown quantities or rates blank and update amounts as supplies change. Turn on **Include supply runway** in **Print the essentials** when you want the inventory on the household sheet.
+
+In **Household → Import and export**, save a household backup to Files or restore one on another iPhone. The backup includes your supplies. The same screen imports and exports the desktop kit’s `notes.txt` and `places.json` files individually. If the local household file is damaged, restoring a backup or starting a new household keeps a separate copy of the damaged file.
 
 In **Household → Share on local network**, select the household details to share and start a browser session on a trusted Wi-Fi or Ethernet network with IPv4. The link uses unencrypted HTTP. Anyone on that network who has the link or can watch its traffic can read the selection. The session ends after ten minutes, when you leave the screen, or when you stop it.
 

@@ -23,12 +23,18 @@ struct HouseholdPlace: Codable, Equatable, Identifiable, Sendable {
 }
 
 struct HouseholdSnapshot: Codable, Equatable, Sendable {
+    static let maxResources = 100
+
     var notes = ""
     var home: HouseholdPlace?
     var pins: [HouseholdPlace] = []
+    var resources: [HouseholdResource]?
 
     var isValid: Bool {
-        home?.isValid != false && pins.allSatisfy(\.isValid) && Set(pins.map(\.id)).count == pins.count
+        let resources = resources ?? []
+        return home?.isValid != false && pins.allSatisfy(\.isValid) && Set(pins.map(\.id)).count == pins.count &&
+            resources.count <= Self.maxResources && resources.allSatisfy(\.isValid) &&
+            Set(resources.map(\.id)).count == resources.count
     }
 }
 
@@ -82,6 +88,28 @@ final class HouseholdStore: ObservableObject {
         try save(next)
     }
 
+    func saveResource(_ resource: HouseholdResource) throws {
+        guard resource.isValid else { throw ResourceError.invalid }
+        var next = snapshot
+        var resources = next.resources ?? []
+        if let index = resources.firstIndex(where: { $0.id == resource.id }) {
+            resources[index] = resource
+        } else {
+            guard resources.count < HouseholdSnapshot.maxResources else { throw ResourceError.limitReached }
+            resources.append(resource)
+        }
+        next.resources = resources
+        try save(next)
+    }
+
+    func removeResource(_ id: UUID) throws {
+        var next = snapshot
+        guard var resources = next.resources else { return }
+        resources.removeAll { $0.id == id }
+        next.resources = resources.isEmpty ? nil : resources
+        try save(next)
+    }
+
     func restore(_ next: HouseholdSnapshot) throws {
         guard next.isValid else { throw PlaceError.invalidHousehold }
         guard loadError != nil || snapshot != next else { return }
@@ -116,7 +144,18 @@ final class HouseholdStore: ObservableObject {
         var errorDescription: String? {
             switch self {
             case .invalid: "Enter a name and valid coordinates for this place."
-            case .invalidHousehold: "The household backup contains invalid or duplicate locations."
+            case .invalidHousehold: "The household backup contains invalid or duplicate locations or supplies."
+            }
+        }
+    }
+
+    private enum ResourceError: LocalizedError {
+        case invalid, limitReached
+
+        var errorDescription: String? {
+            switch self {
+            case .invalid: "Check the supply name, amounts, and units."
+            case .limitReached: "The household already has \(HouseholdSnapshot.maxResources) supplies."
             }
         }
     }

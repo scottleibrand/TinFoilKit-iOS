@@ -60,6 +60,12 @@ struct HouseholdView: View {
                 } header: { Text("Pins") }
                 Section {
                     NavigationLink {
+                        HouseholdResourcesView(household: household)
+                    } label: {
+                        Label("Supplies and runway", systemImage: "shippingbox")
+                    }
+                    .disabled(household.loadError != nil)
+                    NavigationLink {
                         HouseholdPrintView(snapshot: printableSnapshot)
                     } label: {
                         Label("Print the essentials", systemImage: "printer")
