@@ -69,9 +69,10 @@ final class RegionalPlaceStorageTests: XCTestCase {
         let west = root.appendingPathComponent("West.sqlite")
         let east = root.appendingPathComponent("East.sqlite")
         let duplicate = root.appendingPathComponent("Duplicate.sqlite")
-        try makeIndex(at: west, region: "West", longitude: 10)
-        try makeIndex(at: east, region: "East", longitude: 10.05)
-        try makeIndex(at: duplicate, region: "Overlap", longitude: 10, name: "West Hospital")
+        try makeIndex(at: west, region: "West", longitude: 10, address: "325 9th Avenue, West")
+        try makeIndex(at: east, region: "East", longitude: 10.05, address: "325 9th Avenue, East")
+        try makeIndex(at: duplicate, region: "Overlap", longitude: 10, name: "West Hospital",
+                      address: "325 9th Avenue, West")
         let storage = RegionalPlaceStorage(directory: folder)
         for source in [west, east, duplicate] { _ = try await storage.install(source) }
         let regions = try await storage.installedIndexes()
@@ -98,6 +99,46 @@ final class RegionalPlaceStorageTests: XCTestCase {
         let emptyStorage = RegionalPlaceStorage(directory: root.appendingPathComponent("Empty"))
         let empty = try await RegionalPlaceSearch.nearestInstalled(.hospital, from: home, storage: emptyStorage)
         guard case .noPlaceData = empty else { return XCTFail("Expected no installed place data") }
+
+        let exact = try XCTUnwrap(HomeRouteQuestion.parse("Walk from Home to 325 9th Avenue, West"))
+        let exactMatches = try await RegionalPlaceSearch.destinationsInstalled(matching: exact, from: home, storage: storage)
+        XCTAssertEqual(exactMatches?.map(\.place.name), ["West Hospital"])
+        let ambiguous = try XCTUnwrap(HomeRouteQuestion.parse("Drive from Home to 325 9th Avenue"))
+        let ambiguousMatches = try await RegionalPlaceSearch.destinationsInstalled(matching: ambiguous, from: home,
+                                                                                   storage: storage)
+        XCTAssertEqual(Set(ambiguousMatches?.map(\.place.name) ?? []), ["East Hospital", "West Hospital"])
+        let noIndexes = try await RegionalPlaceSearch.destinationsInstalled(matching: exact, from: home,
+                                                                            storage: emptyStorage)
+        XCTAssertNil(noIndexes)
+    }
+
+    func testNamedDestinationRequiresExactNameAndPreservesDistinctLocations() async throws {
+        let root = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storage = RegionalPlaceStorage(directory: root.appendingPathComponent("Places"))
+        let home = HouseholdPlace(name: "Home", latitude: 45, longitude: 10)
+        let fixtures = [
+            ("West", 10.0, "Harbor Medical Center"),
+            ("East", 10.05, "Harbor Medical Center"),
+            ("Overlap", 10.0, "Harbor Medical Center"),
+            ("Annex", 10.1, "Harbor Medical Center Annex")
+        ]
+        for (region, longitude, name) in fixtures {
+            let source = root.appendingPathComponent("\(region).sqlite")
+            try makeIndex(at: source, region: region, longitude: longitude, name: name)
+            _ = try await storage.install(source)
+        }
+
+        let exact = try XCTUnwrap(HomeRouteQuestion.parse("Walk from Home to Hárbor Medical Center?"))
+        let matches = try await RegionalPlaceSearch.destinationsInstalled(matching: exact, from: home, storage: storage)
+        XCTAssertEqual(matches?.count, 2)
+        XCTAssertEqual(Set(matches?.map(\.place.coordinate.longitude) ?? []), [10.0, 10.05])
+
+        let partial = try XCTUnwrap(HomeRouteQuestion.parse("Walk from Home to Harbor Medical"))
+        let partialMatches = try await RegionalPlaceSearch.destinationsInstalled(matching: partial, from: home,
+                                                                                 storage: storage)
+        XCTAssertEqual(partialMatches?.count, 0)
     }
 
     func testRegionalBundlePublishesAndRemovesPlaceDataAndRoutesTogether() async throws {
@@ -369,7 +410,8 @@ final class RegionalPlaceStorageTests: XCTestCase {
         XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK)
     }
 
-    private func makeIndex(at url: URL, region: String, longitude: Double = 10, name: String? = nil) throws {
+    private func makeIndex(at url: URL, region: String, longitude: Double = 10, name: String? = nil,
+                           address: String = "") throws {
         let title = name ?? "\(region) Hospital"
         var db: OpaquePointer?
         defer { sqlite3_close(db) }
@@ -385,8 +427,8 @@ final class RegionalPlaceStorageTests: XCTestCase {
                 address TEXT, latitude REAL, longitude REAL);
             CREATE VIRTUAL TABLE place_search USING fts5(title, category_words, address);
             CREATE VIRTUAL TABLE place_bounds USING rtree(id, min_latitude, max_latitude, min_longitude, max_longitude);
-            INSERT INTO places VALUES (1, '\(title)', 'hospital', 'Hospital', '', 45, \(longitude));
-            INSERT INTO place_search VALUES ('\(title)', 'Hospital', '');
+            INSERT INTO places VALUES (1, '\(title)', 'hospital', 'Hospital', '\(address)', 45, \(longitude));
+            INSERT INTO place_search VALUES ('\(title)', 'Hospital', '\(address)');
             INSERT INTO place_bounds VALUES (1, 45, 45, \(longitude), \(longitude));
             """
         XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK)
