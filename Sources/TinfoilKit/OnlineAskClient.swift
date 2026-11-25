@@ -58,7 +58,7 @@ enum OnlineAskClient {
             endpoint = URL(string: "https://api.openai.com/v1/responses")!
             headers = ["Authorization": "Bearer \(key)"]
             body = [
-                "model": "gpt-5-mini", "instructions": instructions, "input": question,
+                "model": "gpt-6.1-terra", "instructions": instructions, "input": question,
                 "store": false, "tools": [["type": "web_search"]],
                 "tool_choice": ["type": "web_search"],
                 "include": ["web_search_call.action.sources"]
