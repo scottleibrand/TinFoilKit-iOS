@@ -59,6 +59,7 @@ Valhalla Mobile packages Valhalla and its dependencies. [Scripts/routing/README.
   - iFixit: CC BY-NC-SA 3.0, which prohibits commercial use.
   - ZIM Git collections of water, field medicine, post-disaster resources, food preparation and knots: the included documents retain their authors' individual terms. These are direct user downloads from Kiwix's open-access catalog. [Kiwix catalog FAQ](https://get.kiwix.org/en/solutions/catalog/)
   - Military medicine manuals: Kiwix archives the Federation of American Scientists' collection of published reference manuals. Individual documents retain their original terms. [Original collection](https://irp.fas.org/doddir/milmed/index.html) · [Kiwix download metadata](https://download.kiwix.org/zim/zimit/irp.fas.org_en_military-medicine_2026-10.zim.meta4)
+  - Ready.gov Preparedness Guides: FEMA Ready.gov material archived by openZIM and distributed by Kiwix as an individual download. Content retains its source terms, including third-party documents published with scoped permissions. [Edition metadata](https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim.meta4) · [Example publisher terms](https://www.ready.gov/sites/default/files/2020-03/ready_emergency-financial-first-aid-toolkit.pdf)
   - Archive sharing is disabled for these collections.
 - **Printable references:** Household prints page ranges from installed packs. They include *Where There Is No Doctor* (Hesperian Health Guides) and Washington State Department of Health guidance, under their publishers' terms.
 

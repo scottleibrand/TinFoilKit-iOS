@@ -77,7 +77,7 @@ The post-disaster copies of the water guide, *Where There Is No Doctor* and FM 4
 
 For the Apple check, use a dedicated simulator or test phone. Install Water Treatment and Field Medicine from Content Packs with publisher checksum verification. In a build that includes the desktop starter packs, check the fallbacks with an isolated library containing only Post-Disaster, then only Military Medicine. After an airplane-mode restart, open each expected preview and compare its first and last pages and page count to the table. Check the system print preview for the excerpt and household sheet.
 
-Ready.gov still needs offline reader verification before catalog inclusion. Its printable PDF can be tested separately with a hash-checked exact-edition archive in a test harness. A Files import has no verified catalog metadata, so it does not activate a printable reference in the app.
+The optional Ready.gov download uses the pinned October 2026 edition. Verify the home page, Power Outages, Earthquakes, and Be Informed in WebKit in Airplane Mode. Follow a link with a pagination query, then test relative links after a cross-directory redirect. Confirm the two-page Power outages preview under Print the Essentials. The installed archive must carry the catalog edition metadata for this preview. [Ready.gov publisher manifest](https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim.meta4)
 
 ### Tests and build
 

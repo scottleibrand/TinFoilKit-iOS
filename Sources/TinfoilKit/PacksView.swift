@@ -76,6 +76,9 @@ struct PacksView: View {
             }
             Text("\(pack.version) · \(pack.sizeEstimate.formatted(.byteCount(style: .file)))")
                 .font(.footnote)
+            if entry.individualDownloadOnly == true {
+                Text("Individual download").font(.footnote).foregroundStyle(.secondary)
+            }
             if !entry.isDefault {
                 Text("Earlier edition").font(.footnote).foregroundStyle(.secondary)
             }

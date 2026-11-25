@@ -13,6 +13,9 @@ final class ArchiveWebAddressTests: XCTestCase {
         let anchor = try XCTUnwrap(URL(string: "#main-content", relativeTo: home)?.absoluteURL)
         XCTAssertEqual(ArchiveWebAddress.candidates(in: anchor), ["www.ready.gov/"])
         XCTAssertEqual(anchor.fragment, "main-content")
+        let pdfPath = "sites/default/files/2024-08/ready.gov_power-outage_info-sheet.pdf"
+        let localPDF = try XCTUnwrap(URL(string: pdfPath, relativeTo: home))
+        XCTAssertEqual(ArchiveWebAddress.candidates(in: localPDF), ["www.ready.gov/" + pdfPath])
     }
 
     func testPrefersExactQueryAndKeepsBookmarkKey() throws {

@@ -244,6 +244,24 @@
   },
   {
     "pack": {
+      "id": "ready-gov-en-all",
+      "title": "Ready.gov Preparedness Guides",
+      "version": "2026-10",
+      "source": "https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim",
+      "sha256": "c88ce03db2a6dd855c1075d87abb6dceac678718e0dd3fa7912009469b9ca225",
+      "sizeEstimate": 2063895408,
+      "attribution": "FEMA Ready.gov · Individual content terms · Archived by openZIM · Distributed by Kiwix"
+    },
+    "section": "extended",
+    "language": "en",
+    "isDefault": true,
+    "individualDownloadOnly": true,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false,
+    "detail": "Read preparedness guidance for power outages, earthquakes, and other emergencies."
+  },
+  {
+    "pack": {
       "id": "ifixit-en-all",
       "title": "iFixit Repair Guides",
       "version": "2025-12",
