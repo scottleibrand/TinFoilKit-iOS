@@ -115,6 +115,29 @@ public final class ZIMArchive {
         return data
     }
 
+    /// Writes a supported large compressed PDF into a caller-owned, empty temporary file.
+    public func extractCompressedPDF(at path: String, to descriptor: Int32) throws -> Bool {
+        guard !path.utf8.contains(0) else {
+            throw ReadError(errorDescription: "An archive path cannot contain a null byte.")
+        }
+        try Task.checkCancellation()
+        var error: UnsafeMutablePointer<CChar>?
+        let status = tfk_archive_extract_compressed_pdf(archive, path, descriptor, { _ in
+            withUnsafeCurrentTask { $0?.isCancelled ?? false }
+        }, nil, &error)
+        if let error {
+            let failure = Self.readError(error, fallback: "The compressed document could not be extracted.")
+            try Task.checkCancellation()
+            throw failure
+        }
+        try Task.checkCancellation()
+        switch status {
+        case 1: return true
+        case 0: return false
+        default: throw ReadError(errorDescription: "The compressed document could not be extracted.")
+        }
+    }
+
     private func withDirectResource<Value>(at path: String, _ operation: (OpaquePointer) throws -> Value) throws -> Value? {
         guard !path.utf8.contains(0) else {
             throw ReadError(errorDescription: "An archive path cannot contain a null byte.")

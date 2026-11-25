@@ -26,7 +26,9 @@ zimru links these Rust crates, at the versions in [ReaderBridge/Cargo.lock](Read
 | lzma-rust2 | Apache-2.0 |
 | rustix | Apache-2.0 with LLVM exception, Apache-2.0, or MIT |
 
-proc-macro2, quote, syn, thiserror-impl and unicode-ident (MIT or Apache-2.0, plus Unicode-3.0 for unicode-ident) run only while compiling.
+The large PDF reader also links the [zstd Rust binding](https://github.com/gyscos/zstd-rs), its zstd-safe wrapper, and zstd-sys with bundled libzstd. The binding and wrapper are BSD-3-Clause. zstd-sys supplies BSD-3-Clause and BSD-2-Clause notices, and libzstd uses its BSD license for this build. The preparation script collects the notices from the pinned packages. [Zstandard license](https://github.com/facebook/zstd/blob/dev/LICENSE)
+
+cc, find-msvc-tools, jobserver, pkg-config, proc-macro2, quote, shlex, syn, thiserror-impl and unicode-ident (MIT or Apache-2.0, plus Unicode-3.0 for unicode-ident) run only while compiling.
 
 Valhalla Mobile packages Valhalla and its dependencies. [Scripts/routing/README.md](Scripts/routing/README.md) records the exact revisions.
 
