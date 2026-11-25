@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import PDFKit
 
@@ -19,6 +20,35 @@ public final class FileBackedArchivePDF: PDFDocument {
 }
 
 extension ZIMArchive {
+    /// Opens a PDF and optionally validates the exact source bytes before handing them to PDFKit.
+    public func pdfDocument(at path: String, expectedSHA256: String? = nil) throws -> PDFDocument? {
+        if let temporary = try prepareLargePDF(at: path) {
+            if let expectedSHA256 {
+                let input = try FileHandle(forReadingFrom: temporary.url)
+                defer { try? input.close() }
+                var digest = SHA256()
+                while let bytes = try input.read(upToCount: 1_048_576), !bytes.isEmpty {
+                    try Task.checkCancellation()
+                    digest.update(data: bytes)
+                }
+                guard Self.hexDigest(digest.finalize()) == expectedSHA256 else { return nil }
+            }
+            try Task.checkCancellation()
+            return FileBackedArchivePDF(temporary)
+        }
+        let resource = try resource(at: path)
+        try Task.checkCancellation()
+        guard resource.mimeType == "application/pdf",
+              expectedSHA256.map({ $0 == Self.hexDigest(SHA256.hash(data: resource.data)) }) ?? true else {
+            return nil
+        }
+        return PDFDocument(data: resource.data)
+    }
+
+    private static func hexDigest(_ digest: SHA256.Digest) -> String {
+        digest.map { String(format: "%02x", $0) }.joined()
+    }
+
     /// Opens supported large PDF entries from a file instead of a single buffer.
     public func prepareLargePDF(at path: String) throws -> TemporaryArchivePDF? {
         let info = try directResourceInfo(at: path)

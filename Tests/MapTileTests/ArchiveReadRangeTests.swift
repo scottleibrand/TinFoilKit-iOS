@@ -1,3 +1,4 @@
+import CryptoKit
 import PDFKit
 import SQLite3
 import XCTest
@@ -38,6 +39,11 @@ final class ArchiveReadRangeTests: XCTestCase {
         XCTAssertEqual(document?.pageCount, 1)
         XCTAssertTrue(document?.page(at: 0)?.string?.contains("Large offline PDF fixture") == true)
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        if filename == "large-offline-pdf-zstd.zim" {
+            let digest = SHA256.hash(data: try Data(contentsOf: url, options: .alwaysMapped))
+                .map { String(format: "%02x", $0) }.joined()
+            try verifyReadinessAndPrinting(archive: archive, fixture: fixture, sha256: digest)
+        }
         document = nil
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
 
@@ -62,6 +68,22 @@ final class ArchiveReadRangeTests: XCTestCase {
         XCTAssertEqual(ArchivePDFReference(articlePath: match.path)?.pageIndex, 0)
         XCTAssertTrue(match.excerpt.contains("PDF fixture"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: previous.path))
+    }
+
+    private func verifyReadinessAndPrinting(archive: ZIMArchive, fixture: URL, sha256: String) throws {
+        XCTAssertTrue(OfflineReadinessLibraryChecks.isReadablePDF(in: archive, path: "large.pdf", pageIndex: 0))
+        let source = HouseholdPrinting.Reference.Source(archive: fixture.lastPathComponent, path: "large.pdf",
+                                                        sha256: sha256)
+        let reference = HouseholdPrinting.Reference(id: "large-pdf", title: "Fixture", document: "Fixture",
+                                                   pages: 1...1, sources: [source])
+        let available = HouseholdPrinting.AvailableReference(reference: reference, file: fixture, source: source,
+                                                            attribution: "Synthetic test fixture")
+        let excerpt = try XCTUnwrap(PDFDocument(data: available.printablePDF()))
+        XCTAssertEqual(excerpt.pageCount, 1)
+        XCTAssertTrue(excerpt.page(at: 0)?.string?.contains("Large offline PDF fixture") == true)
+        let wrong = HouseholdPrinting.Reference.Source(archive: source.archive, path: source.path,
+                                                       sha256: String(repeating: "0", count: 64))
+        XCTAssertThrowsError(try HouseholdPrinting.AvailableReference.openPDF(file: fixture, source: wrong, pages: 1...1))
     }
 
     func testSelectsClosedOpenAndSuffixRanges() {

@@ -194,12 +194,7 @@ public struct ArticleIndex: Sendable {
         guard let entry = try archive.pdfEntry(at: index) else { return }
         let candidate: PDFDocument?
         do {
-            if let temporary = try archive.prepareLargePDF(at: entry.path) {
-                candidate = FileBackedArchivePDF(temporary)
-            } else {
-                let resource = try archive.resource(at: entry.path)
-                candidate = PDFDocument(data: resource.data)
-            }
+            candidate = try archive.pdfDocument(at: entry.path)
         } catch is CancellationError {
             throw CancellationError()
         } catch let error as CocoaError where error.code == .fileWriteOutOfSpace {

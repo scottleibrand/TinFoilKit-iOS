@@ -1,7 +1,6 @@
 import CoreGraphics
 import CoreLocation
 import CoreText
-import CryptoKit
 import Foundation
 import PDFKit
 import ZIMArchive
@@ -52,10 +51,8 @@ enum HouseholdPrinting {
 
         static func openPDF(file: URL, source: Reference.Source, pages: ClosedRange<Int>) throws -> PDFDocument {
             let archive = try ZIMArchive(fileURL: file)
-            let resource = try archive.resource(at: source.path)
-            guard resource.mimeType == "application/pdf",
-                  SHA256.hash(data: resource.data).map({ String(format: "%02x", $0) }).joined() == source.sha256,
-                  let pdf = PDFDocument(data: resource.data), !pdf.isLocked, pdf.allowsPrinting,
+            guard let pdf = try archive.pdfDocument(at: source.path, expectedSHA256: source.sha256),
+                  !pdf.isLocked, pdf.allowsPrinting,
                   pages.lowerBound > 0, pdf.pageCount >= pages.upperBound else {
                 throw PrintError.unreadableReference
             }
