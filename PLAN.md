@@ -2,6 +2,28 @@
 
 Build a standalone iPhone app that opens its installed library and maps after a cold launch with no network or desktop host. Use a SwiftUI shell and keep downloadable assets separate from household data. Exclude downloaded archives, indexes, map data and the tile cache from device backup. Include household notes, home and pins in backup.
 
+## Intermittent connectivity
+
+Preload maps, routing graphs, a compact emergency library, and regional directories. Use short connections for official alerts and local conditions. Fetch specialized documents on demand, including public medication labels selected on the device. Leave additional large general-reference packs available as optional downloads.
+
+| Priority | Work | Initial acceptance |
+| --- | --- | --- |
+| P0 | NWS active alerts first, then qualifying official all-hazards alerts | Conditional fetch after a connection returns. Keep publisher, coverage, issued and expiration times, and last successful check visible offline. A complete authoritative snapshot can remove corrected or cancelled alerts. FEMA IPAWS live access needs an agreement. The delayed archive is historical. |
+| P1 | Washington closures and pass, bridge, and ferry restrictions. Add locally verified shelter, utility, and drinking-water updates as feeds become available. | Show dated restrictions alongside offline routes. Reroute only for current, directionally matched closures. Distinguish potential shelter facilities from confirmed open shelters. |
+| P2 | NWS forecasts and observations, NOAA river forecasts, and USGS earthquake feeds | Cache small geographically selected records. Refresh forecasts about every three hours and river forecasts hourly when connected. Show last successful check and source timestamps offline. |
+| P3 | NIFC fire locations and perimeters, plus regional hazard layers | Clip and simplify foreground geometry, preserve publisher time and attribution, and measure transfer sizes. Cache Washington DNR hazards in regional packs and refresh active fire data hourly when connected. |
+| P4 | Washington DOH and CMS healthcare, utilities, AFDC charging and fueling, NOAA Weather Radio, FoodKeeper, and selected emergency references | Verify edition, coverage and redistribution rights. Preprocess static records for regional offline search. Keep household choices local when fetching an individual public document. |
+
+Schedule independent transfers, with alerts taking priority over routine refreshes and requested material ahead of lower-priority feeds. Use conditional HTTP validators, payload limits, and retries that respect network policy. Ordinary IP access over Starlink can use the same client. Treat phone-native satellite access and background wakeups as separate device checks.
+
+Start with direct publisher feeds. Before introducing a scheduled regional snapshot, measure transfer sizes and freshness on a short connection and verify redistribution terms and any credential requirements. A snapshot should retain per-source timestamps, coverage, stable identities, provenance, and corrections. Only relay public updates whose authenticity and redistribution rights can be verified. Never broadcast household medication choices, notes, or precise locations.
+
+- A Washington NWS active-alert sample returned 31 alerts in 12,744 compressed bytes. Its 163,319-byte decoded payload contained area descriptions and zone references, with no geometries. Keep these alerts browsable by area. The Updates tab checks a user-selected state or territory in the foreground and retains the last good list. Verify reconnection, offline relaunch and metered policy on iPhone. [NWS API](https://www.weather.gov/documentation/services-web-api) · [NWS alerts guidance](https://www.weather.gov/documentation/services-web-alerts)
+- Updates can show forecasts for saved Home after explicit opt-in. The app rounds the coordinates to two decimal places before resolving the nearest NWS forecast grid. Day/night and hourly records refresh independently, with a three-hour target and conditional revalidation using the saved grid endpoint. Verify offline reopening, automatic and manual refresh, and expired-period display on iPhone. [NWS forecast API](https://www.weather.gov/documentation/services-web-api)
+- WSDOT has a public Road Closures GeoJSON layer for low-volume queries. Pilot dated closures as route advisories before matching affected road segments and travel directions. Confirm redistribution rights before adding these to a republished snapshot or peer transfer. [WSDOT closure layer](https://data.wsdot.wa.gov/arcgis/rest/services/TravelInformation/TravelInfoRoadAlerts/FeatureServer/2) · [Dataset terms](https://data.wsdot.wa.gov/arcgis/rest/services/TravelInformation/TravelInfoRoadAlerts/FeatureServer/info/iteminfo)
+- Updates shows the last successful check and coverage for each source. Its saved report list uses publisher timestamps and puts undated reports last. Explicit NWS updates and cancellations link to their source records. An alert that drops out of the active feed has no cancellation record. A check runs alerts first, then enabled Washington closures and Home forecasts. Verify the combined view with Wi-Fi disabled, then reconnect and check each source’s saved timestamp.
+- The NOAA river API returned seven gauges within the Seattle bundle bounds. Keep observed and forecast levels separate, preserve the contributing source for each gauge, and use NWS alerts for official flood warnings. [NOAA NWPS guide](https://www.weather.gov/media/owp/operations/nwps_user_guide.pdf)
+
 ## Status
 
 Status as of 2026-11-24. "Built" means the feature exists in the app. It is complete only after its acceptance checks pass on a simulator and on an iPhone.
@@ -11,6 +33,7 @@ Status as of 2026-11-24. "Built" means the feature exists in the app. It is comp
 | Offline library | Built | Run the milestone 1 acceptance checks on a device with a publisher archive. Measure PDF extraction time and search-index storage on the larger packs. |
 | Content packs | Partly built | The bundled catalog has English and Spanish choices and dated editions. Wi-Fi downloads, disk space checks, checksum verification, repair and replacement after indexing are implemented. Expand coverage, add catalog refresh and exercise real interrupted transfers. |
 | Maps | Partly built | Imported basemaps, place indexes and Valhalla routing packs work offline. Resumable in-app downloads accept trusted manifests, and Map plans routes from separate endpoints. Publish a named regional edition and verify full navigation on an iPhone. |
+| Situational updates | Partly built | Cache NWS alerts for a selected state or territory, opt-in Home forecasts and Puget Sound closure reports. Verify foreground reconnection and offline relaunch on iPhone, then expand coverage. |
 | Ask | Partly built | Ask searches installed articles and PDF pages, opens cited quotes without a model, and can hand local destinations to walking or driving directions from Home. Verify generated citations and the household-notes opt-in on an eligible iPhone. A downloadable model remains open. |
 | Household tools | Built | Run the airplane-mode restart and printing checks on a device. |
 | Household sharing | Partly built | A phone can share a selected household snapshot, verified templates, and optional directions with a guest browser. Guests can search, export the shared locations, and submit notes or pins for host review. Guests can ask for cited quotes from the selected verified public templates. Questions stay in the guest browser. Verify the workflow on a second device and extend shared queries to eligible installed references. Nearby can exchange two public templates and the verified MIT-licensed Offline Starter library pack. Extend exchange to more cleared editions and eligible saved web sources. |
@@ -48,6 +71,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 - Region coverage is a bounding box. Show coverage as the region's actual outline where it isn't rectangular.
 - Regional place indexes are excluded from device backup.
 - Installed routing packs support walking and driving directions with individual steps. Verify each mode on a physical iPhone in airplane mode.
+- Map can cache WSDOT’s reported Puget Sound closures after opt-in and flag a closure near an offline route. Verify overlay restoration after a style reload, bounded reconnect updates, source freshness, and offline reopening on iPhone. A proximity match provides an advisory. Matching closures to graph edges and travel directions is a separate milestone. [WSDOT Road Closures](https://data.wsdot.wa.gov/arcgis/rest/services/TravelInformation/TravelInfoRoadAlerts/FeatureServer/2)
 
 ### Ask
 

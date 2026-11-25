@@ -52,6 +52,7 @@ Valhalla Mobile packages Valhalla and its dependencies. [Scripts/routing/README.
 
 ## Downloaded by the app
 
+- **Weather alerts and forecasts** come directly from NOAA’s National Weather Service. Updates retains publisher timestamps and forecast validity periods alongside the app’s last check. NWS content is generally public domain unless specifically marked otherwise. [NWS API](https://www.weather.gov/documentation/services-web-api) · [NWS data terms](https://www.weather.gov/disclaimer)
 - **Map tiles:** the app's tile cache reads the same Protomaps v4 basemap, with the same OpenStreetMap attribution and license.
 - **Content packs:** downloaded from Kiwix and its official mirrors when a user chooses them. Content Packs shows each archive’s attribution and links to license terms where available. In summary:
   - Wikipedia packs and Appropedia: CC BY-SA. Images carry their own licenses.
@@ -61,6 +62,7 @@ Valhalla Mobile packages Valhalla and its dependencies. [Scripts/routing/README.
   - Military medicine manuals: Kiwix archives the Federation of American Scientists' collection of published reference manuals. Individual documents retain their original terms. [Original collection](https://irp.fas.org/doddir/milmed/index.html) · [Kiwix download metadata](https://download.kiwix.org/zim/zimit/irp.fas.org_en_military-medicine_2026-10.zim.meta4)
   - Ready.gov Preparedness Guides: FEMA Ready.gov material archived by openZIM and distributed by Kiwix as an individual download. Content retains its source terms, including third-party documents published with scoped permissions. [Edition metadata](https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim.meta4) · [Example publisher terms](https://www.ready.gov/sites/default/files/2020-03/ready_emergency-financial-first-aid-toolkit.pdf)
   - Archive sharing is disabled for these collections.
+- **Road closure advisories** use the Washington State Department of Transportation’s public Road Closures layer for low-volume, direct requests and local display. The app keeps the last successful snapshot on the device. Confirm redistribution terms before republishing or relaying this feed. [WSDOT closure layer](https://data.wsdot.wa.gov/arcgis/rest/services/TravelInformation/TravelInfoRoadAlerts/FeatureServer/2) · [Dataset terms](https://data.wsdot.wa.gov/arcgis/rest/services/TravelInformation/TravelInfoRoadAlerts/FeatureServer/info/iteminfo)
 - **Printable references:** Household prints page ranges from installed packs. They include *Where There Is No Doctor* (Hesperian Health Guides) and Washington State Department of Health guidance, under their publishers' terms.
 
 ### Publisher book discovery
