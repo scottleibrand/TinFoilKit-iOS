@@ -11,6 +11,7 @@ struct TinfoilKitApp: App {
     @StateObject private var indexing = LibraryIndexing(library: .standard)
     @StateObject private var household = HouseholdStore()
     @StateObject private var nearby = NearbyLifecycle()
+    @StateObject private var deferredAsk = DeferredAskController()
     @StateObject private var readingShelf = ReadingShelf()
     @AppStorage("hasSeenOfflineStarterGuide") private var hasSeenOfflineStarterGuide = false
     @State private var showingOfflineStarterGuide = false
@@ -42,6 +43,7 @@ struct TinfoilKitApp: App {
             }
             .task { await packs.restore() }
             .task(id: packs.installedRevision) { await indexing.refresh() }
+            .onChange(of: scenePhase, initial: true) { deferredAsk.setForeground(scenePhase == .active) }
             .task {
                 if Bundle.main.object(forInfoDictionaryKey: "TFKLightweightProfile") as? Bool == true,
                    !hasSeenOfflineStarterGuide {
@@ -71,6 +73,7 @@ struct TinfoilKitApp: App {
             .environmentObject(nearby.discovery)
             .environmentObject(nearby.notifications)
             .environmentObject(readingShelf)
+            .environmentObject(deferredAsk)
         }
     }
 }

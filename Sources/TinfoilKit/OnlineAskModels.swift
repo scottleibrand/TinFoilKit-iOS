@@ -123,9 +123,24 @@ actor OnlineAskCache {
     func save(_ answer: OnlineAskSavedAnswer) throws {
         try prepareDirectory()
         try JSONEncoder().encode(answer).write(
-            to: directory.appendingPathComponent(answer.id.uuidString).appendingPathExtension("json"),
+            to: answerFile(answer.id),
             options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
         )
+    }
+
+    func answer(_ id: UUID) throws -> OnlineAskSavedAnswer? {
+        let file = answerFile(id)
+        guard FileManager.default.fileExists(atPath: file.path) else { return nil }
+        return try JSONDecoder().decode(OnlineAskSavedAnswer.self, from: Data(contentsOf: file))
+    }
+
+    func removeAnswer(_ id: UUID) throws {
+        let file = answerFile(id)
+        if FileManager.default.fileExists(atPath: file.path) { try FileManager.default.removeItem(at: file) }
+    }
+
+    private func answerFile(_ id: UUID) -> URL {
+        directory.appendingPathComponent(id.uuidString).appendingPathExtension("json")
     }
 
     private func prepareDirectory() throws {

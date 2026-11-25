@@ -7,7 +7,10 @@ enum OnlineAskClient {
         say what the evidence establishes and what additional detail is needed. Do not invent a source.
         """
 
-    private static let session: URLSession = {
+    private static let session = makeSession(allowMetered: true)
+    private static let unmeteredSession = makeSession(allowMetered: false)
+
+    private static func makeSession(allowMetered: Bool) -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
         configuration.httpCookieStorage = nil
@@ -15,10 +18,14 @@ enum OnlineAskClient {
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.timeoutIntervalForRequest = 90
         configuration.timeoutIntervalForResource = 120
+        configuration.allowsCellularAccess = allowMetered
+        configuration.allowsExpensiveNetworkAccess = allowMetered
+        configuration.allowsConstrainedNetworkAccess = allowMetered
         return URLSession(configuration: configuration, delegate: NoRedirects(), delegateQueue: nil)
-    }()
+    }
 
-    static func ask(_ question: String, provider: OnlineAskProvider, apiKey: String) async throws -> OnlineAskResponse {
+    static func ask(_ question: String, provider: OnlineAskProvider, apiKey: String,
+                    allowMetered: Bool = true) async throws -> OnlineAskResponse {
         let question = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { throw ClientError.emptyQuestion }
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -26,7 +33,8 @@ enum OnlineAskClient {
             throw ClientError.invalidKey
         }
         let request = try makeRequest(question: question, provider: provider, key: key)
-        let (bytes, response) = try await session.data(for: request)
+        let connection = allowMetered ? session : unmeteredSession
+        let (bytes, response) = try await connection.data(for: request)
         try Task.checkCancellation()
         guard let response = response as? HTTPURLResponse else { throw ClientError.invalidResponse }
         switch response.statusCode {

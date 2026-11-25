@@ -8,15 +8,23 @@ struct OnlineAskView: View {
     let onSaved: () -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @EnvironmentObject private var deferredAsk: DeferredAskController
     @State private var configured: Set<OnlineAskProvider> = []
     @State private var editing: OnlineAskProvider?
     @State private var key = ""
     @State private var pending: OnlineAskProvider?
+    @State private var deferredDraft: DeferredAskDraft?
     @State private var result: OnlineAskSavedAnswer?
     @State private var searchEntryPoint: String?
     @State private var status: String?
     @State private var error: String?
     @State private var showingSavedSources = false
+
+    private var savedDeferredAnswerIDs: Set<UUID> {
+        guard let question else { return [] }
+        let request = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Set(deferredAsk.jobs.filter { $0.state == .saved && $0.question == request }.map(\.id))
+    }
 
     var body: some View {
         NavigationStack {
@@ -46,6 +54,15 @@ struct OnlineAskView: View {
                             ForEach(OnlineAskProvider.allCases.filter { configured.contains($0) }) { provider in
                                 Button("Ask \(provider.title)", systemImage: "globe") { pending = provider }
                                     .disabled(pending != nil)
+                                if provider == .gpt || provider == .claude {
+                                    Button("Queue for \(provider.title)", systemImage: "clock") {
+                                        deferredDraft = DeferredAskDraft(
+                                            question: question.trimmingCharacters(in: .whitespacesAndNewlines),
+                                            provider: provider
+                                        )
+                                    }
+                                    .disabled(pending != nil)
+                                }
                             }
                         } header: {
                             Text("Ask in Tinfoil Kit")
@@ -64,6 +81,7 @@ struct OnlineAskView: View {
                         }
                     }
                 }
+                DeferredAskQueueSection()
                 Section {
                     ForEach(OnlineAskProvider.allCases) { provider in
                         Button(configured.contains(provider) ? "Manage \(provider.title) key" : "Add \(provider.title) key") {
@@ -81,11 +99,17 @@ struct OnlineAskView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("Done") { dismiss() } }
             .task { refreshKeys() }
+            .onChange(of: savedDeferredAnswerIDs) { previous, current in
+                if !current.subtracting(previous).isEmpty { onSaved() }
+            }
             .task(id: pending) {
                 if let provider = pending { await ask(provider) }
             }
             .sheet(isPresented: $showingSavedSources) {
                 SavedWebSourcesView(onChange: onSaved)
+            }
+            .sheet(item: $deferredDraft) { draft in
+                DeferredAskConfirmationView(draft: draft)
             }
             .sheet(item: $editing) { provider in
                 NavigationStack {
@@ -129,6 +153,7 @@ struct OnlineAskView: View {
         do {
             try OnlineAskKeys.save(value, for: provider)
             refreshKeys()
+            deferredAsk.keysChanged()
         } catch {
             self.error = error.localizedDescription
         }
