@@ -47,7 +47,9 @@ The Cloud assembled a cumulative preview and recorded its ordered release candid
 
 Offline Ask shipped with exact address, saved pin, nearby service and coordinate routing from Home, plus links to matching source quotes on devices without a model and after a failed model answer. The signed build installed on the paired iPhone. The simulator passed 169 app unit tests and UI checks for coordinate routing, the water-outage service-area prompt and a model-free quote linked to the exact PDF page. Four optional fixture tests were skipped. An eligible iPhone still needs to verify generated citations and per-answer household-notes consent. [PR #28](https://github.com/scottleibrand/TinFoilKit-iOS/pull/28)
 
-The combined Monitor candidate, deferred Online Ask, offline photo preparation and regional publication staging still need their own acceptance checks. General queries over eligible installed references and guest-browser route generation remain open.
+Regional Updates shipped with cached official NWS alerts, daily and hourly forecasts for opted-in Home locations, and Puget Sound WSDOT route advisories. The signed build installed on the paired iPhone. The simulator passed 196 unit tests and two regional UI tests. The Swift decoders read live NWS and WSDOT responses. A physical offline relaunch and foreground reconnect remain open. [PR #29](https://github.com/scottleibrand/TinFoilKit-iOS/pull/29)
+
+Deferred Online Ask, offline photo preparation and regional publication staging still need their own acceptance checks. General queries over eligible installed references and guest-browser route generation remain open.
 
 ## Cloud branches awaiting integration
 
