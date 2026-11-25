@@ -259,7 +259,7 @@ final class PackDownloads: ObservableObject {
             if tasks[key] != nil { continue }
             if case .verifying = statuses[key] { continue }
             let repair = repairTarget(key)
-            let update = updateTarget(key)
+            let update = repair == nil ? updateTarget(key) : nil
             if repair == nil, let current = installed.first(where: { archive in
                 archive.pack == pack || (publisherApprovals[key]?.replacesArchiveID == nil
                     && publisherApprovals[key] != nil && archive.pack?.sha256 == pack.sha256
@@ -295,6 +295,15 @@ final class PackDownloads: ObservableObject {
     func start(_ pack: PublishedPack, network: PackDownloadNetwork? = nil, replacing archive: InstalledArchive? = nil) {
         guard !restoring, canStart(pack) else { return }
         let key = pack.editionKey
+        if repairTarget(key) != nil {
+            guard archive == nil, pack == self.pack(for: key) else { return }
+            do {
+                try enqueue([pack], network: .wifiOnly)
+            } catch {
+                statuses[key] = .failed(error.localizedDescription)
+            }
+            return
+        }
         let previousApproval = publisherApprovals[key]
         let publisher = previousApproval != nil || !Self.catalog.contains(pack)
         let target = archive?.id ?? previousApproval?.replacesArchiveID
@@ -384,7 +393,11 @@ final class PackDownloads: ObservableObject {
     }
 
     func resumesOnCellular(for pack: PublishedPack) -> Bool {
-        preferredNetwork(for: pack) == .cellularAllowed
+        !hasPendingRepair(pack) && preferredNetwork(for: pack) == .cellularAllowed
+    }
+
+    func hasPendingRepair(_ pack: PublishedPack) -> Bool {
+        repairTarget(pack.editionKey) != nil
     }
 
     private func preferredNetwork(for pack: PublishedPack) -> PackDownloadNetwork {
@@ -469,7 +482,8 @@ final class PackDownloads: ObservableObject {
     }
 
     func canDiscardPublisherUpdate(_ pack: PublishedPack) -> Bool {
-        guard publisherApprovals[pack.editionKey]?.replacesArchiveID != nil else { return false }
+        guard publisherApprovals[pack.editionKey]?.replacesArchiveID != nil,
+              repairTarget(pack.editionKey) == nil else { return false }
         switch statuses[pack.editionKey] {
         case .paused, .failed: return true
         default: return false
@@ -541,10 +555,15 @@ final class PackDownloads: ObservableObject {
     }
 
     func canRepair(_ archive: InstalledArchive) -> Bool {
-        guard !restoring, let pack = archive.pack, Self.catalog.contains(pack), !isDownloadingUpdate(for: archive),
-              tasks[pack.editionKey] == nil else { return false }
-        if case .installed = statuses[pack.editionKey] { return true }
-        return false
+        guard !restoring, let pack = archive.pack, pack == self.pack(for: pack.editionKey),
+              !isDownloadingUpdate(for: archive), tasks[pack.editionKey] == nil,
+              archive.replacesArchiveID.flatMap({ installedPublisherArchives[$0] }) == nil else { return false }
+        let pending = repairTarget(pack.editionKey)
+        switch statuses[pack.editionKey] {
+        case .installed: return pending == nil || pending == archive.id
+        case .paused, .failed: return pending == archive.id
+        default: return false
+        }
     }
 
     func isRepairing(_ archive: InstalledArchive) -> Bool {
@@ -558,12 +577,13 @@ final class PackDownloads: ObservableObject {
     func repair(_ archive: InstalledArchive) throws {
         guard canRepair(archive), let pack = archive.pack else { return }
         let key = pack.editionKey
+        let wasPending = repairTarget(key) == archive.id
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         try Data(archive.id.uuidString.utf8).write(to: repairURL(key), options: .atomic)
         do {
             try enqueue([pack])
         } catch {
-            try? FileManager.default.removeItem(at: repairURL(key))
+            if !wasPending { try? FileManager.default.removeItem(at: repairURL(key)) }
             throw error
         }
     }
@@ -755,8 +775,11 @@ final class PackDownloads: ObservableObject {
         Task {
             do {
                 if let archiveID = repairTarget(key) {
-                    try await library.repairPack(pack, archiveID: archiveID, from: file, movingSource: true)
-                    try FileManager.default.removeItem(at: repairURL(key))
+                    try await library.repairPack(
+                        pack, archiveID: archiveID, from: file, movingSource: true,
+                        expectedByteCount: publisherApprovals[key] == nil ? nil : pack.sizeEstimate
+                    )
+                    try? FileManager.default.removeItem(at: repairURL(key))
                 } else if let approval = publisherApprovals[key], let previous = approval.replacesArchiveID {
                     let archive = try await library.installPack(pack, from: file, replacing: previous, movingSource: true,
                                                                 expectedByteCount: pack.sizeEstimate)
