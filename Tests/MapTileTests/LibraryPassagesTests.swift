@@ -3,6 +3,22 @@ import ZIMArchive
 @testable import TinfoilKit
 
 final class LibraryPassagesTests: XCTestCase {
+    func testQuotesRequireWholeTopicsAndRetainEvidenceOrder() {
+        let supported = "Radio batteries are in the west cabinet. Leave the sealed emergency pack in place."
+        let excerpts = ["The radio is by the entrance.", supported, supported,
+                        "The spare radio batteries are in the blue box.", "Radio batteries belong in the second box."]
+        XCTAssertEqual(LibraryPassages.quoteIndices(for: "Where are the radio batteries?", excerpts: excerpts), [1, 3])
+        XCTAssertEqual(LibraryPassages.quoteIndices(for: "Who has the west cabinet key?", excerpts: excerpts), [])
+        XCTAssertEqual(LibraryPassages.quoteIndices(for: "Radio", excerpts: excerpts), [])
+        XCTAssertEqual(LibraryPassages.quoteIndices(for: "Are spare radio batteries upstairs?", excerpts: excerpts), [])
+    }
+
+    func testQuotesMatchSpanishAccentsAndSkipOversizedExcerpts() {
+        let matching = "Las baterías de la radio están junto a la puerta."
+        let excerpts = [String(repeating: matching, count: 12), "La radio está aquí.", matching]
+        XCTAssertEqual(LibraryPassages.quoteIndices(for: "¿Dónde están las baterias de la radio?", excerpts: excerpts), [2])
+    }
+
     private let outageQuestion = "How long does our water system keep working if there is a gridwide power outage?"
 
     func testUtilityOutageQueriesKeepBothConcepts() {
@@ -54,6 +70,26 @@ final class LibraryPassagesTests: XCTestCase {
         XCTAssertNotNil(intent.score(match("Emergency water storage", "Store drinking water in clean containers."), rank: 0, queryOrder: 0))
         let ordinary = LibraryPassages.queries(for: "What is anthropogenic climate change?", suggested: [])
         XCTAssertTrue(ordinary.contains("anthropogenic climate change"))
+    }
+
+    func testSpanishQuestionKeepsUsefulNeighboringSearchTerms() {
+        let question = "¿Qué medidas se pueden tomar para prevenir la erosión costera durante una tormenta?"
+        let queries = LibraryPassages.queries(for: question, suggested: ["erosion costera", "erosión costera"])
+        XCTAssertTrue(queries.contains("prevenir erosión"))
+        XCTAssertTrue(queries.contains("costera tormenta"))
+        XCTAssertEqual(queries.filter { $0 == "erosión costera" || $0 == "erosion costera" }.count, 1)
+        XCTAssertFalse(queries.contains("pueden"))
+        let informal = LibraryPassages.queries(for: "como funciona la energia solar durante el invierno", suggested: [])
+        XCTAssertTrue(informal.contains("energia solar"))
+    }
+
+    func testSpanishRelevanceFoldsDiacriticsAndIgnoresQuestionWords() throws {
+        let intent = LibraryPassages.SearchIntent("¿Qué causa la erosión costera?")
+        let relevant = match("Erosion costera", "Las olas desgastan la costa.")
+        let general = match("Qué es la costa", "La costa separa la tierra y el mar.")
+        let relevantScore = try XCTUnwrap(intent.score(relevant, rank: 4, queryOrder: 0))
+        let generalScore = try XCTUnwrap(intent.score(general, rank: 0, queryOrder: 0))
+        XCTAssertGreaterThan(relevantScore, generalScore)
     }
 
     private func match(_ title: String, _ excerpt: String) -> ArticleIndex.Match {

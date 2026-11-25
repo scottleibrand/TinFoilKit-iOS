@@ -12,6 +12,11 @@ struct MapPlace: Identifiable, Sendable {
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
+
+    static func saved(_ place: HouseholdPlace) -> Self {
+        Self(id: "saved:\(place.id)", name: place.name, kind: place.coordinateText,
+             latitude: place.latitude, longitude: place.longitude)
+    }
 }
 
 struct MapPlaces {
@@ -60,6 +65,7 @@ struct MapPlaceSearch: View {
     let regions: [RegionalPlaceStorage.Installed]
     let origin: CLLocationCoordinate2D?
     let savedPlaces: [HouseholdPlace]
+    var currentLocation: MapPlace? = nil
     let onSelect: (MapPlace) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
@@ -85,16 +91,15 @@ struct MapPlaceSearch: View {
     var body: some View {
         NavigationStack {
             Group {
-                if coordinateResult != nil || !matchingSavedPlaces.isEmpty || !places.isEmpty {
+                let current = query.isEmpty && category == nil ? currentLocation : nil
+                if current != nil || coordinateResult != nil || !matchingSavedPlaces.isEmpty || !places.isEmpty {
                     List {
+                        if let current { result(current) }
                         if let coordinateResult { result(coordinateResult) }
                         if !matchingSavedPlaces.isEmpty {
                             Section("Saved places") {
                                 ForEach(matchingSavedPlaces) { place in
-                                    result(MapPlace(
-                                        id: "saved:\(place.id)", name: place.name, kind: place.coordinateText,
-                                        latitude: place.latitude, longitude: place.longitude
-                                    ))
+                                    result(.saved(place))
                                 }
                             }
                         }

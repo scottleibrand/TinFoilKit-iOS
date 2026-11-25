@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 import ZIMArchive
 
-enum PackDownloadNetwork: String, CaseIterable, Sendable {
+enum PackDownloadNetwork: String, CaseIterable, Codable, Sendable {
     case wifiOnly = "org.tinfoilkit.ios.publisher-packs"
     case cellularAllowed = "org.tinfoilkit.ios.publisher-packs.cellular"
 
@@ -20,26 +20,64 @@ enum PackDownloadNetwork: String, CaseIterable, Sendable {
 struct PackDownloadAttempt: Sendable {
     let key: String
     let retryCount: Int
+    let retriedChecksum: Bool
+    let usesMirror: Bool
     private static let delays: [TimeInterval] = [2, 5, 15]
+    private static let checksumPrefix = "checksum-retry:"
 
-    init(key: String, retryCount: Int = 0) {
+    init(key: String, retryCount: Int = 0, usesMirror: Bool = false, retriedChecksum: Bool = false) {
         self.key = key
         self.retryCount = retryCount
+        self.usesMirror = usesMirror
+        self.retriedChecksum = retriedChecksum
     }
 
     init?(description: String?) {
         guard let description, !description.isEmpty else { return nil }
-        let parts = description.split(separator: "|", omittingEmptySubsequences: false)
+        let retriedChecksum = description.hasPrefix(Self.checksumPrefix)
+        let payload = description.dropFirst(retriedChecksum ? Self.checksumPrefix.count : 0)
+        let parts = payload.split(separator: "|", omittingEmptySubsequences: false)
         guard let key = parts.first, !key.isEmpty else { return nil }
         if parts.count == 1 {
-            self.init(key: String(key))
+            self.init(key: String(key), retriedChecksum: retriedChecksum)
         } else {
-            guard parts.count == 2, let count = Int(parts[1]), (1...Self.delays.count).contains(count) else { return nil }
-            self.init(key: String(key), retryCount: count)
+            guard let count = Int(parts[1]), (0...Self.delays.count).contains(count) else { return nil }
+            let mirror = parts.count == 3 && parts[2] == "mirror"
+            guard mirror || (parts.count == 2 && count > 0) else { return nil }
+            self.init(key: String(key), retryCount: count, usesMirror: mirror, retriedChecksum: retriedChecksum)
         }
     }
 
-    var taskDescription: String { retryCount == 0 ? key : "\(key)|\(retryCount)" }
+    var taskDescription: String {
+        let payload = if usesMirror {
+            "\(key)|\(retryCount)|mirror"
+        } else {
+            retryCount == 0 ? key : "\(key)|\(retryCount)"
+        }
+        return retriedChecksum ? Self.checksumPrefix + payload : payload
+    }
+
+    var transportRetry: Self {
+        Self(key: key, retryCount: retryCount + 1, usesMirror: usesMirror, retriedChecksum: retriedChecksum)
+    }
+
+    var checksumRetry: Self? {
+        retriedChecksum ? nil : Self(key: key, usesMirror: usesMirror, retriedChecksum: true)
+    }
+
+    var mirror: Self { Self(key: key, usesMirror: true, retriedChecksum: retriedChecksum) }
+
+    func canTryMirror(for error: NSError) -> Bool {
+        guard !usesMirror, error.domain == NSURLErrorDomain else { return false }
+        switch URLError.Code(rawValue: error.code) {
+        case .timedOut, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed: return true
+        default: return false
+        }
+    }
+
+    func canTryMirror(for response: HTTPURLResponse) -> Bool {
+        !usesMirror && [404, 410, 408, 500, 502, 503, 504].contains(response.statusCode)
+    }
 
     func retryDelay(for error: NSError) -> TimeInterval? {
         guard error.domain == NSURLErrorDomain, Self.delays.indices.contains(retryCount) else { return nil }
@@ -93,6 +131,12 @@ final class PackDownloads: ObservableObject {
     @Published private(set) var restoring = true
     @Published private(set) var installedRevision = 0
     @Published private(set) var downloadAllError: String?
+    @Published private var publisherApprovals: [String: KiwixDownloadApproval]
+    @Published private var installedPublisherArchives: [UUID: InstalledArchive] = [:]
+
+    var publisherDownloads: [PublishedPack] {
+        publisherApprovals.values.map(\.pack).sorted { ($0.title, $0.editionKey) < ($1.title, $1.editionKey) }
+    }
 
     var downloadAllSizeEstimate: Int64 {
         sizeEstimate(for: Self.defaultPacks)
@@ -101,7 +145,7 @@ final class PackDownloads: ObservableObject {
     var essentialsSizeEstimate: Int64 { sizeEstimate(for: Self.essentials) }
 
     private let library = InstalledLibrary.standard
-    private let staging = URL.applicationSupportDirectory.appendingPathComponent("PackDownloads", isDirectory: true)
+    private let staging: URL
     private var tasks: [String: (task: URLSessionDownloadTask, network: PackDownloadNetwork)] = [:]
     private var restoringStarted = false
     private var backgroundCompletions: [PackDownloadNetwork: () -> Void] = [:]
@@ -119,6 +163,40 @@ final class PackDownloads: ObservableObject {
         case failed(String)
     }
 
+    private init() {
+        let staging = URL.applicationSupportDirectory.appendingPathComponent("PackDownloads", isDirectory: true)
+        self.staging = staging
+        publisherApprovals = KiwixDownloadApproval.load(from: staging)
+    }
+
+    func publisherEdition(for pack: PublishedPack) -> PublishedPack {
+        Self.catalog.first { $0.sha256 == pack.sha256 && $0.sizeEstimate == pack.sizeEstimate }
+            ?? publisherApprovals[pack.editionKey]?.pack ?? pack
+    }
+
+    func publisherFileImported(_ archive: InstalledArchive, as pack: PublishedPack) {
+        guard canStart(pack) else { return }
+        transfer.clearResume(pack.editionKey)
+        installedPublisherArchives[archive.id] = archive
+        statuses[pack.editionKey] = .installed
+    }
+
+    func status(for pack: PublishedPack) -> Status? {
+        let status = statuses[pack.editionKey]
+        switch status {
+        case .downloading, .retrying, .pausing, .verifying, .installed: return status
+        default: break
+        }
+        guard KiwixDownloadApproval.isValid(pack), installedPublisherArchives.values.contains(where: {
+            $0.pack?.sha256 == pack.sha256 && $0.byteCount == pack.sizeEstimate
+        }) else { return status }
+        return .installed
+    }
+
+    private func pack(for key: String) -> PublishedPack? {
+        Self.catalog.first { $0.editionKey == key } ?? publisherApprovals[key]?.pack
+    }
+
     func restore() async {
         guard !restoringStarted else { return }
         restoringStarted = true
@@ -132,16 +210,22 @@ final class PackDownloads: ObservableObject {
             }
         }
         let installed = (try? await library.archives()) ?? []
-        for pack in Self.catalog {
+        for archive in installed where archive.pack != nil {
+            installedPublisherArchives[archive.id] = archive
+        }
+        for pack in Self.catalog + publisherDownloads {
             let key = pack.editionKey
             if tasks[key] != nil { continue }
             if case .verifying = statuses[key] { continue }
             let repair = repairTarget(key)
             let update = updateTarget(key)
-            if repair == nil, let current = installed.first(where: { $0.pack == pack }),
+            if repair == nil, let current = installed.first(where: { archive in
+                archive.pack == pack || (publisherApprovals[key] != nil && archive.pack?.sha256 == pack.sha256
+                    && archive.byteCount == pack.sizeEstimate)
+            }),
                update == nil || current.replacesArchiveID == update {
                 if update != nil { try? FileManager.default.removeItem(at: updateURL(key)) }
-                try? FileManager.default.removeItem(at: transfer.downloadURL(key))
+                transfer.discardDownload(key)
                 transfer.clearResume(key)
                 statuses[key] = .installed
             } else if let active = sessionTasks[key] {
@@ -152,7 +236,7 @@ final class PackDownloads: ObservableObject {
                 install(pack)
             } else if transfer.hasResume(key) {
                 statuses[key] = .paused
-            } else if repair != nil || update != nil {
+            } else if repair != nil || update != nil || publisherApprovals[key] != nil {
                 statuses[key] = .failed("The download was interrupted. Retry to continue.")
             }
         }
@@ -160,12 +244,72 @@ final class PackDownloads: ObservableObject {
 
     func start(_ pack: PublishedPack, network: PackDownloadNetwork? = nil) {
         guard !restoring, canStart(pack) else { return }
+        let key = pack.editionKey
+        let publisher = !Self.catalog.contains(pack)
+        let selectedNetwork = network ?? preferredNetwork(for: pack)
         downloadAllError = nil
         do {
-            try enqueue([pack], network: network ?? transfer.resumeNetwork(pack.editionKey))
+            if publisher {
+                let approval = KiwixDownloadApproval(pack: pack, allowsCellular: selectedNetwork == .cellularAllowed)
+                try approval.save(in: staging)
+                publisherApprovals[key] = approval
+            }
+            try enqueue([pack], network: selectedNetwork)
         } catch {
-            statuses[pack.editionKey] = .failed(error.localizedDescription)
+            statuses[key] = .failed(error.localizedDescription)
         }
+    }
+
+    func installBundledCopy(_ pack: PublishedPack) async throws {
+        guard let file = PackCatalog.bundledCopy(for: pack), canInstallLocalCopy(pack) else {
+            throw LocalCopyUnavailable()
+        }
+        try await installLocalEdition(key: pack.editionKey) {
+            try await library.importPublishedPack(pack, from: file)
+        }
+    }
+
+    func canInstallLocalCopy(_ pack: PublishedPack) -> Bool {
+        let key = pack.editionKey
+        return !restoring && canStart(pack) && updateTarget(key) == nil && repairTarget(key) == nil
+    }
+
+    func installLocalCopy(_ match: PortableLibraryFolder.Match, progress: @escaping @Sendable (Double) -> Void) async throws {
+        let pack = match.pack
+        let key = pack.editionKey
+        guard Self.catalog.contains(pack), canInstallLocalCopy(pack) else {
+            throw LocalCopyUnavailable()
+        }
+        try await installLocalEdition(key: key) {
+            try await library.installPack(pack, from: match.file, progress: progress)
+        }
+    }
+
+    func installNearbyArchive(_ pack: PublishedPack, from file: URL) async throws {
+        guard Self.allowsArchiveSharing(pack), canInstallLocalCopy(pack) else { throw LocalCopyUnavailable() }
+        try await installLocalEdition(key: pack.editionKey) {
+            try await library.installDownloadedPublishedPack(pack, from: file)
+        }
+    }
+
+    private func installLocalEdition(key: String, install: () async throws -> InstalledArchive) async throws {
+        let previous = statuses[key]
+        statuses[key] = .verifying
+        do {
+            let archive = try await install()
+            installedPublisherArchives[archive.id] = archive
+            transfer.clearResume(key)
+            try? FileManager.default.removeItem(at: transfer.downloadURL(key))
+            statuses[key] = .installed
+            installedRevision += 1
+        } catch {
+            statuses[key] = previous
+            throw error
+        }
+    }
+
+    private struct LocalCopyUnavailable: LocalizedError {
+        var errorDescription: String? { "This edition is already installed or has an archive operation in progress." }
     }
 
     func allowsCellular(for pack: PublishedPack) -> Bool {
@@ -173,7 +317,20 @@ final class PackDownloads: ObservableObject {
     }
 
     func resumesOnCellular(for pack: PublishedPack) -> Bool {
-        transfer.resumeNetwork(pack.editionKey) == .cellularAllowed
+        preferredNetwork(for: pack) == .cellularAllowed
+    }
+
+    private func preferredNetwork(for pack: PublishedPack) -> PackDownloadNetwork {
+        if let approval = publisherApprovals[pack.editionKey] {
+            return approval.allowsCellular ? .cellularAllowed : .wifiOnly
+        }
+        return transfer.resumeNetwork(pack.editionKey)
+    }
+
+    func activeMirrorHost(for pack: PublishedPack) -> String? {
+        guard let task = tasks[pack.editionKey]?.task,
+              PackDownloadAttempt(description: task.taskDescription)?.usesMirror == true else { return nil }
+        return PackCatalog.fallbackMirror(for: pack)?.host
     }
 
     func startAll() {
@@ -202,11 +359,22 @@ final class PackDownloads: ObservableObject {
 
     func archiveRemoved(_ archive: InstalledArchive) {
         guard let pack = archive.pack else { return }
+        installedPublisherArchives[archive.id] = nil
         let key = pack.editionKey
+        let completedApprovals = publisherApprovals.values.filter {
+            guard $0.pack.sha256 == pack.sha256, $0.pack.sizeEstimate == archive.byteCount,
+                  case .installed = statuses[$0.pack.editionKey] else { return false }
+            return true
+        }
+        for approval in completedApprovals {
+            try? approval.remove(from: staging)
+            publisherApprovals[approval.pack.editionKey] = nil
+            statuses[approval.pack.editionKey] = nil
+        }
         if repairTarget(key) == archive.id {
             try? FileManager.default.removeItem(at: repairURL(key))
             transfer.clearResume(key)
-            try? FileManager.default.removeItem(at: transfer.downloadURL(key))
+            transfer.discardDownload(key)
             statuses[key] = nil
         } else if case .installed = statuses[key] {
             statuses[key] = nil
@@ -216,10 +384,11 @@ final class PackDownloads: ObservableObject {
             tasks.removeValue(forKey: updateKey)?.task.cancel()
             try? FileManager.default.removeItem(at: updateURL(updateKey))
             transfer.clearResume(updateKey)
-            try? FileManager.default.removeItem(at: transfer.downloadURL(updateKey))
+            transfer.discardDownload(updateKey)
             statuses[updateKey] = nil
         }
     }
+
 
     func availableUpdate(for archive: InstalledArchive) -> PublishedPack? {
         guard !restoring, let previous = archive.pack, !isRepairing(archive) else { return nil }
@@ -315,7 +484,7 @@ final class PackDownloads: ObservableObject {
     private func canStart(_ pack: PublishedPack) -> Bool {
         let key = pack.editionKey
         guard tasks[key] == nil else { return false }
-        switch statuses[key] {
+        switch status(for: pack) {
         case nil, .paused, .failed: return true
         case .downloading, .retrying, .pausing, .verifying, .installed: return false
         }
@@ -333,36 +502,61 @@ final class PackDownloads: ObservableObject {
         try directory.setResourceValues(values)
         let available = try directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         let downloadAndIndexBytes = packs.reduce(Int64.zero) { $0 + capacityEstimate(for: $1) }
-        let reservedBytes = Self.catalog.reduce(Int64.zero) { total, pack in
+        let reservedBytes = (Self.catalog + publisherDownloads).reduce(Int64.zero) { total, pack in
             let key = pack.editionKey
             switch statuses[key] {
             case .downloading, .retrying:
                 let received = max(0, tasks[key]?.task.countOfBytesReceived ?? 0)
-                return total + capacityEstimate(for: pack) - min(received, pack.sizeEstimate)
+                return Self.addingCapacity(total, capacityEstimate(for: pack) - min(received, pack.sizeEstimate))
             case .verifying:
-                return total + capacityEstimate(for: pack) - pack.sizeEstimate
+                return Self.addingCapacity(total, capacityEstimate(for: pack) - pack.sizeEstimate)
             default:
                 return total
             }
         }
-        let required = downloadAndIndexBytes + reservedBytes + 64 * 1024 * 1024
+        let required = Self.addingCapacity(Self.addingCapacity(downloadAndIndexBytes, reservedBytes), 64 * 1024 * 1024)
         if let bytes = available.volumeAvailableCapacityForImportantUsage, bytes < required {
             throw InsufficientStorage(shortfall: required - bytes)
         }
         for pack in packs {
-            beginDownload(pack, network: network, attempt: PackDownloadAttempt(key: pack.editionKey))
+            let key = pack.editionKey
+            let usesMirror = PackCatalog.fallbackMirror(for: pack) != nil
+                && transfer.hasMirrorResume(key, network: network)
+            let previous = transfer.verificationContext(key)
+            let previousAttempt = previous?.attempt(for: key)
+            let resumedChecksumRetry = transfer.hasResume(key, network: network) && previous?.network == network
+                && previousAttempt?.usesMirror == usesMirror && previousAttempt?.retriedChecksum == true
+            let attempt = PackDownloadAttempt(key: key, usesMirror: usesMirror, retriedChecksum: resumedChecksumRetry)
+            beginDownload(pack, network: network, attempt: attempt)
         }
+    }
+
+    private static func addingCapacity(_ lhs: Int64, _ rhs: Int64) -> Int64 {
+        let (sum, overflow) = lhs.addingReportingOverflow(rhs)
+        return overflow ? .max : sum
     }
 
     private func beginDownload(_ pack: PublishedPack, network: PackDownloadNetwork, attempt: PackDownloadAttempt,
                                delay: TimeInterval? = nil) {
+        let source = attempt.usesMirror ? PackCatalog.fallbackMirror(for: pack) : pack.source
+        guard let source else {
+            statuses[attempt.key] = .failed("This edition’s mirror is no longer in the catalog.")
+            return
+        }
+        do {
+            let verification = PackTransfer.VerificationContext(attempt: attempt, network: network, host: nil)
+            try transfer.recordVerification(verification, key: attempt.key)
+        } catch {
+            statuses[attempt.key] = .failed(error.localizedDescription)
+            return
+        }
         let session = transfer.session(for: network)
-        let resumeURL = transfer.resumeURL(attempt.key, network: network)
+        let resumeURL = transfer.resumeURL(attempt.key, network: network, usesMirror: attempt.usesMirror)
         let task: URLSessionDownloadTask
         if let resume = try? Data(contentsOf: resumeURL) {
             task = session.downloadTask(withResumeData: resume)
         } else {
-            task = session.downloadTask(with: pack.source)
+            task = session.downloadTask(with: source)
         }
         task.taskDescription = attempt.taskDescription
         if let delay { task.earliestBeginDate = Date().addingTimeInterval(delay) }
@@ -387,11 +581,14 @@ final class PackDownloads: ObservableObject {
     func pause(_ pack: PublishedPack) {
         let key = pack.editionKey
         guard let active = tasks.removeValue(forKey: key) else { return }
+        let usesMirror = PackDownloadAttempt(description: active.task.taskDescription)?.usesMirror == true
         statuses[key] = .pausing
         active.task.cancel { [weak self] resumeData in
             Task { @MainActor in
                 guard let self else { return }
-                if let resumeData { try? self.transfer.saveResume(resumeData, key: key, network: active.network) }
+                if let resumeData {
+                    try? self.transfer.saveResume(resumeData, key: key, network: active.network, usesMirror: usesMirror)
+                }
                 if case .pausing = self.statuses[key] { self.statuses[key] = .paused }
             }
         }
@@ -411,21 +608,25 @@ final class PackDownloads: ObservableObject {
             default: break
             }
         case let .downloaded(ticket):
-            guard accepts(ticket) else { return }
+            guard accepts(ticket), let pack = pack(for: ticket.key) else { return }
             let key = ticket.key
             tasks[key] = nil
-            if let pack = Self.catalog.first(where: { $0.editionKey == key }) { install(pack) }
-        case let .failed(ticket, message, delay):
+            install(pack)
+        case let .failed(ticket, message, delay, canTryMirror):
             let key = ticket.key
-            guard accepts(ticket), tasks[key] != nil || restoring else { return }
+            guard accepts(ticket), let pack = pack(for: key), tasks[key] != nil || restoring else { return }
             tasks[key] = nil
             switch statuses[key] {
             case .pausing, .paused, .verifying, .installed: break
             default:
-                if let delay, let pack = Self.catalog.first(where: { $0.editionKey == key }) {
-                    beginDownload(pack, network: ticket.network,
-                                  attempt: PackDownloadAttempt(key: key, retryCount: ticket.attempt.retryCount + 1),
-                                  delay: delay)
+                if let delay {
+                    beginDownload(pack, network: ticket.network, attempt: ticket.attempt.transportRetry, delay: delay)
+                } else if canTryMirror, PackCatalog.fallbackMirror(for: pack) != nil {
+                    // Resume data belongs to the origin and must not carry over to the mirror.
+                    transfer.clearResume(key)
+                    beginDownload(pack, network: ticket.network, attempt: ticket.attempt.mirror)
+                } else if ticket.attempt.usesMirror, let host = PackCatalog.fallbackMirror(for: pack)?.host {
+                    statuses[key] = .failed("Mirror \(host) could not provide the archive. \(message)")
                 } else {
                     statuses[key] = .failed(message)
                 }
@@ -445,21 +646,37 @@ final class PackDownloads: ObservableObject {
         if case .verifying = statuses[key] { return }
         statuses[key] = .verifying
         let file = transfer.downloadURL(key)
+        let verification = transfer.verificationContext(key)
         Task {
             do {
                 if let archiveID = repairTarget(key) {
                     try await library.repairPack(pack, archiveID: archiveID, from: file, movingSource: true)
                     try FileManager.default.removeItem(at: repairURL(key))
+                } else if publisherApprovals[key] != nil {
+                    let archive = try await library.installDownloadedPublishedPack(pack, from: file)
+                    installedPublisherArchives[archive.id] = archive
                 } else {
-                    try await library.installPack(pack, from: file, replacing: updateTarget(key), movingSource: true)
+                    let archive = try await library.installPack(pack, from: file, replacing: updateTarget(key), movingSource: true)
+                    installedPublisherArchives[archive.id] = archive
                     try? FileManager.default.removeItem(at: updateURL(key))
                 }
-                try? FileManager.default.removeItem(at: file)
+                transfer.discardDownload(key)
                 transfer.clearResume(key)
                 statuses[key] = .installed
                 installedRevision += 1
+            } catch let error as InstalledLibrary.PublisherChecksumMismatch {
+                // Never carry partial bytes from a transfer that failed verification.
+                transfer.discardDownload(key)
+                transfer.clearResume(key)
+                guard case .verifying = statuses[key] else { return }
+                if let verification, let retry = verification.attempt(for: key)?.checksumRetry,
+                   !FileManager.default.fileExists(atPath: file.path), !transfer.hasResume(key) {
+                    beginDownload(pack, network: verification.network, attempt: retry)
+                } else {
+                    statuses[key] = .failed(verification?.failureMessage ?? error.localizedDescription)
+                }
             } catch {
-                try? FileManager.default.removeItem(at: file)
+                transfer.discardDownload(key)
                 transfer.clearResume(key)
                 statuses[key] = .failed(error.localizedDescription)
             }
@@ -468,6 +685,27 @@ final class PackDownloads: ObservableObject {
 }
 
 final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    struct VerificationContext: Codable, Sendable {
+        let network: PackDownloadNetwork
+        let host: String?
+        private let attemptDescription: String
+
+        init(attempt: PackDownloadAttempt, network: PackDownloadNetwork, host: String?) {
+            attemptDescription = attempt.taskDescription
+            self.network = network
+            self.host = host
+        }
+
+        func attempt(for key: String) -> PackDownloadAttempt? {
+            guard let attempt = PackDownloadAttempt(description: attemptDescription), attempt.key == key else { return nil }
+            return attempt
+        }
+
+        var failureMessage: String? {
+            host.map { "The download from \($0) does not match the publisher’s checksum." }
+        }
+    }
+
     struct Ticket: Sendable {
         let attempt: PackDownloadAttempt
         let network: PackDownloadNetwork
@@ -487,7 +725,7 @@ final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
     enum Event: Sendable {
         case progress(Ticket, Double?)
         case downloaded(Ticket)
-        case failed(Ticket, String, retryAfter: TimeInterval?)
+        case failed(Ticket, String, retryAfter: TimeInterval?, canTryMirror: Bool = false)
         case finishedEvents(PackDownloadNetwork)
     }
 
@@ -513,16 +751,48 @@ final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
         directory.appendingPathComponent(key).appendingPathExtension("zim")
     }
 
-    func resumeURL(_ key: String, network: PackDownloadNetwork) -> URL {
-        directory.appendingPathComponent(key).appendingPathExtension(network.resumeExtension)
+    private func verificationURL(_ key: String) -> URL {
+        directory.appendingPathComponent(key).appendingPathExtension("verification")
+    }
+
+    func verificationContext(_ key: String) -> VerificationContext? {
+        guard let data = try? Data(contentsOf: verificationURL(key)) else { return nil }
+        return try? JSONDecoder().decode(VerificationContext.self, from: data)
+    }
+
+    func recordVerification(_ verification: VerificationContext, key: String) throws {
+        try JSONEncoder().encode(verification).write(to: verificationURL(key), options: .atomic)
+    }
+
+    func discardDownload(_ key: String) {
+        try? FileManager.default.removeItem(at: downloadURL(key))
+        try? FileManager.default.removeItem(at: verificationURL(key))
+    }
+
+    func stageDownload(at location: URL, key: String, verification: VerificationContext) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let staged = downloadURL(key)
+        guard !FileManager.default.fileExists(atPath: staged.path) else { return }
+        try recordVerification(verification, key: key)
+        try FileManager.default.moveItem(at: location, to: staged)
+    }
+
+    func resumeURL(_ key: String, network: PackDownloadNetwork, usesMirror: Bool = false) -> URL {
+        let suffix = usesMirror ? "mirror-\(network.resumeExtension)" : network.resumeExtension
+        return directory.appendingPathComponent(key).appendingPathExtension(suffix)
     }
 
     func hasResume(_ key: String) -> Bool {
         PackDownloadNetwork.allCases.contains { hasResume(key, network: $0) }
     }
 
-    private func hasResume(_ key: String, network: PackDownloadNetwork) -> Bool {
+    func hasResume(_ key: String, network: PackDownloadNetwork) -> Bool {
         FileManager.default.fileExists(atPath: resumeURL(key, network: network).path)
+            || hasMirrorResume(key, network: network)
+    }
+
+    func hasMirrorResume(_ key: String, network: PackDownloadNetwork) -> Bool {
+        FileManager.default.fileExists(atPath: resumeURL(key, network: network, usesMirror: true).path)
     }
 
     func resumeNetwork(_ key: String) -> PackDownloadNetwork {
@@ -535,11 +805,12 @@ final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
     func clearResume(_ key: String) {
         for network in PackDownloadNetwork.allCases {
             try? FileManager.default.removeItem(at: resumeURL(key, network: network))
+            try? FileManager.default.removeItem(at: resumeURL(key, network: network, usesMirror: true))
         }
     }
 
-    func saveResume(_ data: Data, key: String, network: PackDownloadNetwork) throws {
-        try data.write(to: resumeURL(key, network: network), options: .atomic)
+    func saveResume(_ data: Data, key: String, network: PackDownloadNetwork, usesMirror: Bool = false) throws {
+        try data.write(to: resumeURL(key, network: network, usesMirror: usesMirror), options: .atomic)
     }
 
     func urlSession(
@@ -552,15 +823,13 @@ final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
         }
         guard (200...299).contains(response.statusCode) else {
             post(.failed(ticket, "The publisher did not return the archive (HTTP \(response.statusCode)).",
-                         retryAfter: ticket.attempt.retryDelay(for: response)))
+                         retryAfter: ticket.attempt.retryDelay(for: response),
+                         canTryMirror: ticket.attempt.canTryMirror(for: response)))
             return
         }
         do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let file = downloadURL(ticket.key)
-            if !FileManager.default.fileExists(atPath: file.path) {
-                try FileManager.default.moveItem(at: location, to: file)
-            }
+            let verification = VerificationContext(attempt: ticket.attempt, network: ticket.network, host: response.url?.host)
+            try stageDownload(at: location, key: ticket.key, verification: verification)
             post(.downloaded(ticket))
         } catch {
             post(.failed(ticket, error.localizedDescription, retryAfter: nil))
@@ -581,9 +850,10 @@ final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
         guard let ticket = Ticket(session: session, task: task), let error = error as NSError? else { return }
         guard error.code != NSURLErrorCancelled || error.domain != NSURLErrorDomain else { return }
         if let data = error.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
-            try? saveResume(data, key: ticket.key, network: ticket.network)
+            try? saveResume(data, key: ticket.key, network: ticket.network, usesMirror: ticket.attempt.usesMirror)
         }
-        post(.failed(ticket, error.localizedDescription, retryAfter: ticket.attempt.retryDelay(for: error)))
+        post(.failed(ticket, error.localizedDescription, retryAfter: ticket.attempt.retryDelay(for: error),
+                     canTryMirror: ticket.attempt.canTryMirror(for: error)))
     }
 
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {

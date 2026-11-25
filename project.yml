@@ -22,6 +22,10 @@ targets:
         buildPhase: resources
       - path: Resources/NearbyPublic/household-check-in-v1.txt
         buildPhase: resources
+      - path: Resources/NearbyPublic/neighborhood-status-log-v1.txt
+        buildPhase: resources
+      - path: Resources/NearbyPublic/tinfoil-kit-offline-starter_2026-11.zim
+        buildPhase: resources
       - path: .build/map-assets
         type: folder
         buildPhase: resources
@@ -106,6 +110,8 @@ targets:
       - path: Tests/MapTileTests
         excludes: [Fixtures]
       - path: Tests/MapTileTests/Fixtures/Synthetic.tfkroute
+        buildPhase: resources
+      - path: Tests/ZIMArchiveTests/Fixtures/pdf-collection.zim
         buildPhase: resources
     dependencies:
       - target: TinfoilKit

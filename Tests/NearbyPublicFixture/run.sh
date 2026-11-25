@@ -10,7 +10,7 @@ cleanup() {
 trap cleanup EXIT
 xcrun swiftc -module-cache-path "$output/module-cache" -o "$output/verify" \
     Tests/NearbyPublicFixture/VerifyNearbyPublic.swift \
-    Sources/TinfoilKit/Nearby{Discovery,PublicReference,PublicTLS,PublicTransfer}.swift
+    Sources/TinfoilKit/Nearby{ArchiveFiles,ArchiveTransfer,Discovery,PublicManifest,PublicReference,PublicResume,PublicTLS,PublicTransfer}.swift
 seed=Resources/NearbyPublic/household-check-in-v1.txt
 
 
@@ -18,6 +18,7 @@ seed=Resources/NearbyPublic/household-check-in-v1.txt
 sender=$!
 "$output/verify" disabled "$output/disabled" -
 "$output/verify" receive "$output/second" -
+"$output/verify" receive-checkpoint "$output/resumed" - "$seed"
 kill "$sender"
 wait "$sender" 2>/dev/null || true
 
@@ -31,3 +32,13 @@ wait "$sender" 2>/dev/null || true
 "$output/verify" serve-draining "$output/third" - &
 sender=$!
 "$output/verify" receive-draining "$output/fourth" -
+kill "$sender"
+wait "$sender" 2>/dev/null || true
+
+log=Resources/NearbyPublic/neighborhood-status-log-v1.txt
+"$output/verify" serve-catalog "$output/catalog-source" "$seed" "$log" &
+sender=$!
+"$output/verify" receive-catalog "$output/catalog-receiver" -
+cmp "$seed" "$output/catalog-receiver/household-check-in-v1.txt"
+cmp "$log" "$output/catalog-receiver/neighborhood-status-log-v1.txt"
+echo "Verified both catalog references on one Nearby listener."

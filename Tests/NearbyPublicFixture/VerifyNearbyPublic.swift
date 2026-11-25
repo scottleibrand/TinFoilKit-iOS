@@ -4,37 +4,62 @@ import Foundation
 struct VerifyNearbyPublic {
     @MainActor static func main() async throws {
         let arguments = CommandLine.arguments
-        guard arguments.count == 4 else { throw FixtureError.invalidArguments }
+        guard arguments.count == 4 || arguments.count == 5 else { throw FixtureError.invalidArguments }
         let mode = arguments[1]
+        let directory = URL(fileURLWithPath: arguments[2])
         let reference = NearbyPublicReference(
-            directory: URL(fileURLWithPath: arguments[2]),
+            directory: directory,
             bundledFile: arguments[3] == "-" ? nil : URL(fileURLWithPath: arguments[3]),
             availableCapacity: { _ in 100_000_000 }
         )
-        let discovery = NearbyDiscovery(publicReference: reference)
+        if mode == "receive-checkpoint" {
+            guard arguments.count == 5 else { throw FixtureError.invalidArguments }
+            let seed = try Data(contentsOf: URL(fileURLWithPath: arguments[4]))
+            let prefix = Data(seed.prefix(512))
+            try reference.saveCheckpoint(prefix)
+            guard reference.checkpoint() == prefix else { throw FixtureError.unexpectedTransfer }
+        }
+        var references = [reference]
+        if mode.hasSuffix("-catalog") {
+            guard let entry = NearbyPublicReference.mainCatalog.first(where: { $0.id == "neighborhood-status-log-v1" }),
+                  mode != "serve-catalog" || arguments.count == 5 else { throw FixtureError.invalidArguments }
+            references.append(NearbyPublicReference(
+                entry: entry, directory: directory,
+                bundledFile: mode == "serve-catalog" ? URL(fileURLWithPath: arguments[4]) : nil,
+                availableCapacity: { _ in 100_000_000 }
+            ))
+        }
+        let discovery = NearbyDiscovery(publicReferences: references)
         let draining = mode.hasSuffix("-draining")
+        var receivingIDs = Set<String>()
         var stoppedDiscoveryForTransfer = false
-        if draining {
+        if draining || mode == "receive-catalog" {
             discovery.activityDidChange = { [weak discovery] active in
                 guard active, let discovery else { return }
-                precondition(discovery.hasActivePublicReceive == (mode == "receive-draining"))
-                discovery.finishTransfersWithoutDiscovery()
-                stoppedDiscoveryForTransfer = !discovery.isRunning
+                receivingIDs.formUnion(discovery.activePublicReceiveIDs)
+                if draining {
+                    precondition(discovery.activePublicReceiveIDs == (mode == "receive-draining" ? [reference.entry.id] : []))
+                    discovery.finishTransfersWithoutDiscovery()
+                    stoppedDiscoveryForTransfer = !discovery.isRunning
+                }
             }
         }
         discovery.start(publicSync: mode != "disabled")
         defer { discovery.stop() }
 
         switch mode {
-        case "serve", "serve-draining":
-            guard reference.loadVerified() != nil else { throw FixtureError.missingReference }
+        case "serve", "serve-draining", "serve-catalog":
+            guard references.allSatisfy({ $0.loadVerified() != nil }) else { throw FixtureError.missingReference }
             try await Task.sleep(for: .seconds(50))
-        case "receive", "receive-draining", "disabled":
+        case "receive", "receive-draining", "receive-checkpoint", "receive-catalog", "disabled":
             let deadline = ContinuousClock.now + .seconds(mode == "disabled" ? 5 : 26)
             while ContinuousClock.now < deadline {
-                if discovery.publicReferenceText != nil {
-                    guard mode != "disabled", reference.loadVerified() != nil,
-                          !draining || stoppedDiscoveryForTransfer else {
+                if discovery.publicReferences.count == references.count {
+                    guard mode != "disabled", references.allSatisfy({ $0.loadVerified() != nil }),
+                          !draining || stoppedDiscoveryForTransfer,
+                          mode != "receive-catalog" || receivingIDs == Set(references.map(\.entry.id)),
+                          discovery.activePublicReceiveIDs.isEmpty,
+                          mode != "receive-checkpoint" || reference.checkpoint().isEmpty else {
                         throw FixtureError.unexpectedTransfer
                     }
                     if draining { print("Verified receipt after Nearby discovery stopped.") }

@@ -64,6 +64,29 @@ final class RegionalRouteStoreTests: XCTestCase {
         XCTAssertEqual(Set(packs.map(\.id)), [original.id, eastOnly.id])
     }
 
+    func testGuestDirectionsUseTheInstalledEditionAndSelectedPins() async throws {
+        let directory = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = RegionalRouteStore(directory: directory)
+        let source = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Synthetic", withExtension: "tfkroute"))
+        let installed = try await store.install(source)
+
+        let home = HouseholdPlace(name: "Home", latitude: 47.50002, longitude: -122.0004)
+        let pins = (0..<4).map { index in
+            HouseholdPlace(name: "Pin \(index)", latitude: 47.50003, longitude: -122.0035)
+        }
+        let routes = await HouseholdShareDirections.prepare(for: HouseholdSnapshot(home: home, pins: pins), router: store)
+        XCTAssertEqual(routes.count, 6)
+        XCTAssertEqual(Set(routes.map(\.pinID)), Set(pins.prefix(3).map(\.id)))
+        XCTAssertEqual(Set(routes.map(\.modeTitle)), Set(MapTravelMode.allCases.map(\.title)))
+        XCTAssertTrue(routes.allSatisfy {
+            $0.region == installed.pack.region && $0.edition == installed.pack.dataVersion && !$0.steps.isEmpty
+        })
+
+        let withoutHome = await HouseholdShareDirections.prepare(for: HouseholdSnapshot(pins: pins), router: store)
+        XCTAssertTrue(withoutHome.isEmpty)
+    }
+
     private func makeEasternSubset(of source: URL, at destination: URL) throws {
         let original = try Data(contentsOf: source)
         let length = original.withUnsafeBytes { Int($0.loadUnaligned(fromByteOffset: 8, as: UInt32.self).littleEndian) }
