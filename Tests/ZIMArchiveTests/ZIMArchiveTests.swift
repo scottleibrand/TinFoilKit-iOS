@@ -566,10 +566,10 @@ final class ZIMArchiveTests: XCTestCase {
             sha256: String(repeating: "0", count: 64), sizeEstimate: edition.sizeEstimate, attribution: edition.attribution
         )
         do {
-            try await library.installPack(badUpdate, from: fixture)
+            try await library.installPack(badUpdate, from: fixture, replacing: installed.id)
             XCTFail("An archive with a bad checksum was accepted")
         } catch {
-            XCTAssertTrue(error.localizedDescription.contains("checksum"))
+            XCTAssertTrue(error is InstalledLibrary.PublisherChecksumMismatch)
         }
         let archives = try await library.archives()
         XCTAssertEqual(archives, [installed])

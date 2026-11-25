@@ -147,6 +147,9 @@ struct PackDownloadControls: View {
         case nil:
             downloadControls("Download", pack: pack)
         }
+        if let host = downloads.activeMirrorHost(for: pack) {
+            Text("Publisher mirror \(host)").font(.caption).foregroundStyle(.secondary)
+        }
     }
 
     private func downloadControls(_ title: String, pack: PublishedPack) -> some View {
