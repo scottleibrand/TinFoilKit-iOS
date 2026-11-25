@@ -44,3 +44,11 @@ Four desktop starter archives are absent from the iOS catalog. Kiwix's OPDS feed
 | Knots, 2024-08 | 27,945,133 | [Kiwix Metalink](https://download.kiwix.org/zim/other/zimgit-knots_en_2024-08.zim.meta4) |
 
 The broader desktop library also includes WikiMed, Ready.gov, MedlinePlus, field manuals, textbooks, and practical Q&A collections. Verify each prospective edition independently. The iOS English Wikipedia highlights pack covers a smaller selection than the desktop's complete English Wikipedia option. [Desktop catalog](https://github.com/tudor-city-ventures/tinfoil-kit/blob/64179271bcebffc5d76f1e3d13d2592e0089b6b1/kit.json)
+
+## Consolidated candidate on November 25, 2026
+
+All six desktop starter archives have pinned iOS Essentials editions. New one-byte HTTPS probes for the four additions returned HTTP 206 and the exact lengths above. Their Metalinks matched the catalog filenames and SHA-256 digests. In the official English OPDS results, openZIM is the package publisher and Kiwix hosts the downloads. The included documents retain their original terms. All four entries support user-initiated downloads and keep archive sharing disabled. [Current catalog candidate](Sources/TinfoilKit/PackCatalog.json) · [Content notices](THIRD-PARTY.md)
+
+On a fresh installation, **Download Essentials** totals 2,255,961,634 bytes and **Download all** totals 8,607,974,338 bytes, before indexing. WikiMed is an individual 2,302,838,768-byte download. Both complete English Wikipedia editions also remain individual downloads. [WikiMed Metalink](https://download.kiwix.org/zim/other/mdwiki_en_all_maxi_2025-11.zim.meta4)
+
+The print audit verified the exact post-disaster and military-medicine PDF fallbacks. Publisher download recovery, PDF indexing and search, offline reading, and the printable excerpts still need an iPhone run. Ready.gov remains a separate reader verification case. [Print reference checks](PLAN.md#print-reference-checks)
