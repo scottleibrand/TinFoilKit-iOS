@@ -3,6 +3,9 @@ import XCTest
 @testable import TinfoilKit
 
 final class HouseholdBackupTests: XCTestCase {
+    private let supply = HouseholdResource(name: "Water jugs", category: .water, quantity: 8, quantityUnit: .gallons,
+                                           dailyUse: 4, dailyUseUnit: .liters)
+
     func testNativeBackupRoundTripsAndReplacesHousehold() throws {
         let snapshot = HouseholdSnapshot(
             notes: "Call first",
@@ -33,6 +36,54 @@ final class HouseholdBackupTests: XCTestCase {
         for json in [#"{"format":null,"pins":[]}"#, #"{"format":"foreign","home":null}"#] {
             XCTAssertThrowsError(try HouseholdBackup.importing(Data(json.utf8), asText: false, into: snapshot))
         }
+    }
+
+    func testResourceInventoryRoundTripsAndDesktopImportsPreserveIt() throws {
+        let snapshot = HouseholdSnapshot(notes: "Household", resources: [supply])
+        let data = try HouseholdBackup.encode(snapshot)
+        XCTAssertEqual(try HouseholdBackup.importing(data, as: .native, into: HouseholdSnapshot()), snapshot)
+
+        let places = try DesktopHouseholdFiles.encodePlaces(snapshot)
+        let notes = try DesktopHouseholdFiles.encodeNotes(snapshot)
+        XCTAssertEqual(try HouseholdBackup.importing(places, as: .desktopPlaces, into: snapshot).resources, [supply])
+        XCTAssertEqual(try HouseholdBackup.importing(notes, as: .desktopNotes, into: snapshot).resources, [supply])
+        XCTAssertNil(try HouseholdBackup.importing(places, as: .desktopPlaces, into: HouseholdSnapshot()).resources)
+
+        let older = Data(#"{"format":"org.tinfoilkit.household-backup","version":1,"household":{"notes":"Legacy","pins":[]}}"#.utf8)
+        let restored = try HouseholdBackup.importing(older, as: .native, into: snapshot)
+        XCTAssertEqual(restored.notes, "Legacy")
+        XCTAssertNil(restored.resources)
+    }
+
+    func testBackupRejectsInvalidOrDuplicateResources() throws {
+        var invalid = supply
+        invalid.quantity = -1
+        for resources in [[supply, supply], [invalid]] {
+            let snapshot = HouseholdSnapshot(resources: resources)
+            XCTAssertThrowsError(try HouseholdBackup.encode(snapshot))
+            let encodedSnapshot = try JSONEncoder().encode(snapshot)
+            let backup = Data(("{\"format\":\"org.tinfoilkit.household-backup\",\"version\":1,\"household\":" +
+                               String(decoding: encodedSnapshot, as: UTF8.self) + "}").utf8)
+            XCTAssertThrowsError(try HouseholdBackup.importing(backup, as: .native, into: HouseholdSnapshot()))
+        }
+    }
+
+    @MainActor
+    func testInventoryEditsAndDeletePersistWithoutOverwritingNotes() throws {
+        let folder = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let file = folder.appendingPathComponent("household.json")
+        let store = HouseholdStore(file: file)
+        try store.saveNotes("Keep")
+        try store.saveResource(supply)
+        var updated = supply
+        updated.quantity = 1
+        try store.saveResource(updated)
+        let loaded = HouseholdStore(file: file)
+        XCTAssertEqual(loaded.snapshot.resources, [updated])
+        XCTAssertEqual(loaded.snapshot.notes, "Keep")
+        try loaded.removeResource(updated.id)
+        XCTAssertEqual(HouseholdStore(file: file).snapshot, HouseholdSnapshot(notes: "Keep"))
     }
 
     @MainActor

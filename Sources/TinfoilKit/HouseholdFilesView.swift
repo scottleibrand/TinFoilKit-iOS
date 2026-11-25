@@ -42,7 +42,7 @@ struct HouseholdFilesView: View {
                     Button("Home and pins (places.json)") { beginExport(.places) }
                 }
             } footer: {
-                Text("The backup contains your notes, home, and pins. Save it somewhere you trust.")
+                Text("The backup contains your notes, home, pins, and supplies. Save it somewhere you trust.")
             }
             .disabled(household.loadError != nil)
         }
@@ -73,9 +73,15 @@ struct HouseholdFilesView: View {
                 }
             }
         } message: { preview in
-            Text(preview.startsFresh
-                 ? "Create an empty household and keep a separate copy of the damaged file."
-                 : "Replace the household information included in this file.")
+            if preview.startsFresh {
+                Text("Create an empty household and keep a separate copy of the damaged file.")
+            } else if !(preview.before.resources ?? []).isEmpty && (preview.after.resources ?? []).isEmpty {
+                Text("Restore this household backup and clear your current supplies.")
+            } else if preview.before.resources != preview.after.resources {
+                Text("Restore this household backup, including its supplies.")
+            } else {
+                Text("Replace the household information included in this file.")
+            }
         }
         .alert("Household file error", isPresented: Binding(
             get: { errorMessage != nil },
