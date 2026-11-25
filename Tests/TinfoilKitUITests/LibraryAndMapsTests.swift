@@ -61,6 +61,28 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertFalse(app.buttons["Search Kiwix"].isEnabled)
     }
 
+    func testOfflineAskQuoteOpensItsPDFWithoutAModel() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-askUsesOnDeviceModel", "NO"]
+        app.launch()
+        guard app.staticTexts["Offline Ask PDF Fixture"].waitForExistence(timeout: 8) else {
+            throw XCTSkip("Stage the synthetic PDF fixture as an installed Library archive.")
+        }
+        app.tabBars.buttons["Ask"].tap()
+        let question = app.descendants(matching: .any)["ask-question"].firstMatch
+        XCTAssertTrue(question.waitForExistence(timeout: 10))
+        question.tap()
+        question.typeText("ceramic filtration protozoa")
+        app.buttons["ask-submit"].tap()
+
+        let quote = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "ask-quote-")).firstMatch
+        XCTAssertTrue(quote.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Ceramic filtration"))
+            .firstMatch.exists)
+        quote.tap()
+        XCTAssertTrue(app.buttons["Find in document"].waitForExistence(timeout: 10))
+    }
+
     func testWaterOutageAsksForTheServiceArea() {
         let app = XCUIApplication()
         app.launchArguments = ["-askUsesOnDeviceModel", "NO"]
@@ -108,6 +130,40 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Map"].waitForExistence(timeout: 8))
         XCTAssertTrue(central.waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["Open in Google Maps"].firstMatch.exists)
+    }
+
+    func testAskCoordinatesOfferBothModesAndOpenDrivingSteps() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-askUsesOnDeviceModel", "NO", "-mapDownloadPolicy", "off"]
+        app.launch()
+        app.tabBars.buttons["Ask"].tap()
+        let question = app.descendants(matching: .any)["ask-question"].firstMatch
+        XCTAssertTrue(question.waitForExistence(timeout: 10))
+        question.tap()
+        question.typeText("Directions to 47.50003, -122.0035")
+        app.buttons["ask-dismiss-keyboard"].tap()
+        app.buttons["ask-submit"].tap()
+
+        let driving = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Driving to 47.500030")).firstMatch
+        guard driving.waitForExistence(timeout: 5) else {
+            if app.buttons["Open Map"].exists {
+                throw XCTSkip("Set Home to the east endpoint of the synthetic routing graph first.")
+            }
+            XCTFail("Expected a driving choice for the entered coordinates.")
+            return
+        }
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Walking to 47.500030"))
+            .firstMatch.exists)
+        driving.tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let denyLocation = springboard.alerts.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH 'Don' AND label ENDSWITH 'Allow'")
+        ).firstMatch
+        if denyLocation.waitForExistence(timeout: 3) { denyLocation.tap() }
+        let steps = app.buttons["Route steps"]
+        XCTAssertTrue(steps.waitForExistence(timeout: 15), "Install the synthetic routing graph before this check.")
+        steps.tap()
+        XCTAssertTrue(app.navigationBars["Route steps"].waitForExistence(timeout: 5))
     }
 
     func testHouseholdNotesSurviveSwitchingTabsAndRelaunch() {
@@ -574,10 +630,17 @@ final class LibraryAndMapsTests: XCTestCase {
         done.tap()
         XCTAssertTrue(app.tabBars.buttons["Library"].isHittable)
         app.buttons["ask-submit"].tap()
-        XCTAssertTrue(app.staticTexts["Matching passages"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["Quotes from saved sources"].waitForExistence(timeout: 30))
         XCTAssertFalse(app.staticTexts["Answer"].exists)
+        let citation = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "ask-quote-")).firstMatch
+        for _ in 0..<3 where !citation.isHittable { app.swipeUp() }
+        XCTAssertTrue(citation.isHittable)
+        citation.tap()
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Done"].tap()
         let online = app.buttons["Ask online"]
-        XCTAssertTrue(online.waitForExistence(timeout: 5))
+        for _ in 0..<3 where !online.isHittable { app.swipeUp() }
+        XCTAssertTrue(online.isHittable)
         online.tap()
         XCTAssertTrue(app.buttons["Search Google"].waitForExistence(timeout: 5))
         for provider in ["ChatGPT", "Claude", "Google Gemini"] {
