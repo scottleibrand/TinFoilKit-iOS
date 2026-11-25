@@ -20,6 +20,18 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Ask"].exists)
     }
 
+    func testPublisherSearchOpensFromContentPacks() {
+        let app = XCUIApplication()
+        app.launch()
+        let contentPacks = app.buttons["Content packs"]
+        XCTAssertTrue(contentPacks.waitForExistence(timeout: 10))
+        contentPacks.tap()
+        app.buttons["Find publisher books"].tap()
+        XCTAssertTrue(app.navigationBars["Find publisher books"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["Book title or topic"].exists)
+        XCTAssertFalse(app.buttons["Search Kiwix"].isEnabled)
+    }
+
     func testWaterOutageAsksForTheServiceArea() {
         let app = XCUIApplication()
         app.launchArguments = ["-askUsesOnDeviceModel", "NO"]
@@ -310,25 +322,42 @@ final class LibraryAndMapsTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
 
-        let fixture = app.staticTexts.containing(NSPredicate(format: "label CONTAINS[c] 'Climate'")).firstMatch
+        let fixture = app.staticTexts.matching(
+            NSPredicate(format: "label == %@ OR label == %@", "Climate change by Wikipedia", "Climate Test")
+        ).firstMatch
         if !fixture.exists {
             if app.buttons["Import from Files"].exists {
                 app.buttons["Import from Files"].tap()
             } else {
                 app.buttons["Import archive"].tap()
             }
-            let picker = XCUIApplication(bundleIdentifier: "com.apple.DocumentsApp")
+            let remotePicker = XCUIApplication(bundleIdentifier: "com.apple.DocumentsApp")
+            let picker = app.buttons["Cancel"].waitForExistence(timeout: 3) ? app : remotePicker
             let file = picker.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Climate Test'")).firstMatch
             if !file.waitForExistence(timeout: 3) {
-                if picker.buttons["Browse"].exists { picker.buttons["Browse"].tap() }
-                let local = picker.staticTexts["On My iPhone"].firstMatch
-                if local.waitForExistence(timeout: 4) { local.tap() }
+                let browse = picker.tabBars.buttons["Browse"].firstMatch
+                if browse.exists, !browse.isSelected {
+                    browse.tap()
+                } else if !browse.exists, picker.buttons["Browse"].firstMatch.exists {
+                    picker.buttons["Browse"].firstMatch.tap()
+                }
                 let folder = picker.staticTexts["Tinfoil Kit"].firstMatch
+                if !folder.exists {
+                    let local = picker.staticTexts["On My iPhone"].firstMatch
+                    if local.waitForExistence(timeout: 4) { local.tap() }
+                }
                 if folder.waitForExistence(timeout: 4) { folder.tap() }
             }
             XCTAssertTrue(file.waitForExistence(timeout: 10), "The simulator Documents folder needs Climate Test.zim")
-            file.tap()
-            XCTAssertTrue(fixture.waitForExistence(timeout: 20))
+            let tile = picker.cells.containing(NSPredicate(format: "label BEGINSWITH 'Climate Test'")).firstMatch
+            if tile.exists {
+                tile.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap()
+            } else {
+                file.tap()
+            }
+            let confirm = picker.buttons["Open"].firstMatch
+            if confirm.exists, confirm.isEnabled { confirm.tap() }
+            XCTAssertTrue(fixture.waitForExistence(timeout: 20), app.debugDescription)
         }
 
         app.terminate()
