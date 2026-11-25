@@ -435,7 +435,9 @@ final class LibraryAndMapsTests: XCTestCase {
         region.tap()
         app.buttons["Review download"].tap()
         let install = app.buttons["Download and install"]
-        XCTAssertTrue(install.waitForExistence(timeout: 30))
+        XCTAssertTrue(app.descendants(matching: .any)["Data source"].firstMatch.waitForExistence(timeout: 30))
+        for _ in 0..<4 where !install.isHittable { app.swipeUp() }
+        XCTAssertTrue(install.isHittable)
         install.tap()
         let credit = app.descendants(matching: .any)["© OpenStreetMap contributors · Protomaps"].firstMatch
         XCTAssertTrue(credit.waitForExistence(timeout: 180), "Expected the downloaded basemap to finish installing.")
