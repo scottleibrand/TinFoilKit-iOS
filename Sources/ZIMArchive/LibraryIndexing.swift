@@ -24,7 +24,7 @@ public final class LibraryIndexing: ObservableObject {
 
     private let library: InstalledLibrary
     private var worker: Task<Void, Never>?
-    private var activeBuild: (id: UUID, task: Task<Void, Error>)?
+    private var activeBuild: (id: UUID, archiveID: UUID, task: Task<Void, Error>)?
     private var completedIndexes: Set<UUID> = []
     private var removing: Set<UUID> = []
     private var inventoryRevision = 0
@@ -74,11 +74,11 @@ public final class LibraryIndexing: ObservableObject {
             completedIndexes.formIntersection(ids)
             errors = errors.filter { ids.contains($0.key) }
             refreshError = nil
-            if let progress, !removing.contains(progress.id),
-               let current = archives.first(where: { $0.id == progress.id }),
+            if let activeBuild, !removing.contains(activeBuild.archiveID),
+               let current = archives.first(where: { $0.id == activeBuild.archiveID }),
                LibraryIndexQueue.shouldPreempt(current, for: nextArchive) {
                 // The builder resumes from its last committed article batch.
-                activeBuild?.task.cancel()
+                activeBuild.task.cancel()
             }
             startIfNeeded()
         } catch {
@@ -94,7 +94,7 @@ public final class LibraryIndexing: ObservableObject {
             removing.remove(id)
             startIfNeeded()
         }
-        if progress?.id == id, let activeBuild {
+        if let activeBuild, activeBuild.archiveID == id {
             activeBuild.task.cancel()
             _ = await activeBuild.task.result
         }
@@ -139,7 +139,6 @@ public final class LibraryIndexing: ObservableObject {
             guard processingAllowed, nextArchive?.id == archive.id else { continue }
             let index = ArticleIndex(archiveURL: url)
             if !index.isReady {
-                progress = Progress(id: archive.id, title: archive.title, fraction: 0)
                 nextSearchUpdate = .now
                 let buildID = UUID()
                 let build = Task.detached(priority: .utility) { [weak self] in
@@ -147,7 +146,7 @@ public final class LibraryIndexing: ObservableObject {
                         Task { @MainActor in
                             guard let self, self.activeBuild?.id == buildID else { return }
                             let latest = max(self.progress?.fraction ?? 0, fraction)
-                            self.progress?.fraction = latest
+                            self.progress = Progress(id: archive.id, title: archive.title, fraction: latest)
                             guard fraction > 0, fraction < 1, ContinuousClock.now >= self.nextSearchUpdate else { return }
                             if !self.searchable.contains(archive.id) { self.searchable.insert(archive.id) }
                             self.searchRevision += 1
@@ -155,7 +154,7 @@ public final class LibraryIndexing: ObservableObject {
                         }
                     }
                 }
-                activeBuild = (buildID, build)
+                activeBuild = (buildID, archive.id, build)
                 let result = await build.result
                 activeBuild = nil
                 progress = nil

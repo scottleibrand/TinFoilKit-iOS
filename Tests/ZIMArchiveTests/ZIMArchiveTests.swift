@@ -480,22 +480,28 @@ final class ZIMArchiveTests: XCTestCase {
         XCTAssertGreaterThan(try XCTUnwrap(file.resourceValues(forKeys: [.fileSizeKey]).fileSize), 1 << 30)
         let index = ArticleIndex(archiveURL: file)
         let interrupted = Task.detached {
-            try index.build(archiveURL: file) { progress in
-                if progress > 0 { withUnsafeCurrentTask { $0?.cancel() } }
-            }
+            var checkpoint = 0.0
+            do {
+                try index.build(archiveURL: file) { progress in
+                    if progress > 0 {
+                        checkpoint = progress
+                        withUnsafeCurrentTask { $0?.cancel() }
+                    }
+                }
+                XCTFail("Indexing should have been interrupted after its first committed batch")
+            } catch is CancellationError {}
+            return checkpoint
         }
-        do {
-            try await interrupted.value
-            XCTFail("Indexing should have been interrupted after its first committed batch")
-        } catch is CancellationError {}
+        let checkpoint = try await interrupted.value
+        XCTAssertGreaterThan(checkpoint, 0)
+        XCTAssertLessThan(checkpoint, 1)
         XCTAssertFalse(index.isReady)
 
         var firstProgress: Double?
-        try index.build(archiveURL: file) { progress in
+        try ArticleIndex(archiveURL: file).build(archiveURL: file) { progress in
             if firstProgress == nil { firstProgress = progress }
         }
-        XCTAssertGreaterThan(try XCTUnwrap(firstProgress), 0)
-        XCTAssertLessThan(try XCTUnwrap(firstProgress), 1)
+        XCTAssertEqual(firstProgress, checkpoint)
 
         let reopenedIndex = ArticleIndex(archiveURL: file)
         let matches = try reopenedIndex.search("anthropogenic")
