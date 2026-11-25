@@ -8,9 +8,12 @@ enum OnlineSourceArchiver {
     private static let maximumText = 250_000
     private static let parallelRequests = 5
 
-    static func capture(_ citations: [OnlineAskCitation]) async throws -> [OnlineAskSavedSource] {
+    static func capture(_ citations: [OnlineAskCitation], allowMetered: Bool = true) async throws -> [OnlineAskSavedSource] {
         guard !citations.isEmpty else { return [] }
         let configuration = URLSessionConfiguration.ephemeral
+        configuration.allowsCellularAccess = allowMetered
+        configuration.allowsExpensiveNetworkAccess = allowMetered
+        configuration.allowsConstrainedNetworkAccess = allowMetered
         configuration.urlCache = nil
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false

@@ -6,6 +6,7 @@ struct AskLibraryView: View {
     @ObservedObject var indexing: LibraryIndexing
     @ObservedObject var household: HouseholdStore
     let openMap: (MapOpenRequest?) -> Void
+    @EnvironmentObject private var deferredAsk: DeferredAskController
     @AppStorage("askUsesOnDeviceModel") private var useModel = true
     @State private var includeHouseholdNotes = false
     @FocusState private var questionFocused: Bool
@@ -130,6 +131,10 @@ struct AskLibraryView: View {
             }
             .task(id: request?.id) {
                 if let request { await run(request) }
+            }
+            .onChange(of: deferredAsk.savedContentRevision) {
+                let query = currentQuestion
+                if !query.isEmpty { Task { await refreshSavedContent(for: query) } }
             }
             .sheet(item: $onlineSheet) { sheet in
                 OnlineAskView(question: sheet.question) {
