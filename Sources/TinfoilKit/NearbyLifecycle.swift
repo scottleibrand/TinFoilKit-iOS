@@ -14,12 +14,17 @@ final class NearbyLifecycle: ObservableObject {
     private var nearbyScreens: Set<UUID> = []
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     private var assertionID: UUID?
-    private var backgroundReceiveID: String?
+    private var backgroundReceiveIDs: [String] = []
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         publicSyncEnabled = defaults.bool(forKey: Self.preferenceKey)
-        discovery = NearbyDiscovery()
+        let catalog = NearbyArchiveCatalog(downloads: .shared)
+        let archiveTransfer = catalog.pins.isEmpty ? nil : NearbyArchiveTransfer(
+            catalog: .init(pins: catalog.pins, needs: catalog.needs, source: catalog.source, install: catalog.install),
+            directory: URL.applicationSupportDirectory.appendingPathComponent("NearbyArchives", isDirectory: true)
+        )
+        discovery = NearbyDiscovery(archiveTransfer: archiveTransfer)
         notifications = NearbyResumeNotifications(defaults: defaults)
         discovery.activityDidChange = { [weak self] active in self?.transferActivityChanged(active) }
     }
@@ -28,7 +33,7 @@ final class NearbyLifecycle: ObservableObject {
         guard phase != self.phase else { return }
         self.phase = phase
         if phase == .background {
-            backgroundReceiveID = publicSyncEnabled ? discovery.activePublicReceiveID : nil
+            backgroundReceiveIDs = publicSyncEnabled ? discovery.activePublicReceiveIDs : []
             if backgroundTask != .invalid, publicSyncEnabled, discovery.hasActivePublicTransfer {
                 discovery.finishTransfersWithoutDiscovery()
             } else {
@@ -37,7 +42,7 @@ final class NearbyLifecycle: ObservableObject {
                 endBackgroundTask()
             }
         } else {
-            backgroundReceiveID = nil
+            backgroundReceiveIDs = []
             if phase == .active { notifications.clear() }
             updateDiscovery()
         }
@@ -54,7 +59,7 @@ final class NearbyLifecycle: ObservableObject {
         publicSyncEnabled = enabled
         defaults.set(enabled, forKey: Self.preferenceKey)
         if !enabled {
-            backgroundReceiveID = nil
+            backgroundReceiveIDs = []
             notifications.clear()
             discovery.stop()
             endBackgroundTask()
@@ -97,9 +102,9 @@ final class NearbyLifecycle: ObservableObject {
     }
 
     private func notifyIfReceiveInterrupted() {
-        guard let referenceID = backgroundReceiveID else { return }
-        backgroundReceiveID = nil
-        if publicSyncEnabled, !discovery.publicReferences.contains(where: { $0.id == referenceID }) {
+        let interrupted = backgroundReceiveIDs.contains { !discovery.receivedPublicItem($0) }
+        backgroundReceiveIDs = []
+        if publicSyncEnabled, interrupted {
             notifications.notifyInterruptedReceive()
         }
     }
