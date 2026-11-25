@@ -92,6 +92,7 @@ private struct LibraryView: View {
     @State private var query = ""
     @State private var results: [SummarySource] = []
     @State private var resultsQuery = ""
+    @State private var unavailableSearchArchives = 0
     @State private var summary: SummaryRequest?
     @State private var sharedArchive: SharedArchive?
     @State private var pendingRemoval: ArchiveRemoval?
@@ -243,7 +244,10 @@ private struct LibraryView: View {
         } else if resultsQuery != searchQuery {
             ProgressView("Searching library")
         } else if results.isEmpty {
-            if indexing.hasPendingIndexes {
+            if unavailableSearchArchives > 0 {
+                ContentUnavailableView("No matches found", systemImage: "magnifyingglass",
+                                       description: Text("Some archives could not be fully searched."))
+            } else if indexing.hasPendingIndexes {
                 ContentUnavailableView("No matches yet", systemImage: "magnifyingglass",
                                        description: Text("Search updates as more articles are indexed."))
             } else {
@@ -255,10 +259,16 @@ private struct LibraryView: View {
     }
 
     private var searchResults: some View {
-        List {
-            if ArticleSummaryView.isAvailable {
+        let passages = results.filter { !$0.match.excerpt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return List {
+            if unavailableSearchArchives > 0 {
+                Text("Some archives could not be fully searched.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            if ArticleSummaryView.isAvailable, !passages.isEmpty {
                 Button("Summarize matching articles", systemImage: "text.justify.leading") {
-                    summary = SummaryRequest(question: query, sources: Array(results.prefix(5)))
+                    summary = SummaryRequest(question: query, sources: Array(passages.prefix(5)))
                 }
             }
             ForEach(results) { result in
@@ -267,7 +277,9 @@ private struct LibraryView: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(result.match.title)
-                        Text(result.match.excerpt).font(.subheadline).lineLimit(3)
+                        if !result.match.excerpt.isEmpty {
+                            Text(result.match.excerpt).font(.subheadline).lineLimit(3)
+                        }
                         Text(result.archive.title).font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -441,17 +453,23 @@ private struct LibraryView: View {
         }
         do {
             try await Task.sleep(for: .milliseconds(180))
+            var titleCache: [UUID: [ZIMArchive.ArticleTitle]] = [:]
             for await _ in updates {
                 do {
-                    let matches = try await searchIndexes(for: requested)
+                    let search = try await searchIndexes(for: requested, titleCache: titleCache)
                     try Task.checkCancellation()
-                    results = matches
+                    titleCache = search.titleCache
+                    results = search.matches
+                    unavailableSearchArchives = search.unavailableCount
                     resultsQuery = requested
                 } catch is CancellationError {
                     return
                 } catch {
                     guard !Task.isCancelled else { return }
-                    if resultsQuery != requested { results = [] }
+                    if resultsQuery != requested {
+                        results = []
+                        unavailableSearchArchives = 0
+                    }
                     resultsQuery = requested
                     errorMessage = error.localizedDescription
                 }
@@ -462,22 +480,18 @@ private struct LibraryView: View {
         }
     }
 
-    private func searchIndexes(for requested: String) async throws -> [SummarySource] {
-        var sources: [(InstalledArchive, ArticleIndex)] = []
-        for archive in archives where indexing.searchable.contains(archive.id) {
+    private func searchIndexes(
+        for requested: String, titleCache: [UUID: [ZIMArchive.ArticleTitle]]
+    ) async throws -> LibraryArchiveSearch.Output {
+        var sources: [(InstalledArchive, URL)] = []
+        for archive in archives {
             try Task.checkCancellation()
             let url = await library.fileURL(for: archive.id)
-            sources.append((archive, ArticleIndex(archiveURL: url)))
+            sources.append((archive, url))
         }
         let inputs = sources
         let worker = Task.detached(priority: .userInitiated) {
-            let groups = try inputs.map { archive, index in
-                try Task.checkCancellation()
-                return try index.search(requested, includeIncomplete: true, prefixMatching: true).map {
-                    SummarySource(archive: archive, match: $0)
-                }
-            }
-            return LibraryResultOrder.interleave(groups, limit: 50)
+            try LibraryArchiveSearch.search(requested, in: inputs, titleCache: titleCache)
         }
         return try await withTaskCancellationHandler {
             try await worker.value

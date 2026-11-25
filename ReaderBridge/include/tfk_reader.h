@@ -5,7 +5,8 @@
 
 typedef struct TFKArchive TFKArchive;
 typedef struct TFKResource TFKResource;
-typedef struct TFKPDFEntry TFKPDFEntry;
+typedef struct TFKEntryMetadata TFKEntryMetadata;
+typedef struct TFKTitleMatches TFKTitleMatches;
 
 /* Callers supply valid file and path strings and release owned handles. An
  * error output, if provided, must point to an empty slot. Read operations
@@ -22,13 +23,22 @@ TFKResource *tfk_archive_resource(const TFKArchive *archive, const char *path, c
 /* Returns a non-redirect HTML article at a URL-table index. A null result
  * with no error means the entry is outside the searchable article set. */
 TFKResource *tfk_archive_article(const TFKArchive *archive, uint32_t index, char **error);
+/* Returns at most maximum_bytes of an HTML article for indexing. An unreadable
+ * compressed cluster can be skipped with a null result and no error. */
+TFKResource *tfk_archive_article_prefix(const TFKArchive *archive, uint32_t index, size_t maximum_bytes, char **error);
+
+/* The result owns up to 30 title matches. Entry metadata is borrowed until
+ * the result is closed. Entry lookup returns null after the final match. */
+TFKTitleMatches *tfk_archive_title_prefix(const TFKArchive *archive, const char *prefix, char **error);
+const TFKEntryMetadata *tfk_title_matches_entry(const TFKTitleMatches *matches, size_t index);
+void tfk_title_matches_close(TFKTitleMatches *matches);
 
 /* Returns a non-redirect PDF entry without reading the PDF bytes. A null
  * result with no error means the entry is not a PDF. */
-TFKPDFEntry *tfk_archive_pdf_entry(const TFKArchive *archive, uint32_t index, char **error);
-const char *tfk_pdf_entry_path(const TFKPDFEntry *entry);
-const char *tfk_pdf_entry_title(const TFKPDFEntry *entry);
-void tfk_pdf_entry_close(TFKPDFEntry *entry);
+TFKEntryMetadata *tfk_archive_pdf_entry(const TFKArchive *archive, uint32_t index, char **error);
+const char *tfk_entry_metadata_path(const TFKEntryMetadata *entry);
+const char *tfk_entry_metadata_title(const TFKEntryMetadata *entry);
+void tfk_entry_metadata_close(TFKEntryMetadata *entry);
 
 /* Resource strings and bytes are borrowed until the resource is closed. */
 const char *tfk_resource_path(const TFKResource *resource);

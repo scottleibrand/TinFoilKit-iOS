@@ -14,6 +14,18 @@ private final class Fractions: @unchecked Sendable {
 }
 
 final class ZIMArchiveTests: XCTestCase {
+    func testEmbeddedArticleTitlesAreSearchableBeforeIndexing() throws {
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "climate", withExtension: "zim"))
+        let archive = try ZIMArchive(fileURL: fixture)
+        let matches = try archive.articleTitles(matching: "climate   change")
+        let article = try XCTUnwrap(matches.first { $0.title == "Climate change" })
+
+        XCTAssertTrue(try archive.resource(at: article.path).mimeType.hasPrefix("text/html"))
+        XCTAssertLessThanOrEqual(matches.count, 30)
+        XCTAssertEqual(Set(matches.map(\.path)).count, matches.count)
+        XCTAssertTrue(try archive.articleTitles(matching: "zz-no-such-article-title").isEmpty)
+    }
+
     func testImportedArchiveVerificationDetectsCorruption() async throws {
         let directory = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -345,6 +357,79 @@ final class ZIMArchiveTests: XCTestCase {
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: storage.path).isEmpty)
     }
 
+    func testIndexContinuesAfterOversizedHTML() throws {
+        let directory = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("oversized.zim")
+        try writeArchiveWithOversizedArticle(to: file)
+
+        let archive = try ZIMArchive(fileURL: file)
+        XCTAssertThrowsError(try archive.article(at: 0))
+        let sample = try XCTUnwrap(archive.article(at: 0, maximumBytes: 512 * 1024))
+        XCTAssertEqual(sample.data.count, 512 * 1024)
+        XCTAssertTrue(String(decoding: sample.data.prefix(100), as: UTF8.self).contains("water storage"))
+
+        let index = ArticleIndex(archiveURL: file)
+        try index.build(archiveURL: file)
+        XCTAssertTrue(index.isReady)
+        XCTAssertEqual(try index.search("cistern").map(\.path), ["small"])
+    }
+
+    private func writeArchiveWithOversizedArticle(to file: URL) throws {
+        func append<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
+            withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
+        }
+
+        let oversizedSize = UInt32(65 * 1024 * 1024)
+        let oversizedStart = Data("<html><body>water storage</body></html>".utf8)
+        let smallArticle = Data("<html><body>inspect the cistern</body></html>".utf8)
+        let mime = Data("text/html\0\0".utf8)
+        let urlTable = 80 + mime.count
+        let clusterTable = urlTable + 2 * 8
+        let firstEntry = clusterTable + 8
+
+        var entries = Data()
+        var entryOffsets: [Int] = []
+        for (blob, name) in ["oversized", "small"].enumerated() {
+            entryOffsets.append(firstEntry + entries.count)
+            append(UInt16(0), to: &entries) // HTML MIME index
+            entries.append(contentsOf: [0, 0x43]) // no parameters, namespace C
+            append(UInt32(0), to: &entries) // revision
+            append(UInt32(0), to: &entries) // cluster index
+            append(UInt32(blob), to: &entries)
+            entries.append(contentsOf: "\(name)\0\(name) article\0".utf8)
+        }
+        let cluster = firstEntry + entries.count
+
+        var bytes = Data()
+        append(UInt32(0x044D495A), to: &bytes)
+        append(UInt16(6), to: &bytes)
+        append(UInt16(1), to: &bytes)
+        bytes.append(Data(count: 16)) // UUID
+        append(UInt32(2), to: &bytes)
+        append(UInt32(1), to: &bytes)
+        for offset in [UInt64(urlTable), .max, UInt64(clusterTable), 80] { append(offset, to: &bytes) }
+        append(UInt32(0), to: &bytes) // main page
+        append(UInt32.max, to: &bytes) // layout page
+        append(UInt64(0), to: &bytes) // no checksum
+        bytes.append(mime)
+        for offset in entryOffsets + [cluster] { append(UInt64(offset), to: &bytes) }
+        bytes.append(entries)
+        bytes.append(1) // uncompressed cluster
+        let firstBlob = UInt32(3 * 4)
+        let smallBlob = firstBlob + oversizedSize
+        for offset in [firstBlob, smallBlob, smallBlob + UInt32(smallArticle.count)] { append(offset, to: &bytes) }
+        bytes.append(oversizedStart)
+        bytes.append(Data(repeating: 0x20, count: 512 * 1024 - oversizedStart.count))
+        try bytes.write(to: file)
+
+        let output = try FileHandle(forWritingTo: file)
+        defer { try? output.close() }
+        try output.seek(toOffset: UInt64(cluster + 1) + UInt64(smallBlob))
+        try output.write(contentsOf: smallArticle)
+    }
+
     func testFullTextSearchResumesForAnArchiveAboveOneGiB() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -539,6 +624,54 @@ final class ZIMArchiveTests: XCTestCase {
         XCTAssertEqual(reused, installed)
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
         try await reopened.verifyArchive(installed)
+    }
+
+    func testInstalledPublisherPackKeepsTitlesAndResumesFullTextSearch() async throws {
+        let root = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "climate", withExtension: "zim"))
+        let staged = root.appendingPathComponent("staged.zim")
+        try FileManager.default.copyItem(at: fixture, to: staged)
+        let size = try XCTUnwrap(staged.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+        let pack = publisherFixture(fixture, byteCount: Int64(size))
+        let directory = root.appendingPathComponent("Library")
+        let library = InstalledLibrary(directory: directory)
+        let installed = try await library.installDownloadedPublishedPack(pack, from: staged)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+        let archiveURL = await library.fileURL(for: installed.id)
+        let archive = try ZIMArchive(fileURL: archiveURL)
+        let title = try XCTUnwrap(archive.articleTitles(matching: "climate change").first { $0.title == "Climate change" })
+        XCTAssertTrue(try archive.resource(at: title.path).mimeType.hasPrefix("text/html"))
+
+        let index = ArticleIndex(archiveURL: archiveURL)
+        let progress = Fractions()
+        let interrupted = Task.detached {
+            try index.build(archiveURL: archiveURL) { fraction in
+                progress.append(fraction)
+                if fraction > 0 { withUnsafeCurrentTask { $0?.cancel() } }
+            }
+        }
+        do {
+            try await interrupted.value
+            XCTFail("Expected indexing to stop after committing a batch")
+        } catch is CancellationError {}
+        XCTAssertTrue(index.hasSearchableIndex)
+        XCTAssertFalse(index.isReady)
+
+        let reopened = InstalledLibrary(directory: directory)
+        let inventory = try await reopened.archives()
+        XCTAssertEqual(inventory, [installed])
+        let resumed = ArticleIndex(archiveURL: archiveURL)
+        var resumedAt: Double?
+        try resumed.build(archiveURL: archiveURL) { if resumedAt == nil { resumedAt = $0 } }
+        let savedFraction = try XCTUnwrap(progress.values.last)
+        XCTAssertGreaterThan(savedFraction, 0)
+        XCTAssertEqual(resumedAt, savedFraction)
+        XCTAssertTrue(resumed.isReady)
+        let matches = try resumed.search("anthropogenic climate change")
+        let match = try XCTUnwrap(matches.first { !$0.excerpt.isEmpty })
+        XCTAssertTrue(try archive.resource(at: match.path).mimeType.hasPrefix("text/html"))
     }
 
     private func publisherFixture(_ source: URL, id: String = "publisher-climate", byteCount: Int64) -> PublishedPack {
