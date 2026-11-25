@@ -40,7 +40,7 @@ Use **Map → + → Import regional bundle** and select a folder containing `man
 
 Use **Map → + → Download regional bundle** when you have the manifest's HTTPS URL and a trusted SHA-256 for that manifest. Review the edition, size and terms before downloading. Cellular data is off by default, and a pending job keeps the network setting chosen at review. You can pause and reopen **Download regional bundle** to resume or discard the pending job after relaunch. A publisher with a strong ETag and byte-range support can resume from the last verified checkpoint. The app verifies all files before installing the bundle.
 
-In Map, press and hold a location to copy its coordinates, set it as home, or save a named pin. Map search accepts saved place names and coordinates in decimal or degrees, minutes, and seconds. The Household tab keeps notes, home, and pins on the device.
+In Map, press and hold a location to copy its coordinates, set it as home, or save a named pin. Map search accepts saved place names and coordinates such as `40.7128, -74.0060`, `40.7128 N 74.0060 W`, and `40°42′46″N 74°0′22″W`. The Household tab keeps notes, home, and pins on the device.
 
 In **Household → Import and export**, save a household backup to Files or restore one on another iPhone. The same screen imports and exports the desktop kit’s `notes.txt` and `places.json` files individually. If the local household file is damaged, restoring a backup or starting a new household keeps a separate copy of the damaged file.
 
@@ -50,7 +50,7 @@ Use Print the Essentials in Household for a printable copy of your household inf
 
 To build a regional address and service index, install `osmium==4.2.0` and run `python Scripts/build-regional-place-index.py region.osm.pbf region.sqlite --region "Region name" --source https://provider.example/region.osm.pbf`, using the actual source URL. Import the resulting SQLite file from Map. Address search and nearby services use all installed regional indexes, regardless of the active basemap. Open **Map → + → Installed place data** to review or remove an index and see its source and attribution.
 
-Import compatible `.tfkroute` packs from Map to plan offline walks and drives and follow individual route steps. The app keeps each pack and looks for one that covers both endpoints. Open **Map → + → Installed routing packs** to check coverage or remove a pack. Build a graph from a regional OSM extract with `python Scripts/build-regional-routing-pack.py --help`. Routing packs are separate from basemap tiles and place indexes. [Routing engine and graph formats](Scripts/routing/README.md)
+Import compatible `.tfkroute` packs from Map, then tap **Directions** to choose **From**, **To**, and a travel mode. The starting point defaults to saved Home when available. Pick a saved pin, current position, an address from installed place data, or coordinates. You can swap the endpoints before calculating the route and tap individual steps to find them on the map. A routing pack must cover both endpoints. Open **Map → + → Installed routing packs** to check coverage or remove a pack. Build a graph from a regional OSM extract with `python Scripts/build-regional-routing-pack.py --help`. Routing packs are separate from basemap tiles and place indexes. [Routing engine and graph formats](Scripts/routing/README.md)
 
 To make a graph available for installation from the app bundle, place its `.tfkroute` file in `.build/routing-packs/` before running XcodeGen. Routing preparation creates this folder even when no graphs are bundled.
 
