@@ -1,22 +1,7 @@
 import PDFKit
 import SwiftUI
 
-final class TemporaryArchivePDF: Sendable {
-    let url: URL
-
-    init(url: URL) { self.url = url }
-
-    deinit { try? FileManager.default.removeItem(at: url) }
-}
-
-final class FileBackedArchivePDF: PDFDocument {
-    private let temporary: TemporaryArchivePDF
-
-    init?(_ temporary: TemporaryArchivePDF) {
-        self.temporary = temporary
-        super.init(url: temporary.url)
-    }
-}
+import ZIMArchive
 
 struct ArchivePDFReader: View {
     let reader: ArchiveReader

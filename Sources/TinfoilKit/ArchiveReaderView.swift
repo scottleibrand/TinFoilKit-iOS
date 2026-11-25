@@ -171,41 +171,8 @@ actor ArchiveReader {
         return try open().directResourceBytes(at: path, offset: offset, count: count)
     }
 
-    /// Opens supported large PDF entries from a file instead of a single buffer.
     func prepareLargePDF(at path: String) throws -> TemporaryArchivePDF? {
-        let archive = try open()
-        let info = try archive.directResourceInfo(at: path)
-        let directory = URL.temporaryDirectory
-        if let info {
-            guard info.mimeType == "application/pdf", info.byteCount > 32 * 1024 * 1024 else { return nil }
-            let capacity = try directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-            if let available = capacity.volumeAvailableCapacityForImportantUsage, available < Int64(info.byteCount) {
-                throw CocoaError(.fileWriteOutOfSpace)
-            }
-        }
-        try Task.checkCancellation()
-        let temporary = TemporaryArchivePDF(url: directory.appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension("pdf"))
-        guard FileManager.default.createFile(atPath: temporary.url.path, contents: nil,
-                                             attributes: [.posixPermissions: 0o600]) else {
-            throw CocoaError(.fileWriteUnknown)
-        }
-        let output = try FileHandle(forWritingTo: temporary.url)
-        defer { try? output.close() }
-        if let info {
-            var offset = 0
-            while offset < info.byteCount {
-                try Task.checkCancellation()
-                let count = min(1_048_576, info.byteCount - offset)
-                try output.write(contentsOf: archive.directResourceBytes(at: path, offset: offset, count: count))
-                offset += count
-            }
-        } else if try !archive.extractCompressedPDF(at: path, to: output.fileDescriptor) {
-            return nil
-        }
-        try output.close()
-        try Task.checkCancellation()
-        return temporary
+        try open().prepareLargePDF(at: path)
     }
 
     func canonicalURL(for request: URL) throws -> URL? {

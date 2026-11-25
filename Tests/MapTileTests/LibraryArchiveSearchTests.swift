@@ -35,8 +35,8 @@ final class LibraryArchiveSearchTests: XCTestCase {
         let healthy = try archive("Available", in: root)
         try writeIndex(for: healthy.1, paths: ["body"])
         for file in [
-            completed.1.deletingLastPathComponent().appendingPathComponent("articles-v2.sqlite"),
-            partial.1.deletingLastPathComponent().appendingPathComponent(".articles-v2-in-progress.sqlite")
+            completed.1.deletingLastPathComponent().appendingPathComponent("articles-v3.sqlite"),
+            partial.1.deletingLastPathComponent().appendingPathComponent(".articles-v3-in-progress.sqlite")
         ] {
             try Data("Not SQLite".utf8).write(to: file)
         }
@@ -71,7 +71,7 @@ final class LibraryArchiveSearchTests: XCTestCase {
         try Data("Not SQLite".utf8).write(to: staged.1.deletingLastPathComponent()
             .appendingPathComponent("articles-v1.sqlite"))
         try Data("Not SQLite".utf8).write(to: legacy.1.deletingLastPathComponent()
-            .appendingPathComponent(".articles-v2-in-progress.sqlite"))
+            .appendingPathComponent(".articles-v3-in-progress.sqlite"))
 
         for (url, path) in [(staged.1, "staged"), (legacy.1, "legacy")] {
             let index = ArticleIndex(archiveURL: url)
@@ -93,7 +93,7 @@ final class LibraryArchiveSearchTests: XCTestCase {
 
     private func writeIndex(for archiveURL: URL, paths: [String], partial: Bool = false, legacy: Bool = false) throws {
         let filename = legacy ? "articles-v1.sqlite"
-            : partial ? ".articles-v2-in-progress.sqlite" : "articles-v2.sqlite"
+            : partial ? ".articles-v3-in-progress.sqlite" : "articles-v3.sqlite"
         let file = archiveURL.deletingLastPathComponent().appendingPathComponent(filename)
         var database: OpaquePointer?
         defer { sqlite3_close(database) }

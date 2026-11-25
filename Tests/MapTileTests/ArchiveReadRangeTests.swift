@@ -1,4 +1,5 @@
 import PDFKit
+import SQLite3
 import XCTest
 import ZIMArchive
 @testable import TinfoilKit
@@ -39,6 +40,28 @@ final class ArchiveReadRangeTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
         document = nil
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+
+        let directory = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let previous = directory.appendingPathComponent("articles-v2.sqlite")
+        var connection: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(previous.path, &connection), SQLITE_OK)
+        do {
+            defer { sqlite3_close(connection) }
+            XCTAssertEqual(sqlite3_exec(connection, """
+                CREATE VIRTUAL TABLE articles USING fts5(path UNINDEXED, title, body, label UNINDEXED);
+                INSERT INTO articles VALUES ('tinfoil-pdf-page:0/large.pdf', 'Old PDF title', '', 'Old PDF title');
+                """, nil, nil, nil), SQLITE_OK)
+        }
+        let archiveIndex = ArticleIndex(archiveURL: directory.appendingPathComponent("archive.zim"))
+        XCTAssertEqual(try archiveIndex.search("old").first?.title, "Old PDF title")
+        try archiveIndex.build(archiveURL: fixture)
+        let match = try XCTUnwrap(archiveIndex.search("offline").first)
+        XCTAssertEqual(ArchivePDFReference(articlePath: match.path)?.path, "large.pdf")
+        XCTAssertEqual(ArchivePDFReference(articlePath: match.path)?.pageIndex, 0)
+        XCTAssertTrue(match.excerpt.contains("PDF fixture"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: previous.path))
     }
 
     func testSelectsClosedOpenAndSuffixRanges() {
