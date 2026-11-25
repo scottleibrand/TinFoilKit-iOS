@@ -33,14 +33,12 @@ final class NearbyPublicTransfer {
     private var lifecycle = Lifecycle.running
 
     var activityDidChange: ((Bool) -> Void)?
-    var activeReceiveReferenceID: String? {
+    var activeReceiveID: String? {
         guard let outbound, outbound.active.isTransferring else { return nil }
         return outbound.reference.entry.id
     }
-
-    var hasActiveReceive: Bool { activeReceiveReferenceID != nil }
     var hasActiveTransfers: Bool {
-        hasActiveReceive || inbound.values.contains(where: \.isTransferring)
+        activeReceiveID != nil || inbound.values.contains(where: \.isTransferring)
     }
 
     init(references: [NearbyPublicReference], didReceive: @escaping (NearbyPublicReference.Entry, Data) -> Void) {

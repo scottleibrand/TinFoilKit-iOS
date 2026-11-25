@@ -35,8 +35,7 @@ final class NearbyDiscovery: ObservableObject {
     @Published private(set) var publicReferences: [PublicReference] = []
     var isRunning: Bool { browser != nil }
     var hasActivePublicTransfer: Bool { publicTransfer?.hasActiveTransfers == true }
-    var activePublicReceiveReferenceID: String? { publicTransfer?.activeReceiveReferenceID }
-    var hasActivePublicReceive: Bool { activePublicReceiveReferenceID != nil }
+    var activePublicReceiveID: String? { publicTransfer?.activeReceiveID }
     var activityDidChange: ((Bool) -> Void)?
 
     private let references: [NearbyPublicReference]

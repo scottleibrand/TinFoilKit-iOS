@@ -28,7 +28,7 @@ final class NearbyLifecycle: ObservableObject {
         guard phase != self.phase else { return }
         self.phase = phase
         if phase == .background {
-            backgroundReceiveID = publicSyncEnabled ? discovery.activePublicReceiveReferenceID : nil
+            backgroundReceiveID = publicSyncEnabled ? discovery.activePublicReceiveID : nil
             if backgroundTask != .invalid, publicSyncEnabled, discovery.hasActivePublicTransfer {
                 discovery.finishTransfersWithoutDiscovery()
             } else {
@@ -97,9 +97,9 @@ final class NearbyLifecycle: ObservableObject {
     }
 
     private func notifyIfReceiveInterrupted() {
-        guard let id = backgroundReceiveID else { return }
+        guard let referenceID = backgroundReceiveID else { return }
         backgroundReceiveID = nil
-        if publicSyncEnabled, !discovery.publicReferences.contains(where: { $0.id == id }) {
+        if publicSyncEnabled, !discovery.publicReferences.contains(where: { $0.id == referenceID }) {
             notifications.notifyInterruptedReceive()
         }
     }
