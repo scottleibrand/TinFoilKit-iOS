@@ -2,8 +2,10 @@ import SwiftUI
 
 struct NWSUpdatesView: View {
     @ObservedObject var store: NWSAlertStore
+    @ObservedObject var roads: WSDOTClosureStore
+    @State private var showingRoadClosures = false
+    @State private var checking = false
 
-    private static let staleAfter: TimeInterval = 30 * 60
     private static let sourceURL = URL(string: "https://www.weather.gov/")!
     private static let areas: [(code: String, name: String)] = [
         ("AL", "Alabama"), ("AK", "Alaska"), ("AS", "American Samoa"), ("AZ", "Arizona"),
@@ -28,10 +30,12 @@ struct NWSUpdatesView: View {
                 Form {
                     settings
                     if !store.area.isEmpty {
-                        checkStatus(at: context.date)
-                        if let snapshot = store.snapshot {
-                            savedAlerts(snapshot, at: context.date)
-                        }
+                        let status = RegionalMonitorStatus(
+                            area: store.area, weather: store.snapshot, roadClosures: roads.snapshot,
+                            roadsEnabled: roads.enabled, now: context.date
+                        )
+                        regionalStatus(status)
+                        RegionalMonitorTimeline(entries: status.entries, now: context.date)
                     }
                     if store.area == "WA" {
                         NWSForecastSection(store: store, date: context.date)
@@ -42,9 +46,12 @@ struct NWSUpdatesView: View {
                         Text("Keep official emergency alerts enabled for urgent warnings.")
                     }
                 }
-                .refreshable { await store.refresh() }
+                .refreshable { await checkUpdates() }
             }
             .navigationTitle("Updates")
+            .sheet(isPresented: $showingRoadClosures) {
+                WSDOTClosureView(store: roads, route: .constant(nil))
+            }
         }
     }
 
@@ -72,79 +79,51 @@ struct NWSUpdatesView: View {
         }
     }
 
-    private func checkStatus(at date: Date) -> some View {
-        Section("Refresh") {
-            if let snapshot = store.snapshot {
-                LabeledContent("Last successful check",
-                               value: snapshot.checkedAt.formatted(date: .abbreviated, time: .shortened))
-                if let sourceUpdatedAt = snapshot.sourceUpdatedAt {
-                    LabeledContent("Source updated",
-                                   value: sourceUpdatedAt.formatted(date: .abbreviated, time: .shortened))
-                }
-                if isStale(snapshot, at: date) {
-                    Label("Saved alerts are stale and may omit newer alerts.", systemImage: "clock.badge.exclamationmark")
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                Text("No saved alert check for this area.").foregroundStyle(.secondary)
-            }
-
+    private func regionalStatus(_ status: RegionalMonitorStatus) -> some View {
+        Section {
+            MonitorSourceRow(title: "NWS weather alerts", coverage: Self.areas.first { $0.code == store.area }?.name ?? store.area,
+                             status: status.weatherStatus, empty: "No unexpired alerts in the saved check")
             if let error = store.errorMessage {
                 Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.secondary)
             }
-
-            if store.isRefreshing {
-                ProgressView("Checking for alerts")
+            if store.area == "WA" {
+                MonitorSourceRow(title: "WSDOT road closures", coverage: "Puget Sound pilot",
+                                 status: status.roadStatus, empty: "No closures in the saved check")
+                if let error = roads.errorMessage {
+                    Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.secondary)
+                }
+                Button("Road closure settings", systemImage: "road.lanes") { showingRoadClosures = true }
+            }
+            if checking || store.isRefreshing || (store.area == "WA" && roads.isRefreshing) {
+                ProgressView("Checking for updates")
             } else {
-                Button("Check for alerts", systemImage: "arrow.clockwise") {
-                    Task { await store.refresh() }
+                Button("Check for updates", systemImage: "arrow.clockwise") {
+                    Task { await checkUpdates() }
                 }
             }
+        } header: {
+            Text("Regional status")
+        } footer: {
+            Text("Each source has its own coverage and last successful check.")
         }
     }
 
-    @ViewBuilder
-    private func savedAlerts(_ snapshot: NWSAlertSnapshot, at date: Date) -> some View {
-        let active = snapshot.alerts.filter { $0.expires > date }
-        let expired = snapshot.alerts.filter { $0.expires <= date }
-
-        Section(isStale(snapshot, at: date) ? "Unexpired saved alerts" : "Saved active alerts") {
-            if snapshot.alerts.isEmpty {
-                Text("No alerts were reported at the last successful check.").foregroundStyle(.secondary)
-            } else if active.isEmpty {
-                Text("All saved alerts have expired.").foregroundStyle(.secondary)
-            } else {
-                ForEach(active) { alert in
-                    alertLink(alert)
-                }
-            }
+    @MainActor
+    private func checkUpdates() async {
+        guard !checking, !store.area.isEmpty else { return }
+        checking = true
+        defer { checking = false }
+        let area = store.area
+        await store.refreshAlerts()
+        guard !Task.isCancelled, area == "WA", store.area == area else { return }
+        await roads.refresh()
+        if !Task.isCancelled, store.area == area {
+            await store.refreshForecasts()
         }
-        if !expired.isEmpty {
-            Section("Expired saved alerts") {
-                ForEach(expired) { alert in
-                    alertLink(alert)
-                }
-            }
-        }
-    }
-
-    private func alertLink(_ alert: NWSAlert) -> some View {
-        NavigationLink {
-            NWSAlertDetailsView(alert: alert)
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(alert.event).font(.headline)
-                Text(alert.areaDescription).font(.subheadline).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func isStale(_ snapshot: NWSAlertSnapshot, at date: Date) -> Bool {
-        date.timeIntervalSince(snapshot.checkedAt) >= Self.staleAfter
     }
 }
 
-private struct NWSAlertDetailsView: View {
+struct NWSAlertDetailsView: View {
     let alert: NWSAlert
 
     var body: some View {
@@ -161,6 +140,7 @@ private struct NWSAlertDetailsView: View {
                     Text(alert.areaDescription)
                     LabeledContent("Issued", value: alert.sent.formatted(date: .abbreviated, time: .shortened))
                     LabeledContent("Expires", value: alert.expires.formatted(date: .abbreviated, time: .shortened))
+                    if let source = alert.sourceURL { Link("NWS source record", destination: source) }
                 }
                 alertSection("Details", text: alert.description)
                 alertSection("Instructions from the National Weather Service", text: alert.instruction)

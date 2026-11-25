@@ -107,7 +107,7 @@ final class NWSAlertStore: ObservableObject {
         await updateForecasts(force: false)
     }
 
-    private func refreshAlerts() async {
+    func refreshAlerts() async {
         guard !area.isEmpty, let path, path.online, allowMetered || !path.metered else { return }
         if let running = activeRefresh {
             await running.value
