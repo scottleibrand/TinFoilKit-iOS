@@ -21,7 +21,8 @@ if [[ "$(git -C "$reader" rev-parse HEAD)" != "$reader_revision" ]]; then
     git -C "$reader" checkout --detach "$reader_revision"
 fi
 
-cargo build --manifest-path ReaderBridge/Cargo.toml --locked --release \
+# Keep C dependencies on the same deployment target as the app in project.yml.
+IPHONEOS_DEPLOYMENT_TARGET=17.0 cargo build --manifest-path ReaderBridge/Cargo.toml --locked --release \
     --target "$target" --target-dir .build/reader-bridge
 cp ReaderBridge/include/tfk_reader.h .build/CTFKReader/
 cat > .build/CTFKReader/module.modulemap <<'MODULE'

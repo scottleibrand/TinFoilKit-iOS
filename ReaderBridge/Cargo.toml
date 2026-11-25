@@ -10,3 +10,4 @@ crate-type = ["staticlib"]
 
 [dependencies]
 zimru = { path = "../.build/zimru", default-features = false }
+zstd = { version = "=0.13.5", default-features = false }

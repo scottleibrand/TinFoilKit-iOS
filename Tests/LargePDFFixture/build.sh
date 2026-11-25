@@ -2,6 +2,7 @@
 # Create a synthetic one-page ZIM PDF larger than the buffered reader limit.
 set -euo pipefail
 destination=${1:?Pass an output ZIM path}
+compression=${2:-none}
 cd "$(dirname "$0")/../.."
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -35,7 +36,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pdf = std::fs::read(args.next().expect("PDF path"))?;
     let output = args.next().expect("ZIM path");
     let mut archive = zimru::writer::Creator::new();
-    archive.set_compression(zimru::Compression::None);
+    let compression = match args.next().and_then(|arg| arg.into_string().ok()).as_deref() {
+        Some("none") => zimru::Compression::None,
+        Some("zstd") => zimru::Compression::Zstd,
+        _ => return Err("Choose none or zstd".into()),
+    };
+    archive.set_compression(compression);
     archive.try_add_item(zimru::writer::Item::new(
         "large.pdf", "Large offline PDF fixture", "application/pdf", pdf,
     ))?;
@@ -46,4 +52,4 @@ RS
 cargo build --manifest-path .build/zimru/Cargo.toml --locked --release --lib --target-dir .build/zimru-host
 rustc --edition=2021 "$work/main.rs" --extern zimru=.build/zimru-host/release/libzimru.rlib \
     -L dependency=.build/zimru-host/release/deps -o "$work/bundle"
-"$work/bundle" "$work/large.pdf" "$destination"
+"$work/bundle" "$work/large.pdf" "$destination" "$compression"

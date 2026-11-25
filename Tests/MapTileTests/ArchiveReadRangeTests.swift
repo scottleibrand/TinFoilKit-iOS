@@ -1,13 +1,26 @@
 import PDFKit
 import XCTest
+import ZIMArchive
 @testable import TinfoilKit
 
 final class ArchiveReadRangeTests: XCTestCase {
     @MainActor
     func testLargeArchivePDFOpensFromTemporaryFileAndReleasesIt() async throws {
-        let fixture = URL.documentsDirectory.appendingPathComponent("large-offline-pdf.zim")
+        try await verifyLargePDF("large-offline-pdf.zim", isDirect: true)
+    }
+
+    @MainActor
+    func testLargeCompressedArchivePDFOpensFromTemporaryFileAndReleasesIt() async throws {
+        try await verifyLargePDF("large-offline-pdf-zstd.zim", isDirect: false)
+    }
+
+    @MainActor
+    private func verifyLargePDF(_ filename: String, isDirect: Bool) async throws {
+        let fixture = URL.documentsDirectory.appendingPathComponent(filename)
         try XCTSkipUnless(FileManager.default.fileExists(atPath: fixture.path),
                           "Build and stage the LargePDFFixture in the dedicated simulator’s Documents.")
+        let archive = try ZIMArchive(fileURL: fixture)
+        XCTAssertEqual(try archive.directResourceInfo(at: "large.pdf") != nil, isDirect)
         let reader = ArchiveReader(file: fixture)
         let documents = try await reader.pdfEntries()
         XCTAssertEqual(documents.map(\.title), ["Large offline PDF fixture"])

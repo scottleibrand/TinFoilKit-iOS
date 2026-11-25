@@ -1,5 +1,8 @@
-use std::ffi::{c_char, CStr, CString};
+use std::ffi::{c_char, c_void, CStr, CString};
 use std::fs::File;
+use std::io::{self, Read, Write};
+use std::ops::Range;
+use std::os::fd::BorrowedFd;
 use std::ptr;
 use zimru::{Archive, ArchiveLimits, Blob, ClusterReadLimits, Entry, Item};
 
@@ -70,6 +73,152 @@ impl TFKDirectResource {
         }
         Ok(())
     }
+}
+
+const MAX_COMPRESSED_PDF_CLUSTER_BYTES: u64 = 256 * MIB;
+
+struct ArchiveSlice<'a> {
+    archive: &'a Archive,
+    range: Range<u64>,
+}
+
+impl Read for ArchiveSlice<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let limit = (self.range.end - self.range.start).min(buffer.len() as u64) as usize;
+        let count = self
+            .archive
+            .read_at(self.range.start, &mut buffer[..limit])
+            .map_err(io::Error::other)?;
+        self.range.start += count as u64;
+        Ok(count)
+    }
+}
+
+fn extract_compressed_pdf(
+    archive: &Archive,
+    path: &str,
+    output: &mut impl Write,
+    check_cancelled: impl Fn() -> io::Result<()>,
+) -> Result<bool, String> {
+    check_cancelled().map_err(|error| error.to_string())?;
+    let item = archive
+        .get_entry_by_path(path)
+        .and_then(|entry| entry.get_item(true))
+        .map_err(|error| error.to_string())?;
+    if item.mimetype() != "application/pdf" {
+        return Ok(false);
+    }
+    let mut range = archive
+        .cluster_byte_range(item.cluster_index())
+        .map_err(|error| error.to_string())?;
+    let mut info = [0];
+    if range.is_empty()
+        || archive
+            .read_at(range.start, &mut info)
+            .map_err(|error| error.to_string())?
+            != 1
+    {
+        return Err("The archive cluster is missing.".into());
+    }
+    // The low nibble identifies compression and bit 4 selects 64-bit blob offsets.
+    if info[0] & 0x0f != 5 {
+        return Ok(false);
+    }
+    if range.end - range.start > LIMITS.cluster.unwrap().max_stored_bytes {
+        return Err("The compressed PDF cluster exceeds the stored size limit.".into());
+    }
+    range.start += 1;
+    let mut decoder = zstd::stream::read::Decoder::new(ArchiveSlice { archive, range })
+        .map_err(|error| error.to_string())?;
+    decoder
+        .window_log_max(LIMITS.cluster.unwrap().zstd_window_log)
+        .map_err(|error| error.to_string())?;
+    let width = if info[0] & 0x10 == 0 { 4 } else { 8 };
+    extract_pdf_blob(
+        &mut decoder,
+        width,
+        item.blob_index(),
+        output,
+        check_cancelled,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn extract_pdf_blob(
+    input: &mut impl Read,
+    width: usize,
+    blob: u32,
+    output: &mut impl Write,
+    check_cancelled: impl Fn() -> io::Result<()>,
+) -> io::Result<bool> {
+    let invalid = || {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Invalid compressed PDF cluster offsets.",
+        )
+    };
+    let mut head = [0; 8];
+    input.read_exact(&mut head[..width])?;
+    let table_len = u64::from_le_bytes(head);
+    if table_len > MAX_COMPRESSED_PDF_CLUSTER_BYTES || table_len % width as u64 != 0 {
+        return Err(invalid());
+    }
+    let words = table_len / width as u64;
+    if u64::from(blob) + 1 >= words {
+        return Err(invalid());
+    }
+
+    let mut buffer = [0; 64 * 1024];
+    let (mut start, mut end) = (table_len, table_len);
+    let mut previous = table_len;
+    let mut index = 1;
+    while index < words {
+        check_cancelled()?;
+        let count = ((words - index) * width as u64).min(buffer.len() as u64) as usize;
+        input.read_exact(&mut buffer[..count])?;
+        for offset in buffer[..count].chunks_exact(width) {
+            head.fill(0);
+            head[..width].copy_from_slice(offset);
+            let next = u64::from_le_bytes(head);
+            if next < previous || next > MAX_COMPRESSED_PDF_CLUSTER_BYTES {
+                return Err(invalid());
+            }
+            if index == u64::from(blob) {
+                start = next;
+            }
+            if index == u64::from(blob) + 1 {
+                end = next;
+            }
+            previous = next;
+            index += 1;
+        }
+    }
+    if end - start <= MAX_RESOURCE_BYTES {
+        return Ok(false);
+    }
+
+    // Consume the entire decoded cluster, including bytes outside this blob,
+    // so truncation and the frame checksum are checked before publication.
+    let mut position = table_len;
+    while position < previous {
+        check_cancelled()?;
+        let count = (previous - position).min(buffer.len() as u64) as usize;
+        input.read_exact(&mut buffer[..count])?;
+        let next = position + count as u64;
+        let overlap_start = start.max(position);
+        let overlap_end = end.min(next);
+        if overlap_start < overlap_end {
+            output.write_all(
+                &buffer[(overlap_start - position) as usize..(overlap_end - position) as usize],
+            )?;
+        }
+        position = next;
+    }
+    check_cancelled()?;
+    if input.read(&mut buffer[..1])? != 0 {
+        return Err(invalid());
+    }
+    Ok(true)
 }
 
 pub struct TFKResource {
@@ -325,6 +474,48 @@ pub unsafe extern "C" fn tfk_direct_resource_close(resource: *mut TFKDirectResou
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn tfk_archive_extract_compressed_pdf(
+    archive: &TFKArchive,
+    path: *const c_char,
+    output_fd: i32,
+    should_cancel: Option<unsafe extern "C" fn(*mut c_void) -> bool>,
+    context: *mut c_void,
+    error: *mut *mut c_char,
+) -> i32 {
+    let check_cancelled = || {
+        if should_cancel.is_some_and(|callback| callback(context)) {
+            Err(io::Error::other(
+                "The compressed PDF extraction was cancelled.",
+            ))
+        } else {
+            Ok(())
+        }
+    };
+    let result = if output_fd < 0 {
+        Err("The compressed PDF output file is invalid.".into())
+    } else {
+        // Duplicate the caller's borrowed descriptor and let File own the duplicate.
+        BorrowedFd::borrow_raw(output_fd)
+            .try_clone_to_owned()
+            .map_err(|error| error.to_string())
+            .and_then(|fd| {
+                let path = CStr::from_ptr(path)
+                    .to_str()
+                    .map_err(|error| error.to_string())?;
+                extract_compressed_pdf(&archive.0, path, &mut File::from(fd), check_cancelled)
+            })
+    };
+    match result {
+        Ok(true) => 1,
+        Ok(false) => 0,
+        Err(message) => {
+            write_error(error, message);
+            -1
+        }
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn tfk_archive_resolved_path(
     archive: &TFKArchive,
     path: *const c_char,
@@ -550,6 +741,52 @@ pub unsafe extern "C" fn tfk_string_free(value: *mut c_char) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streams_only_the_selected_large_pdf_and_checks_cluster_tail() {
+        let first = 16u32;
+        let start = first + 3;
+        let end = start + MAX_RESOURCE_BYTES as u32 + 3;
+        let last = end + 7;
+        let mut encoder = zstd::stream::write::Encoder::new(Vec::new(), 1).unwrap();
+        encoder.include_checksum(true).unwrap();
+        for offset in [first, start, end, last] {
+            encoder.write_all(&offset.to_le_bytes()).unwrap();
+        }
+        encoder.write_all(b"prePDF").unwrap();
+        io::copy(&mut io::repeat(0).take(MAX_RESOURCE_BYTES), &mut encoder).unwrap();
+        encoder.write_all(b"trailer").unwrap();
+        let mut compressed = encoder.finish().unwrap();
+        let mut decoder = zstd::stream::read::Decoder::new(compressed.as_slice()).unwrap();
+        decoder.window_log_max(25).unwrap();
+        let mut result = Vec::new();
+        assert!(extract_pdf_blob(&mut decoder, 4, 1, &mut result, || Ok(())).unwrap());
+        assert_eq!(result.len() as u64, MAX_RESOURCE_BYTES + 3);
+        assert_eq!(&result[..3], b"PDF");
+        assert_eq!(result.last(), Some(&0));
+
+        let checksum = compressed.last_mut().unwrap();
+        *checksum ^= 1;
+        let mut decoder = zstd::stream::read::Decoder::new(compressed.as_slice()).unwrap();
+        assert!(extract_pdf_blob(&mut decoder, 4, 1, &mut io::sink(), || Ok(())).is_err());
+    }
+
+    #[test]
+    fn compressed_pdf_honors_small_fallback_limits_and_cancellation() {
+        let mut small = &[16, 0, 0, 0, 0, 0, 0, 0, 17, 0, 0, 0, 0, 0, 0, 0, b'x'][..];
+        assert!(!extract_pdf_blob(&mut small, 8, 0, &mut io::sink(), || Ok(())).unwrap());
+        let invalid_end = MAX_COMPRESSED_PDF_CLUSTER_BYTES as u32 + 1;
+        let bad = [8u32.to_le_bytes(), invalid_end.to_le_bytes()].concat();
+        assert!(extract_pdf_blob(&mut bad.as_slice(), 4, 0, &mut io::sink(), || Ok(())).is_err());
+        let cancelled = extract_pdf_blob(
+            &mut &[8, 0, 0, 0, 9, 0, 0, 0][..],
+            4,
+            0,
+            &mut io::sink(),
+            || Err(io::ErrorKind::Interrupted.into()),
+        );
+        assert_eq!(cancelled.unwrap_err().kind(), io::ErrorKind::Interrupted);
+    }
 
     #[test]
     fn direct_resource_retains_archive_and_reads_exact_ranges() {

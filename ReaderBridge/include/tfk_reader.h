@@ -31,6 +31,14 @@ uint64_t tfk_direct_resource_size(const TFKDirectResource *resource);
  * On failure the buffer may contain a partial read. */
 bool tfk_direct_resource_read(const TFKDirectResource *resource, uint64_t offset, uint8_t *buffer, size_t count, char **error);
 void tfk_direct_resource_close(TFKDirectResource *resource);
+/* Stage a large Zstandard-compressed PDF into a caller-owned empty file.
+ * The file descriptor is borrowed and is not closed. Returns 1 on success,
+ * 0 when the caller should use the ordinary reader, or -1 on error. The
+ * caller removes partial output. A supplied cancellation callback is called
+ * synchronously and may be null. */
+int32_t tfk_archive_extract_compressed_pdf(const TFKArchive *archive, const char *path,
+    int output_fd, bool (*should_cancel)(void *), void *context, char **error);
+
 /* Follows redirects using directory entries only. Free the returned path
  * with tfk_string_free. A null result with no error means the path is absent. */
 char *tfk_archive_resolved_path(const TFKArchive *archive, const char *path, char **error);
