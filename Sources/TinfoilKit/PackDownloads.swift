@@ -93,6 +93,12 @@ final class PackDownloads: ObservableObject {
     @Published private(set) var restoring = true
     @Published private(set) var installedRevision = 0
     @Published private(set) var downloadAllError: String?
+    @Published private var publisherApprovals: [String: KiwixDownloadApproval]
+    @Published private var installedPublisherArchives: [UUID: InstalledArchive] = [:]
+
+    var publisherDownloads: [PublishedPack] {
+        publisherApprovals.values.map(\.pack).sorted { ($0.title, $0.editionKey) < ($1.title, $1.editionKey) }
+    }
 
     var downloadAllSizeEstimate: Int64 {
         sizeEstimate(for: Self.defaultPacks)
@@ -101,7 +107,7 @@ final class PackDownloads: ObservableObject {
     var essentialsSizeEstimate: Int64 { sizeEstimate(for: Self.essentials) }
 
     private let library = InstalledLibrary.standard
-    private let staging = URL.applicationSupportDirectory.appendingPathComponent("PackDownloads", isDirectory: true)
+    private let staging: URL
     private var tasks: [String: (task: URLSessionDownloadTask, network: PackDownloadNetwork)] = [:]
     private var restoringStarted = false
     private var backgroundCompletions: [PackDownloadNetwork: () -> Void] = [:]
@@ -119,6 +125,36 @@ final class PackDownloads: ObservableObject {
         case failed(String)
     }
 
+    private init() {
+        let staging = URL.applicationSupportDirectory.appendingPathComponent("PackDownloads", isDirectory: true)
+        self.staging = staging
+        publisherApprovals = KiwixDownloadApproval.load(from: staging)
+    }
+
+    func publisherEdition(for pack: PublishedPack) -> PublishedPack {
+        Self.catalog.first { $0.sha256 == pack.sha256 && $0.sizeEstimate == pack.sizeEstimate }
+            ?? publisherApprovals[pack.editionKey]?.pack ?? pack
+    }
+
+    func publisherFileImported(_ archive: InstalledArchive, as pack: PublishedPack) {
+        guard canStart(pack) else { return }
+        transfer.clearResume(pack.editionKey)
+        installedPublisherArchives[archive.id] = archive
+        statuses[pack.editionKey] = .installed
+    }
+
+    func status(for pack: PublishedPack) -> Status? {
+        if let status = statuses[pack.editionKey] { return status }
+        guard KiwixDownloadApproval.isValid(pack), installedPublisherArchives.values.contains(where: {
+            $0.pack?.sha256 == pack.sha256 && $0.byteCount == pack.sizeEstimate
+        }) else { return nil }
+        return .installed
+    }
+
+    private func pack(for key: String) -> PublishedPack? {
+        Self.catalog.first { $0.editionKey == key } ?? publisherApprovals[key]?.pack
+    }
+
     func restore() async {
         guard !restoringStarted else { return }
         restoringStarted = true
@@ -132,13 +168,19 @@ final class PackDownloads: ObservableObject {
             }
         }
         let installed = (try? await library.archives()) ?? []
-        for pack in Self.catalog {
+        for archive in installed where archive.pack != nil {
+            installedPublisherArchives[archive.id] = archive
+        }
+        for pack in Self.catalog + publisherDownloads {
             let key = pack.editionKey
             if tasks[key] != nil { continue }
             if case .verifying = statuses[key] { continue }
             let repair = repairTarget(key)
             let update = updateTarget(key)
-            if repair == nil, let current = installed.first(where: { $0.pack == pack }),
+            if repair == nil, let current = installed.first(where: { archive in
+                archive.pack == pack || (publisherApprovals[key] != nil && archive.pack?.sha256 == pack.sha256
+                    && archive.byteCount == pack.sizeEstimate)
+            }),
                update == nil || current.replacesArchiveID == update {
                 if update != nil { try? FileManager.default.removeItem(at: updateURL(key)) }
                 try? FileManager.default.removeItem(at: transfer.downloadURL(key))
@@ -152,7 +194,7 @@ final class PackDownloads: ObservableObject {
                 install(pack)
             } else if transfer.hasResume(key) {
                 statuses[key] = .paused
-            } else if repair != nil || update != nil {
+            } else if repair != nil || update != nil || publisherApprovals[key] != nil {
                 statuses[key] = .failed("The download was interrupted. Retry to continue.")
             }
         }
@@ -160,11 +202,19 @@ final class PackDownloads: ObservableObject {
 
     func start(_ pack: PublishedPack, network: PackDownloadNetwork? = nil) {
         guard !restoring, canStart(pack) else { return }
+        let key = pack.editionKey
+        let publisher = !Self.catalog.contains(pack)
+        let selectedNetwork = network ?? preferredNetwork(for: pack)
         downloadAllError = nil
         do {
-            try enqueue([pack], network: network ?? transfer.resumeNetwork(pack.editionKey))
+            if publisher {
+                let approval = KiwixDownloadApproval(pack: pack, allowsCellular: selectedNetwork == .cellularAllowed)
+                try approval.save(in: staging)
+                publisherApprovals[key] = approval
+            }
+            try enqueue([pack], network: selectedNetwork)
         } catch {
-            statuses[pack.editionKey] = .failed(error.localizedDescription)
+            statuses[key] = .failed(error.localizedDescription)
         }
     }
 
@@ -173,7 +223,14 @@ final class PackDownloads: ObservableObject {
     }
 
     func resumesOnCellular(for pack: PublishedPack) -> Bool {
-        transfer.resumeNetwork(pack.editionKey) == .cellularAllowed
+        preferredNetwork(for: pack) == .cellularAllowed
+    }
+
+    private func preferredNetwork(for pack: PublishedPack) -> PackDownloadNetwork {
+        if let approval = publisherApprovals[pack.editionKey] {
+            return approval.allowsCellular ? .cellularAllowed : .wifiOnly
+        }
+        return transfer.resumeNetwork(pack.editionKey)
     }
 
     func startAll() {
@@ -202,7 +259,18 @@ final class PackDownloads: ObservableObject {
 
     func archiveRemoved(_ archive: InstalledArchive) {
         guard let pack = archive.pack else { return }
+        installedPublisherArchives[archive.id] = nil
         let key = pack.editionKey
+        let completedApprovals = publisherApprovals.values.filter {
+            guard $0.pack.sha256 == pack.sha256, $0.pack.sizeEstimate == archive.byteCount,
+                  case .installed = statuses[$0.pack.editionKey] else { return false }
+            return true
+        }
+        for approval in completedApprovals {
+            try? approval.remove(from: staging)
+            publisherApprovals[approval.pack.editionKey] = nil
+            statuses[approval.pack.editionKey] = nil
+        }
         if repairTarget(key) == archive.id {
             try? FileManager.default.removeItem(at: repairURL(key))
             transfer.clearResume(key)
@@ -220,6 +288,7 @@ final class PackDownloads: ObservableObject {
             statuses[updateKey] = nil
         }
     }
+
 
     func availableUpdate(for archive: InstalledArchive) -> PublishedPack? {
         guard !restoring, let previous = archive.pack, !isRepairing(archive) else { return nil }
@@ -315,7 +384,7 @@ final class PackDownloads: ObservableObject {
     private func canStart(_ pack: PublishedPack) -> Bool {
         let key = pack.editionKey
         guard tasks[key] == nil else { return false }
-        switch statuses[key] {
+        switch status(for: pack) {
         case nil, .paused, .failed: return true
         case .downloading, .retrying, .pausing, .verifying, .installed: return false
         }
@@ -333,25 +402,30 @@ final class PackDownloads: ObservableObject {
         try directory.setResourceValues(values)
         let available = try directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         let downloadAndIndexBytes = packs.reduce(Int64.zero) { $0 + capacityEstimate(for: $1) }
-        let reservedBytes = Self.catalog.reduce(Int64.zero) { total, pack in
+        let reservedBytes = (Self.catalog + publisherDownloads).reduce(Int64.zero) { total, pack in
             let key = pack.editionKey
             switch statuses[key] {
             case .downloading, .retrying:
                 let received = max(0, tasks[key]?.task.countOfBytesReceived ?? 0)
-                return total + capacityEstimate(for: pack) - min(received, pack.sizeEstimate)
+                return Self.addingCapacity(total, capacityEstimate(for: pack) - min(received, pack.sizeEstimate))
             case .verifying:
-                return total + capacityEstimate(for: pack) - pack.sizeEstimate
+                return Self.addingCapacity(total, capacityEstimate(for: pack) - pack.sizeEstimate)
             default:
                 return total
             }
         }
-        let required = downloadAndIndexBytes + reservedBytes + 64 * 1024 * 1024
+        let required = Self.addingCapacity(Self.addingCapacity(downloadAndIndexBytes, reservedBytes), 64 * 1024 * 1024)
         if let bytes = available.volumeAvailableCapacityForImportantUsage, bytes < required {
             throw InsufficientStorage(shortfall: required - bytes)
         }
         for pack in packs {
             beginDownload(pack, network: network, attempt: PackDownloadAttempt(key: pack.editionKey))
         }
+    }
+
+    private static func addingCapacity(_ lhs: Int64, _ rhs: Int64) -> Int64 {
+        let (sum, overflow) = lhs.addingReportingOverflow(rhs)
+        return overflow ? .max : sum
     }
 
     private func beginDownload(_ pack: PublishedPack, network: PackDownloadNetwork, attempt: PackDownloadAttempt,
@@ -411,18 +485,18 @@ final class PackDownloads: ObservableObject {
             default: break
             }
         case let .downloaded(ticket):
-            guard accepts(ticket) else { return }
+            guard accepts(ticket), let pack = pack(for: ticket.key) else { return }
             let key = ticket.key
             tasks[key] = nil
-            if let pack = Self.catalog.first(where: { $0.editionKey == key }) { install(pack) }
+            install(pack)
         case let .failed(ticket, message, delay):
             let key = ticket.key
-            guard accepts(ticket), tasks[key] != nil || restoring else { return }
+            guard accepts(ticket), let pack = pack(for: key), tasks[key] != nil || restoring else { return }
             tasks[key] = nil
             switch statuses[key] {
             case .pausing, .paused, .verifying, .installed: break
             default:
-                if let delay, let pack = Self.catalog.first(where: { $0.editionKey == key }) {
+                if let delay {
                     beginDownload(pack, network: ticket.network,
                                   attempt: PackDownloadAttempt(key: key, retryCount: ticket.attempt.retryCount + 1),
                                   delay: delay)
@@ -450,8 +524,12 @@ final class PackDownloads: ObservableObject {
                 if let archiveID = repairTarget(key) {
                     try await library.repairPack(pack, archiveID: archiveID, from: file, movingSource: true)
                     try FileManager.default.removeItem(at: repairURL(key))
+                } else if publisherApprovals[key] != nil {
+                    let archive = try await library.installDownloadedPublishedPack(pack, from: file)
+                    installedPublisherArchives[archive.id] = archive
                 } else {
-                    try await library.installPack(pack, from: file, replacing: updateTarget(key), movingSource: true)
+                    let archive = try await library.installPack(pack, from: file, replacing: updateTarget(key), movingSource: true)
+                    installedPublisherArchives[archive.id] = archive
                     try? FileManager.default.removeItem(at: updateURL(key))
                 }
                 try? FileManager.default.removeItem(at: file)

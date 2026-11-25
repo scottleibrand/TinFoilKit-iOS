@@ -6,7 +6,6 @@ struct PacksView: View {
     let library: InstalledLibrary
     let onPublisherImport: () async -> Void
     @State private var language: PackCatalog.Language?
-    @State private var cellularPack: PublishedPack?
 
     var body: some View {
         let downloadSize = downloads.downloadAllSizeEstimate
@@ -42,9 +41,21 @@ struct PacksView: View {
                 Text(error).foregroundStyle(.secondary)
             }
             NavigationLink {
-                KiwixDiscoveryView(library: library, onImport: onPublisherImport)
+                KiwixDiscoveryView(downloads: downloads, library: library, onImport: onPublisherImport)
             } label: {
                 Label("Find publisher books", systemImage: "magnifyingglass")
+            }
+            if !downloads.publisherDownloads.isEmpty {
+                Section("Publisher downloads") {
+                    ForEach(downloads.publisherDownloads, id: \.editionKey) { pack in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(pack.title).font(.headline)
+                            Text(pack.sizeEstimate.formatted(.byteCount(style: .file))).font(.footnote)
+                            Text(pack.attribution).font(.footnote)
+                            PackDownloadControls(downloads: downloads, pack: pack)
+                        }
+                    }
+                }
             }
             Picker("Language", selection: $language) {
                 Text("All languages").tag(nil as PackCatalog.Language?)
@@ -64,14 +75,6 @@ struct PacksView: View {
             }
         }
         .navigationTitle("Content packs")
-        .alert("Allow cellular data for this pack?", isPresented: Binding(
-            get: { cellularPack != nil }, set: { if !$0 { cellularPack = nil } }
-        ), presenting: cellularPack) { pack in
-            Button("Allow cellular data") { downloads.start(pack, network: .cellularAllowed) }
-            Button("Cancel", role: .cancel) {}
-        } message: { pack in
-            Text("\(pack.title) is about \(pack.sizeEstimate.formatted(.byteCount(style: .file))). Switching download modes may restart the transfer.")
-        }
     }
 
     private func row(for entry: PackDownloads.CatalogEntry) -> some View {
@@ -91,13 +94,29 @@ struct PacksView: View {
             if let termsURL = entry.termsURL {
                 Link("Content license", destination: termsURL).font(.footnote)
             }
-            controls(for: pack)
+            PackDownloadControls(downloads: downloads, pack: pack)
         }
+    }
+}
+
+struct PackDownloadControls: View {
+    @ObservedObject var downloads: PackDownloads
+    let pack: PublishedPack
+    @State private var confirmingCellular = false
+
+    var body: some View {
+        controls
+            .alert("Allow cellular data for this pack?", isPresented: $confirmingCellular) {
+                Button("Allow cellular data") { downloads.start(pack, network: .cellularAllowed) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("\(pack.title) · \(pack.sizeEstimate.formatted(.byteCount(style: .file))). Switching download modes may restart the transfer.")
+            }
     }
 
     @ViewBuilder
-    private func controls(for pack: PublishedPack) -> some View {
-        switch downloads.statuses[pack.editionKey] {
+    private var controls: some View {
+        switch downloads.status(for: pack) {
         case let .downloading(fraction):
             let label = downloads.allowsCellular(for: pack) ? "Downloading · cellular allowed" : "Downloading"
             if let fraction {
@@ -134,7 +153,7 @@ struct PacksView: View {
                     Button("Start over on Wi-Fi", systemImage: "wifi") { downloads.start(pack, network: .wifiOnly) }
                 } else {
                     Button("Allow cellular data…", systemImage: "antenna.radiowaves.left.and.right") {
-                        cellularPack = pack
+                        confirmingCellular = true
                     }
                 }
             } label: {

@@ -187,6 +187,10 @@ enum KiwixCatalog {
         }
     }
 
+    static func isTrustedArchiveURL(_ url: URL) -> Bool {
+        metalinkURL(url.absoluteString + ".meta4")?.deletingPathExtension() == url
+    }
+
     private static func metalinkURL(_ href: String) -> URL? {
         guard let components = trustedComponents(href, hosts: ["download.kiwix.org", "lb.download.kiwix.org"]),
               let path = safePath(components.percentEncodedPath), path.count == 3, path[0] == "zim",

@@ -92,12 +92,23 @@ public actor InstalledLibrary {
         _ pack: PublishedPack, from source: URL,
         progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> InstalledArchive {
+        try await installVerifiedPublisherFile(pack, from: source, moving: false, progress: progress)
+    }
+
+    @discardableResult
+    public func installDownloadedPublishedPack(_ pack: PublishedPack, from source: URL) async throws -> InstalledArchive {
+        try await installVerifiedPublisherFile(pack, from: source, moving: true, progress: { _ in })
+    }
+
+    private func installVerifiedPublisherFile(
+        _ pack: PublishedPack, from source: URL, moving: Bool, progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> InstalledArchive {
         guard pack.sizeEstimate > 0 else { throw ImportError.sizeMismatch }
         guard activeEditions.insert(pack.editionKey).inserted else { throw ImportError.busy }
         defer { activeEditions.remove(pack.editionKey) }
         guard activePublishedImports.insert(pack.sha256).inserted else { throw ImportError.busy }
         defer { activePublishedImports.remove(pack.sha256) }
-        return try await installArchive(from: source, pack: pack, moving: false,
+        return try await installArchive(from: source, pack: pack, moving: moving,
                                         expectedByteCount: pack.sizeEstimate, progress: progress)
     }
 
