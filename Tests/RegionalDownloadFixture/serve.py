@@ -79,6 +79,7 @@ def main():
             "url": base + "manifest.json",
             "sha256": hashlib.sha256(server.manifest).hexdigest(),
             "interruptedBytes": offset,
+            "downloadByteCount": sum(asset["byteCount"] for asset in manifest["assets"].values()),
         }))
         try:
             server.serve_forever()
