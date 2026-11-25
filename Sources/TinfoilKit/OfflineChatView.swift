@@ -1,6 +1,5 @@
 import CoreGraphics
 import FoundationModels
-import ImageIO
 import PhotosUI
 import SwiftUI
 
@@ -40,7 +39,8 @@ private struct OfflineConversation: View {
     @State private var confirmingReset = false
     @State private var contextFull = false
     @State private var selectedPhoto: PhotosPickerItem?
-    @State private var photo: CGImage?
+    @State private var photoRequest: PhotoRequest?
+    @State private var photo: OfflineChatPhoto?
 
     private static let maximumPromptLength = 1_500
     private var prompt: String { draft.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -51,7 +51,7 @@ private struct OfflineConversation: View {
     }
 
     private var canSend: Bool {
-        response == nil && selectedPhoto == nil && !contextFull && !prompt.isEmpty &&
+        response == nil && photoRequest == nil && (photo == nil || supportsPhotos) && !contextFull && !prompt.isEmpty &&
             prompt.count <= Self.maximumPromptLength
     }
 
@@ -93,7 +93,7 @@ private struct OfflineConversation: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("New chat", systemImage: "plus.bubble") { confirmingReset = true }
-                    .disabled(messages.isEmpty || response != nil || selectedPhoto != nil)
+                            .disabled(messages.isEmpty || response != nil || photoRequest != nil)
             }
         }
         .alert("Start a new chat?", isPresented: $confirmingReset) {
@@ -102,8 +102,15 @@ private struct OfflineConversation: View {
         } message: {
             Text("The current conversation will be cleared.")
         }
-        .task(id: selectedPhoto) {
-            if let item = selectedPhoto { await loadPhoto(item) }
+        .onChange(of: selectedPhoto) {
+            guard let item = selectedPhoto else { return }
+            selectedPhoto = nil
+            photo = nil
+            status = nil
+            photoRequest = PhotoRequest(item: item)
+        }
+        .task(id: photoRequest?.id) {
+            if let request = photoRequest { await loadPhoto(request) }
         }
         .onDisappear { response?.cancel() }
     }
@@ -113,11 +120,16 @@ private struct OfflineConversation: View {
             if prompt.count > Self.maximumPromptLength {
                 Text("Shorten your message to 1,500 characters.").font(.footnote).foregroundStyle(.secondary)
             }
-            if selectedPhoto != nil {
-                ProgressView("Preparing photo")
+            if photoRequest != nil {
+                HStack {
+                    ProgressView("Preparing photo")
+                    Spacer()
+                    Button("Cancel photo", role: .cancel) { photoRequest = nil }
+                        .buttonStyle(.plain)
+                }
             } else if let photo {
                 HStack(spacing: 8) {
-                    Image(decorative: photo, scale: 1)
+                    Image(decorative: photo.preview, scale: 1)
                         .resizable()
                         .scaledToFit()
                         .frame(width: 52, height: 52)
@@ -136,7 +148,7 @@ private struct OfflineConversation: View {
                             .labelStyle(.iconOnly)
                     }
                     .buttonStyle(.bordered)
-                    .disabled(response != nil || contextFull || selectedPhoto != nil)
+                    .disabled(response != nil || contextFull || photoRequest != nil)
                 }
                 TextField("Message", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
@@ -163,40 +175,27 @@ private struct OfflineConversation: View {
         draft = ""
         composing = false
         status = nil
-        messages.append(Message(isUser: true, text: text, photo: photo))
+        messages.append(Message(isUser: true, text: text, photo: photo?.preview))
         let reply = messages.count
         messages.append(Message(isUser: false, text: ""))
-        response = Task { await respond(to: text, photo: photo, at: reply) }
+        response = Task { await respond(to: text, photo: photo?.image, at: reply) }
     }
 
-    private func loadPhoto(_ item: PhotosPickerItem) async {
-        defer { if selectedPhoto == item { selectedPhoto = nil } }
+    private func loadPhoto(_ request: PhotoRequest) async {
+        defer { if photoRequest?.id == request.id { photoRequest = nil } }
         do {
-            guard let data = try await item.loadTransferable(type: Data.self) else {
-                if selectedPhoto == item { status = "This photo could not be opened." }
-                return
-            }
+            let attachment = try await request.item.loadTransferable(type: OfflineChatPhoto.self)
             try Task.checkCancellation()
-            let thumbnail = await Task.detached(priority: .userInitiated) {
-                guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil as CGImage? }
-                let options: [CFString: Any] = [
-                    kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceCreateThumbnailWithTransform: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 2048
-                ]
-                return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
-            }.value
-            try Task.checkCancellation()
-            guard selectedPhoto == item else { return }
-            if let thumbnail {
-                photo = thumbnail
-                status = nil
-            } else {
-                status = "This photo could not be opened."
-            }
+            guard photoRequest?.id == request.id else { return }
+            photo = attachment
+            if attachment == nil { status = OfflineChatPhoto.ImportError.invalidPhoto.localizedDescription }
         } catch is CancellationError {
+        } catch let error as OfflineChatPhoto.ImportError {
+            if photoRequest?.id == request.id, !Task.isCancelled { status = error.localizedDescription }
         } catch {
-            if selectedPhoto == item { status = "This photo could not be loaded. Try a photo available on this phone." }
+            if photoRequest?.id == request.id, !Task.isCancelled {
+                status = "This photo could not be loaded. Try a photo available on this phone."
+            }
         }
     }
 
@@ -243,12 +242,14 @@ private struct OfflineConversation: View {
         draft = ""
         photo = nil
         selectedPhoto = nil
+        photoRequest = nil
         status = nil
         contextFull = false
     }
 
     private static func makeSession() -> LanguageModelSession {
-        LanguageModelSession(instructions: "Be clear and concise. Say when you’re uncertain. Give general help and avoid inventing sources.")
+        LanguageModelSession(model: SystemLanguageModel.default,
+                             instructions: "Be clear and concise. Say when you’re uncertain. Give general help and avoid inventing sources.")
     }
 
     private static func contextExceeded(_ error: Error) -> Bool {
@@ -264,5 +265,10 @@ private struct OfflineConversation: View {
         let isUser: Bool
         var text: String
         var photo: CGImage? = nil
+    }
+
+    private struct PhotoRequest {
+        let id = UUID()
+        let item: PhotosPickerItem
     }
 }
