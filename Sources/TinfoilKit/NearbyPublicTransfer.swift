@@ -155,7 +155,10 @@ final class NearbyPublicTransfer {
                     if let connection, let version = NearbyPublicTLS.version(connection) {
                         self?.sendRequest(id, version: version)
                     } else { self?.finishOutbound(id) }
-                case .failed, .cancelled: self?.finishOutbound(id)
+                case .failed, .cancelled:
+                    // An outstanding receive can still deliver its last bytes with the error.
+                    // Transfer callbacks or the existing deadline will close this connection.
+                    if self?.outbound?.active.isTransferring != true { self?.finishOutbound(id) }
                 default: break
                 }
             }
@@ -274,7 +277,7 @@ final class NearbyPublicTransfer {
             [weak self] bytes, _, isComplete, error in
             DispatchQueue.main.async {
                 guard let self, self.outbound?.id == id else { return }
-                guard error == nil, let bytes, !bytes.isEmpty, bytes.count <= remaining else {
+                guard let bytes, !bytes.isEmpty, bytes.count <= length else {
                     self.finishOutbound(id)
                     return
                 }
@@ -303,7 +306,7 @@ final class NearbyPublicTransfer {
                     self.finishOutbound(id)
                     return
                 }
-                if isComplete { self.finishOutbound(id) }
+                if isComplete || error != nil { self.finishOutbound(id) }
                 else { self.readReference(id, from: connection, prefix: data, version: version) }
             }
         }
