@@ -49,9 +49,13 @@ final class KiwixDownloadApprovalTests: XCTestCase {
         XCTAssertNil(KiwixDownloadApproval.replacement(for: unrelated, in: baseline))
         let unbound = KiwixDownloadApproval(pack: replacement, allowsCellular: true)
         XCTAssertThrowsError(try unbound.save(in: directory))
-        let approved = KiwixDownloadApproval(pack: replacement, allowsCellular: true, replacesArchiveID: UUID())
+        let target = KiwixDownloadApproval.Replacement(archiveID: UUID(), source: baseline.source)
+        let approved = KiwixDownloadApproval(pack: replacement, allowsCellular: true, replacement: target)
         try approved.save(in: directory)
         XCTAssertEqual(KiwixDownloadApproval.load(from: directory), [replacement.editionKey: approved])
+        let wrongSeries = KiwixDownloadApproval.Replacement(archiveID: target.archiveID, source: unrelated.source)
+        let mismatched = KiwixDownloadApproval(pack: replacement, allowsCellular: true, replacement: wrongSeries)
+        XCTAssertThrowsError(try mismatched.save(in: directory))
     }
 
     func testIgnoresMismatchedReceiptFilenameAndInvalidStoredMetadata() throws {

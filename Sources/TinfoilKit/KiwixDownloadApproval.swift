@@ -4,7 +4,14 @@ import ZIMArchive
 struct KiwixDownloadApproval: Codable, Equatable, Sendable {
     let pack: PublishedPack
     let allowsCellular: Bool
-    var replacesArchiveID: UUID? = nil
+    var replacement: Replacement? = nil
+
+    struct Replacement: Codable, Equatable, Sendable {
+        let archiveID: UUID
+        let source: URL
+    }
+
+    var replacesArchiveID: UUID? { replacement?.archiveID }
 
     static func replacement(for candidate: PublishedPack, in seriesPack: PublishedPack) -> PublishedPack? {
         guard isValid(candidate),
@@ -42,11 +49,10 @@ struct KiwixDownloadApproval: Codable, Equatable, Sendable {
     }
 
     private var isValid: Bool {
-        if replacesArchiveID == nil { return Self.isValid(pack) }
-        return Self.hasValidMetadata(pack) && PackCatalog.entries.contains { entry in
-            entry.pack.id == pack.id
-                && KiwixCatalog.EditionSeries(archiveURL: entry.pack.source)?.newerEdition(at: pack.source) == pack.version
-        }
+        guard let replacement else { return Self.isValid(pack) }
+        return Self.hasValidMetadata(pack)
+            && pack.id.range(of: #"^[a-zA-Z0-9_-]{1,150}$"#, options: .regularExpression) != nil
+            && KiwixCatalog.EditionSeries(archiveURL: replacement.source)?.newerEdition(at: pack.source) == pack.version
     }
 
     private static func version(for source: URL) -> String {
