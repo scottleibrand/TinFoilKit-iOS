@@ -78,6 +78,19 @@ final class RegionalMonitorStatusTests: XCTestCase {
         XCTAssertEqual(status.entries.map(\.id), ["nws:\(id("cancel"))", "nws:\(id("expired"))"])
     }
 
+    func testSavedWeatherOutsideWashingtonHasIndependentCoverage() throws {
+        let checkedAt = now.addingTimeInterval(-90)
+        let weather = try weatherSnapshot([alert("oregon", sent: -100)], checkedAt: checkedAt, area: "OR")
+        let roads = try roadSnapshot([closure(1)])
+        let monitor = RegionalMonitorStatus(area: "OR", weather: weather, roadClosures: roads,
+                                            roadsEnabled: true, now: now)
+
+        XCTAssertEqual(monitor.weatherStatus.coverage, .weatherArea("OR"))
+        XCTAssertEqual(monitor.weatherStatus.state, .saved(checkedAt: checkedAt, stale: false, count: 1))
+        XCTAssertEqual(monitor.roadStatus.state, .outsideCoverage)
+        XCTAssertEqual(monitor.entries.map(\.id), ["nws:\(id("oregon"))"])
+    }
+
     private func identifier(_ name: String) -> String { "urn:oid:fixture-\(name)" }
 
     private func id(_ name: String) -> String { "https://api.weather.gov/alerts/\(identifier(name))" }
@@ -111,8 +124,9 @@ final class RegionalMonitorStatusTests: XCTestCase {
                 "geometry": ["type": "LineString", "coordinates": [[-122.34, 47.6], [-122.3, 47.6]]]]
     }
 
-    private func weatherSnapshot(_ features: [[String: Any]], checkedAt: Date? = nil) throws -> NWSAlertSnapshot {
-        try NWSAlertSnapshot.decode(collection(features), area: "WA", checkedAt: checkedAt ?? now, etag: nil, lastModified: nil)
+    private func weatherSnapshot(_ features: [[String: Any]], checkedAt: Date? = nil,
+                                 area: String = "WA") throws -> NWSAlertSnapshot {
+        try NWSAlertSnapshot.decode(collection(features), area: area, checkedAt: checkedAt ?? now, etag: nil, lastModified: nil)
     }
 
     private func roadSnapshot(_ features: [[String: Any]], checkedAt: Date? = nil) throws -> WSDOTClosureSnapshot {

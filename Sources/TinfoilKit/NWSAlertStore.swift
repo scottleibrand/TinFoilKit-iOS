@@ -19,19 +19,14 @@ final class NWSAlertStore: ObservableObject {
     private let monitorQueue = DispatchQueue(label: "org.tinfoilkit.ios.nws-path")
     private var monitor: NWPathMonitor?
     private var monitorGeneration = UUID()
-    private var path: Connection?
+    private var path: RegionalUpdateConnection?
     private var periodicRefresh: Task<Void, Never>?
     private var activeRefresh: Task<Void, Never>?
     private var refreshID = UUID()
-    private var lastAttempt: ContinuousClock.Instant?
+    private var alertsThrottle = RegionalRefreshThrottle()
     private var forecastTask: Task<Void, Never>?
     private var forecastID = UUID()
-    private var lastForecastAttempt: ContinuousClock.Instant?
-
-    private struct Connection: Equatable, Sendable {
-        let online: Bool
-        let metered: Bool
-    }
+    private var forecastThrottle = RegionalRefreshThrottle()
 
     init(defaults: UserDefaults = .standard,
          cache: NWSAlertCache = NWSAlertCache(directory: URL.applicationSupportDirectory.appendingPathComponent("NWSAlerts"))) {
@@ -48,7 +43,9 @@ final class NWSAlertStore: ObservableObject {
 
     func setArea(_ code: String) {
         guard code != area, code.isEmpty || NWSAlertSnapshot.endpoint(for: code) != nil else { return }
-        resetRefresh()
+        cancelRefresh()
+        alertsThrottle = RegionalRefreshThrottle()
+        forecastThrottle = RegionalRefreshThrottle()
         area = code
         defaults.set(code, forKey: "nwsAlertArea")
         snapshot = cache.read(area: code)
@@ -62,7 +59,7 @@ final class NWSAlertStore: ObservableObject {
         guard allowed != allowMetered else { return }
         allowMetered = allowed
         defaults.set(allowed, forKey: "nwsAlertAllowMetered")
-        if path?.metered == true { resetRefresh() }
+        if !mayRefresh { pauseForConnectionLoss() }
         errorMessage = nil
         forecastErrorMessage = nil
         Task { await refresh() }
@@ -75,7 +72,7 @@ final class NWSAlertStore: ObservableObject {
             path = nil
             periodicRefresh?.cancel()
             periodicRefresh = nil
-            cancelRefresh()
+            pauseForConnectionLoss()
             return
         }
         guard monitor == nil else { return }
@@ -84,13 +81,17 @@ final class NWSAlertStore: ObservableObject {
         monitor = newMonitor
         monitorGeneration = generation
         newMonitor.pathUpdateHandler = { [weak self] path in
-            let connection = Connection(online: path.status == .satisfied,
-                                        metered: path.isExpensive || path.isConstrained)
+            let connection = RegionalUpdateConnection(online: path.status == .satisfied,
+                                                      metered: path.isExpensive || path.isConstrained)
             Task { @MainActor [weak self] in
-                guard let self, self.monitor != nil, self.monitorGeneration == generation else { return }
-                let changed = self.path != connection
+                guard let self, self.monitor != nil, self.monitorGeneration == generation,
+                      self.path != connection else { return }
                 self.path = connection
-                if changed { await self.refresh() }
+                if self.mayRefresh {
+                    await self.refresh()
+                } else {
+                    self.pauseForConnectionLoss()
+                }
             }
         }
         newMonitor.start(queue: monitorQueue)
@@ -103,19 +104,19 @@ final class NWSAlertStore: ObservableObject {
     }
 
     func refresh() async {
+        let selectedArea = area
         await refreshAlerts()
+        guard selectedArea == area else { return }
         await updateForecasts(force: false)
     }
 
     func refreshAlerts() async {
-        guard !area.isEmpty, let path, path.online, allowMetered || !path.metered else { return }
+        guard !area.isEmpty, mayRefresh else { return }
         if let running = activeRefresh {
             await running.value
             return
         }
-        let now = ContinuousClock.now
-        if let lastAttempt, now - lastAttempt < .seconds(30) { return }
-        lastAttempt = now
+        guard alertsThrottle.begin(after: .seconds(30)) else { return }
         isRefreshing = true
         errorMessage = nil
         let id = UUID()
@@ -137,6 +138,7 @@ final class NWSAlertStore: ObservableObject {
                 guard refreshID == id else { return }
                 try cache.write(next)
                 snapshot = next
+                alertsThrottle.finishSuccessfully()
             } catch is CancellationError {
             } catch {
                 guard refreshID == id, !Task.isCancelled else { return }
@@ -147,10 +149,14 @@ final class NWSAlertStore: ObservableObject {
         await task.value
     }
 
-    private func resetRefresh() {
+    private var mayRefresh: Bool {
+        path?.allowsRefresh(allowMetered: allowMetered) == true
+    }
+
+    private func pauseForConnectionLoss() {
         cancelRefresh()
-        lastAttempt = nil
-        lastForecastAttempt = nil
+        alertsThrottle.connectionInterrupted()
+        forecastThrottle.connectionInterrupted()
     }
 
     private func cancelRefresh() {
@@ -177,7 +183,7 @@ final class NWSAlertStore: ObservableObject {
     }
 
     private func updateForecasts(force: Bool) async {
-        guard !Task.isCancelled, area == "WA", let path, path.online, allowMetered || !path.metered else { return }
+        guard !Task.isCancelled, area == "WA", mayRefresh else { return }
         if let forecastTask {
             await forecastTask.value
             return
@@ -186,9 +192,7 @@ final class NWSAlertStore: ObservableObject {
             force || (forecasts[kind].map { Date.now.timeIntervalSince($0.checkedAt) >= 3 * 60 * 60 } ?? true)
         }
         guard !kinds.isEmpty else { return }
-        let now = ContinuousClock.now
-        if let lastForecastAttempt, now - lastForecastAttempt < .seconds(60) { return }
-        lastForecastAttempt = now
+        guard forecastThrottle.begin(after: .seconds(60)) else { return }
         let metered = allowMetered
         let id = UUID()
         forecastID = id
@@ -227,6 +231,7 @@ final class NWSAlertStore: ObservableObject {
                 }
                 guard forecastID == id, !Task.isCancelled else { return }
                 forecastErrorMessage = errors.isEmpty ? nil : errors.joined(separator: "\n")
+                if errors.isEmpty { forecastThrottle.finishSuccessfully() }
             } catch is CancellationError {
             } catch {
                 guard forecastID == id, !Task.isCancelled else { return }

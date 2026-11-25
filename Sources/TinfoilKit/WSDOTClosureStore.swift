@@ -15,17 +15,12 @@ final class WSDOTClosureStore: ObservableObject {
     private let queue = DispatchQueue(label: "org.tinfoilkit.ios.wsdot-path")
     private var isForeground = false
     private var monitor: NWPathMonitor?
-    private var path: Connection?
+    private var path: RegionalUpdateConnection?
     private var monitorID = UUID()
     private var refreshID = UUID()
     private var activeRefresh: Task<Void, Never>?
     private var periodicRefresh: Task<Void, Never>?
-    private var lastAttempt: ContinuousClock.Instant?
-
-    private struct Connection: Equatable, Sendable {
-        let online: Bool
-        let metered: Bool
-    }
+    private var throttle = RegionalRefreshThrottle()
 
     init(defaults: UserDefaults = .standard,
          directory: URL = URL.applicationSupportDirectory.appendingPathComponent("RoadClosures")) {
@@ -51,7 +46,7 @@ final class WSDOTClosureStore: ObservableObject {
         guard allowed != allowMetered else { return }
         allowMetered = allowed
         defaults.set(allowed, forKey: "wsdotClosureAllowMetered")
-        if path?.metered == true { cancelRefresh() }
+        if !mayRefresh { pauseForConnectionLoss() }
         errorMessage = nil
         Task { await refresh() }
     }
@@ -68,7 +63,7 @@ final class WSDOTClosureStore: ObservableObject {
             path = nil
             periodicRefresh?.cancel()
             periodicRefresh = nil
-            cancelRefresh()
+            pauseForConnectionLoss()
             return
         }
         guard monitor == nil else { return }
@@ -77,12 +72,16 @@ final class WSDOTClosureStore: ObservableObject {
         self.monitor = monitor
         monitorID = id
         monitor.pathUpdateHandler = { [weak self] path in
-            let connection = Connection(online: path.status == .satisfied,
-                                        metered: path.isExpensive || path.isConstrained)
+            let connection = RegionalUpdateConnection(online: path.status == .satisfied,
+                                                      metered: path.isExpensive || path.isConstrained)
             Task { @MainActor [weak self] in
                 guard let self, self.monitor != nil, self.monitorID == id, self.path != connection else { return }
                 self.path = connection
-                await self.refresh()
+                if self.mayRefresh {
+                    await self.refresh()
+                } else {
+                    self.pauseForConnectionLoss()
+                }
             }
         }
         monitor.start(queue: queue)
@@ -95,14 +94,12 @@ final class WSDOTClosureStore: ObservableObject {
     }
 
     func refresh() async {
-        guard enabled, isForeground, let path, path.online, allowMetered || !path.metered else { return }
+        guard enabled, isForeground, mayRefresh else { return }
         if let activeRefresh {
             await activeRefresh.value
             return
         }
-        let now = ContinuousClock.now
-        if let lastAttempt, now - lastAttempt < .seconds(60) { return }
-        lastAttempt = now
+        guard throttle.begin(after: .seconds(60)) else { return }
         let id = UUID()
         refreshID = id
         isRefreshing = true
@@ -123,6 +120,7 @@ final class WSDOTClosureStore: ObservableObject {
                 guard refreshID == id else { return }
                 try Self.write(next, to: file)
                 snapshot = next
+                throttle.finishSuccessfully()
             } catch is CancellationError {
             } catch {
                 guard refreshID == id, !Task.isCancelled else { return }
@@ -133,11 +131,16 @@ final class WSDOTClosureStore: ObservableObject {
         await task.value
     }
 
-    private func cancelRefresh() {
+    private var mayRefresh: Bool {
+        path?.allowsRefresh(allowMetered: allowMetered) == true
+    }
+
+    private func pauseForConnectionLoss() {
         refreshID = UUID()
         activeRefresh?.cancel()
         activeRefresh = nil
         isRefreshing = false
+        throttle.connectionInterrupted()
     }
 
     nonisolated private static func read(_ file: URL) -> WSDOTClosureSnapshot? {
