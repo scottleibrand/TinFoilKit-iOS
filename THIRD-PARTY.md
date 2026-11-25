@@ -54,12 +54,22 @@ Valhalla Mobile packages Valhalla and its dependencies. [Scripts/routing/README.
 
 - **Weather alerts and forecasts** come directly from NOAA’s National Weather Service. Updates retains publisher timestamps and forecast validity periods alongside the app’s last check. NWS content is generally public domain unless specifically marked otherwise. [NWS API](https://www.weather.gov/documentation/services-web-api) · [NWS data terms](https://www.weather.gov/disclaimer)
 - **Map tiles:** the app's tile cache reads the same Protomaps v4 basemap, with the same OpenStreetMap attribution and license.
-- **Content packs:** downloaded from Kiwix and its official mirrors when a user chooses them. Each pack lists its own attribution and terms in Content Packs. In summary:
+- **Content packs:** downloaded from Kiwix and its official mirrors when a user chooses them. Content Packs shows each archive’s attribution and links to license terms where available. In summary:
   - Wikipedia packs and Appropedia: CC BY-SA. Images carry their own licenses.
+  - WikiMed Medical Encyclopedia: an English MDWiki archive downloaded directly from Kiwix. WikiProjectMed accepts CC BY-SA, CC BY and public-domain text. Media retain their individual terms. Archive sharing is disabled. [Content policy](https://www.mdwiki.org/wiki/Main_Page) · [License terms](https://www.mdwiki.org/wiki/WikiProjectMed:Copyrights) · [Edition metadata](https://download.kiwix.org/zim/other/mdwiki_en_all_maxi_2025-11.zim.meta4)
   - iFixit: CC BY-NC-SA 3.0, which prohibits commercial use.
-  - The water and field medicine libraries: collections of documents under their authors' individual terms.
+  - ZIM Git collections of water, field medicine, post-disaster resources, food preparation and knots: the included documents retain their authors' individual terms. These are direct user downloads from Kiwix's open-access catalog. [Kiwix catalog FAQ](https://get.kiwix.org/en/solutions/catalog/)
+  - Military medicine manuals: Kiwix archives the Federation of American Scientists' collection of published reference manuals. Individual documents retain their original terms. [Original collection](https://irp.fas.org/doddir/milmed/index.html) · [Kiwix download metadata](https://download.kiwix.org/zim/zimit/irp.fas.org_en_military-medicine_2026-10.zim.meta4)
+  - Ready.gov Preparedness Guides: FEMA Ready.gov material archived by openZIM and distributed by Kiwix as an individual download. Content retains its source terms, including third-party documents published with scoped permissions. [Edition metadata](https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim.meta4) · [Example publisher terms](https://www.ready.gov/sites/default/files/2020-03/ready_emergency-financial-first-aid-toolkit.pdf)
+  - Archive sharing is disabled for these collections.
 - **Road closure advisories** use the Washington State Department of Transportation’s public Road Closures layer for low-volume, direct requests and local display. The app keeps the last successful snapshot on the device. Confirm redistribution terms before republishing or relaying this feed. [WSDOT closure layer](https://data.wsdot.wa.gov/arcgis/rest/services/TravelInformation/TravelInfoRoadAlerts/FeatureServer/2) · [Dataset terms](https://data.wsdot.wa.gov/arcgis/rest/services/TravelInformation/TravelInfoRoadAlerts/FeatureServer/info/iteminfo)
 - **Printable references:** Household prints page ranges from installed packs. They include *Where There Is No Doctor* (Hesperian Health Guides) and Washington State Department of Health guidance, under their publishers' terms.
+
+### Publisher book discovery
+
+The app searches the official Kiwix OPDS catalog and reads per-edition Metalink metadata from Kiwix. The result carries publisher attribution, exact file size and SHA-256. The app can download a selected edition or verify a copy supplied through Files. Discovered editions are for local use and carry the terms of their original works. The app includes its own catalog and Metalink readers. [Kiwix catalog](https://library.kiwix.org/) · [Kiwix terms](https://get.kiwix.org/en/terms-conditions/)
+
+The Spanish Wikipedia highlights edition `2026-10` can fall back from FAU to Wikimedia using the same publisher SHA-256. Kiwix lists both locations for the 217,314,941-byte edition. [Kiwix Metalink](https://download.kiwix.org/zim/wikipedia/wikipedia_es_top_mini_2026-10.zim.meta4)
 
 ## Build and test tools
 

@@ -3,8 +3,9 @@ import ZIMArchive
 
 struct PacksView: View {
     @ObservedObject var downloads: PackDownloads
+    let library: InstalledLibrary
+    let onPublisherImport: () async -> Void
     @State private var language: PackCatalog.Language?
-    @State private var cellularPack: PublishedPack?
 
     var body: some View {
         let downloadSize = downloads.downloadAllSizeEstimate
@@ -34,10 +35,32 @@ struct PacksView: View {
                         .foregroundStyle(.secondary)
                 }
             } footer: {
-                Text("Bulk downloads use Wi-Fi. Download either complete English Wikipedia edition separately and resume cellular transfers individually.")
+                Text("Bulk downloads use Wi-Fi. Start packs marked Individual download from their own rows. Resume cellular transfers individually.")
             }
             if let error = PackCatalog.loadError {
                 Text(error).foregroundStyle(.secondary)
+            }
+            NavigationLink {
+                KiwixDiscoveryView(downloads: downloads, library: library, onImport: onPublisherImport)
+            } label: {
+                Label("Find publisher books", systemImage: "magnifyingglass")
+            }
+            NavigationLink {
+                PortableLibraryView(downloads: downloads)
+            } label: {
+                Label("Install catalog packs from Files", systemImage: "folder")
+            }
+            if !downloads.publisherDownloads.isEmpty {
+                Section("Publisher downloads") {
+                    ForEach(downloads.publisherDownloads, id: \.editionKey) { pack in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(pack.title).font(.headline)
+                            Text(pack.sizeEstimate.formatted(.byteCount(style: .file))).font(.footnote)
+                            Text(pack.attribution).font(.footnote)
+                            PackDownloadControls(downloads: downloads, pack: pack)
+                        }
+                    }
+                }
             }
             Picker("Language", selection: $language) {
                 Text("All languages").tag(nil as PackCatalog.Language?)
@@ -57,14 +80,6 @@ struct PacksView: View {
             }
         }
         .navigationTitle("Content packs")
-        .alert("Allow cellular data for this pack?", isPresented: Binding(
-            get: { cellularPack != nil }, set: { if !$0 { cellularPack = nil } }
-        ), presenting: cellularPack) { pack in
-            Button("Allow cellular data") { downloads.start(pack, network: .cellularAllowed) }
-            Button("Cancel", role: .cancel) {}
-        } message: { pack in
-            Text("\(pack.title) is about \(pack.sizeEstimate.formatted(.byteCount(style: .file))). Switching download modes may restart the transfer.")
-        }
     }
 
     private func row(for entry: PackDownloads.CatalogEntry) -> some View {
@@ -76,6 +91,9 @@ struct PacksView: View {
             }
             Text("\(pack.version) · \(pack.sizeEstimate.formatted(.byteCount(style: .file)))")
                 .font(.footnote)
+            if entry.individualDownloadOnly == true, PackCatalog.bundledCopy(for: pack) == nil {
+                Text("Individual download").font(.footnote).foregroundStyle(.secondary)
+            }
             if !entry.isDefault {
                 Text("Earlier edition").font(.footnote).foregroundStyle(.secondary)
             }
@@ -84,13 +102,38 @@ struct PacksView: View {
             if let termsURL = entry.termsURL {
                 Link("Content license", destination: termsURL).font(.footnote)
             }
-            controls(for: pack)
+            PackDownloadControls(downloads: downloads, pack: pack)
         }
+    }
+}
+
+struct PackDownloadControls: View {
+    @ObservedObject var downloads: PackDownloads
+    let pack: PublishedPack
+    @State private var confirmingCellular = false
+    @State private var bundledInstallError: String?
+
+    var body: some View {
+        controls
+            .alert("Couldn’t install the bundled archive", isPresented: Binding(
+                get: { bundledInstallError != nil },
+                set: { if !$0 { bundledInstallError = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(bundledInstallError ?? "")
+            }
+            .alert("Allow cellular data for this pack?", isPresented: $confirmingCellular) {
+                Button("Allow cellular data") { downloads.start(pack, network: .cellularAllowed) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("\(pack.title) · \(pack.sizeEstimate.formatted(.byteCount(style: .file))). Switching download modes may restart the transfer.")
+            }
     }
 
     @ViewBuilder
-    private func controls(for pack: PublishedPack) -> some View {
-        switch downloads.statuses[pack.editionKey] {
+    private var controls: some View {
+        switch downloads.status(for: pack) {
         case let .downloading(fraction):
             let label = downloads.allowsCellular(for: pack) ? "Downloading · cellular allowed" : "Downloading"
             if let fraction {
@@ -116,9 +159,28 @@ struct PacksView: View {
         case nil:
             downloadControls("Download", pack: pack)
         }
+        if let host = downloads.activeMirrorHost(for: pack) {
+            Text("Publisher mirror \(host)").font(.caption).foregroundStyle(.secondary)
+        }
     }
 
+    @ViewBuilder
     private func downloadControls(_ title: String, pack: PublishedPack) -> some View {
+        if PackCatalog.bundledCopy(for: pack) != nil {
+            Button("Install bundled copy") {
+                Task {
+                    do { try await downloads.installBundledCopy(pack) }
+                    catch { bundledInstallError = error.localizedDescription }
+                }
+            }
+            .buttonStyle(.borderless)
+            .disabled(!downloads.canInstallLocalCopy(pack))
+        } else {
+            networkControls(title, pack: pack)
+        }
+    }
+
+    private func networkControls(_ title: String, pack: PublishedPack) -> some View {
         let resumesOnCellular = downloads.resumesOnCellular(for: pack)
         return HStack {
             Button(resumesOnCellular ? "\(title) · cellular allowed" : title) { downloads.start(pack) }
@@ -127,7 +189,7 @@ struct PacksView: View {
                     Button("Start over on Wi-Fi", systemImage: "wifi") { downloads.start(pack, network: .wifiOnly) }
                 } else {
                     Button("Allow cellular data…", systemImage: "antenna.radiowaves.left.and.right") {
-                        cellularPack = pack
+                        confirmingCellular = true
                     }
                 }
             } label: {

@@ -17,7 +17,7 @@ struct TinfoilKitApp: App {
     @AppStorage("hasSeenOfflineStarterGuide") private var hasSeenOfflineStarterGuide = false
     @State private var showingOfflineStarterGuide = false
     @State private var selectedTab: Tab = .library
-    @State private var pendingMapPlace: MapPlace?
+    @State private var pendingMapRequest: MapOpenRequest?
 
     private enum Tab: Hashable {
         case library, map, ask, household, updates
@@ -26,14 +26,14 @@ struct TinfoilKitApp: App {
     var body: some Scene {
         WindowGroup {
             TabView(selection: $selectedTab) {
-                LibraryView(library: .standard, packs: packs, indexing: indexing)
+                LibraryView(library: .standard, packs: packs, indexing: indexing, household: household)
                     .tabItem { Label("Library", systemImage: "books.vertical") }
                     .tag(Tab.library)
-                OfflineMapView(household: household, pendingPlace: $pendingMapPlace)
+                OfflineMapView(household: household, pendingMapRequest: $pendingMapRequest)
                     .tabItem { Label("Map", systemImage: "map") }
                     .tag(Tab.map)
-                AskLibraryView(library: .standard, indexing: indexing, household: household) { place in
-                    pendingMapPlace = place
+                AskLibraryView(library: .standard, indexing: indexing, household: household) { request in
+                    pendingMapRequest = request
                     selectedTab = .map
                 }
                     .tabItem { Label("Ask", systemImage: "questionmark.bubble") }
@@ -89,6 +89,7 @@ private struct LibraryView: View {
     let library: InstalledLibrary
     @ObservedObject var packs: PackDownloads
     @ObservedObject var indexing: LibraryIndexing
+    @ObservedObject var household: HouseholdStore
     @EnvironmentObject private var readingShelf: ReadingShelf
     private var archives: [InstalledArchive] { indexing.archives }
     private var hasLibraryItems: Bool {
@@ -102,6 +103,7 @@ private struct LibraryView: View {
     @State private var query = ""
     @State private var results: [SummarySource] = []
     @State private var resultsQuery = ""
+    @State private var unavailableSearchArchives = 0
     @State private var summary: SummaryRequest?
     @State private var sharedArchive: SharedArchive?
     @State private var pendingRemoval: ArchiveRemoval?
@@ -189,7 +191,7 @@ private struct LibraryView: View {
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search installed articles")
         .toolbar {
             NavigationLink {
-                PacksView(downloads: packs)
+                PacksView(downloads: packs, library: library) { await indexing.refresh() }
             } label: {
                 Label("Content packs", systemImage: "arrow.down.circle")
             }
@@ -199,7 +201,7 @@ private struct LibraryView: View {
                 Label("Desktop kit", systemImage: "desktopcomputer")
             }
             NavigationLink {
-                OfflineReadinessView(indexing: indexing)
+                OfflineReadinessView(indexing: indexing, household: household)
             } label: {
                 Label("Offline readiness", systemImage: "checkmark.circle")
             }
@@ -226,7 +228,9 @@ private struct LibraryView: View {
         }
         .fileImporter(
             isPresented: $choosingArchive,
-            allowedContentTypes: [UTType(filenameExtension: "zim") ?? .data]
+            // File providers can advertise ZIM archives as generic data.
+            // The library validates the extension and archive format on import.
+            allowedContentTypes: [.data]
         ) { result in
             beginImport(result)
         }
@@ -253,7 +257,10 @@ private struct LibraryView: View {
         } else if resultsQuery != searchQuery {
             ProgressView("Searching library")
         } else if results.isEmpty {
-            if indexing.hasPendingIndexes {
+            if unavailableSearchArchives > 0 {
+                ContentUnavailableView("No matches found", systemImage: "magnifyingglass",
+                                       description: Text("Some archives could not be fully searched."))
+            } else if indexing.hasPendingIndexes {
                 ContentUnavailableView("No matches yet", systemImage: "magnifyingglass",
                                        description: Text("Search updates as more articles are indexed."))
             } else {
@@ -265,10 +272,16 @@ private struct LibraryView: View {
     }
 
     private var searchResults: some View {
-        List {
-            if ArticleSummaryView.isAvailable {
+        let passages = results.filter { !$0.match.excerpt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return List {
+            if unavailableSearchArchives > 0 {
+                Text("Some archives could not be fully searched.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            if ArticleSummaryView.isAvailable, !passages.isEmpty {
                 Button("Summarize matching articles", systemImage: "text.justify.leading") {
-                    summary = SummaryRequest(question: query, sources: Array(results.prefix(5)))
+                    summary = SummaryRequest(question: query, sources: Array(passages.prefix(5)))
                 }
             }
             ForEach(results) { result in
@@ -277,7 +290,9 @@ private struct LibraryView: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(result.match.title)
-                        Text(result.match.excerpt).font(.subheadline).lineLimit(3)
+                        if !result.match.excerpt.isEmpty {
+                            Text(result.match.excerpt).font(.subheadline).lineLimit(3)
+                        }
                         Text(result.archive.title).font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -451,17 +466,23 @@ private struct LibraryView: View {
         }
         do {
             try await Task.sleep(for: .milliseconds(180))
+            var titleCache: [UUID: [ZIMArchive.ArticleTitle]] = [:]
             for await _ in updates {
                 do {
-                    let matches = try await searchIndexes(for: requested)
+                    let search = try await searchIndexes(for: requested, titleCache: titleCache)
                     try Task.checkCancellation()
-                    results = matches
+                    titleCache = search.titleCache
+                    results = search.matches
+                    unavailableSearchArchives = search.unavailableCount
                     resultsQuery = requested
                 } catch is CancellationError {
                     return
                 } catch {
                     guard !Task.isCancelled else { return }
-                    if resultsQuery != requested { results = [] }
+                    if resultsQuery != requested {
+                        results = []
+                        unavailableSearchArchives = 0
+                    }
                     resultsQuery = requested
                     errorMessage = error.localizedDescription
                 }
@@ -472,22 +493,18 @@ private struct LibraryView: View {
         }
     }
 
-    private func searchIndexes(for requested: String) async throws -> [SummarySource] {
-        var sources: [(InstalledArchive, ArticleIndex)] = []
-        for archive in archives where indexing.searchable.contains(archive.id) {
+    private func searchIndexes(
+        for requested: String, titleCache: [UUID: [ZIMArchive.ArticleTitle]]
+    ) async throws -> LibraryArchiveSearch.Output {
+        var sources: [(InstalledArchive, URL)] = []
+        for archive in archives {
             try Task.checkCancellation()
             let url = await library.fileURL(for: archive.id)
-            sources.append((archive, ArticleIndex(archiveURL: url)))
+            sources.append((archive, url))
         }
         let inputs = sources
         let worker = Task.detached(priority: .userInitiated) {
-            let groups = try inputs.map { archive, index in
-                try Task.checkCancellation()
-                return try index.search(requested, includeIncomplete: true, prefixMatching: true).map {
-                    SummarySource(archive: archive, match: $0)
-                }
-            }
-            return LibraryResultOrder.interleave(groups, limit: 50)
+            try LibraryArchiveSearch.search(requested, in: inputs, titleCache: titleCache)
         }
         return try await withTaskCancellationHandler {
             try await worker.value

@@ -23,6 +23,10 @@ public struct InstalledArchive: Identifiable, Equatable, Sendable, Codable {
 
 /// Owns imported archive copies and their manifests.
 public actor InstalledLibrary {
+    public struct PublisherChecksumMismatch: LocalizedError {
+        public var errorDescription: String? { "The download does not match the publisher’s checksum." }
+    }
+
     /// The installed archives, plus folders whose manifest or archive can no longer be read.
     public struct Inventory: Equatable, Sendable {
         public let archives: [InstalledArchive]
@@ -37,6 +41,7 @@ public actor InstalledLibrary {
     private let files = FileManager.default
     private var activeStaging: Set<UUID> = []
     private var activeEditions: Set<String> = []
+    private var activePublishedImports: Set<String> = []
     private var busyArchives: Set<UUID> = []
 
     public init(directory: URL) {
@@ -85,9 +90,36 @@ public actor InstalledLibrary {
         try await installArchive(from: source, pack: nil, moving: false, progress: progress)
     }
 
+    /// Imports a publisher-approved local file with an exact byte count and SHA-256.
+    @discardableResult
+    public func importPublishedPack(
+        _ pack: PublishedPack, from source: URL,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> InstalledArchive {
+        try await installVerifiedPublisherFile(pack, from: source, moving: false, progress: progress)
+    }
+
+    @discardableResult
+    public func installDownloadedPublishedPack(_ pack: PublishedPack, from source: URL) async throws -> InstalledArchive {
+        try await installVerifiedPublisherFile(pack, from: source, moving: true, progress: { _ in })
+    }
+
+    private func installVerifiedPublisherFile(
+        _ pack: PublishedPack, from source: URL, moving: Bool, progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> InstalledArchive {
+        guard pack.sizeEstimate > 0 else { throw ImportError.sizeMismatch }
+        guard activeEditions.insert(pack.editionKey).inserted else { throw ImportError.busy }
+        defer { activeEditions.remove(pack.editionKey) }
+        guard activePublishedImports.insert(pack.sha256).inserted else { throw ImportError.busy }
+        defer { activePublishedImports.remove(pack.sha256) }
+        return try await installArchive(from: source, pack: pack, moving: moving,
+                                        expectedByteCount: pack.sizeEstimate, progress: progress)
+    }
+
     @discardableResult
     public func installPack(
-        _ pack: PublishedPack, from source: URL, replacing previousID: UUID? = nil, movingSource: Bool = false
+        _ pack: PublishedPack, from source: URL, replacing previousID: UUID? = nil, movingSource: Bool = false,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> InstalledArchive {
         guard activeEditions.insert(pack.editionKey).inserted else { throw ImportError.busy }
         defer { activeEditions.remove(pack.editionKey) }
@@ -124,7 +156,7 @@ public actor InstalledLibrary {
             return replacement
         }
         return try await installArchive(
-            from: source, pack: pack, replacesArchiveID: previousID, moving: movingSource, progress: { _ in }
+            from: source, pack: pack, replacesArchiveID: previousID, moving: movingSource, progress: progress
         )
     }
 
@@ -166,11 +198,18 @@ public actor InstalledLibrary {
 
     private func installArchive(
         from source: URL, pack: PublishedPack?, replacesArchiveID: UUID? = nil,
-        moving: Bool, progress: @escaping @Sendable (Double) -> Void
+        moving: Bool, expectedByteCount: Int64? = nil, progress: @escaping @Sendable (Double) -> Void
     ) async throws -> InstalledArchive {
         let id = UUID()
-        return try await withStagedArchive(id: id, source: source, pack: pack, moving: moving, progress: progress) {
+        return try await withStagedArchive(id: id, source: source, pack: pack, moving: moving,
+                                           expectedByteCount: expectedByteCount, progress: progress) {
             stagedFile, archiveTitle in
+            if let pack, let expectedByteCount {
+                if let existing = try await verifiedEdition(matching: pack, byteCount: expectedByteCount) {
+                    return existing
+                }
+                try Task.checkCancellation()
+            }
             let values = try stagedFile.resourceValues(forKeys: [.fileSizeKey])
             let entry = InstalledArchive(
                 id: id,
@@ -187,10 +226,29 @@ public actor InstalledLibrary {
         }
     }
 
+    private func verifiedEdition(matching pack: PublishedPack, byteCount: Int64) async throws -> InstalledArchive? {
+        let candidates = try archives().filter { $0.pack?.sha256 == pack.sha256 && $0.byteCount == byteCount }
+        for candidate in candidates {
+            guard busyArchives.insert(candidate.id).inserted else { throw ImportError.busy }
+            defer { busyArchives.remove(candidate.id) }
+            do {
+                try await verifyArchive(candidate, expectedByteCount: byteCount)
+                try Task.checkCancellation()
+                return candidate
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // A damaged edition cannot stand in for the newly verified copy.
+                try Task.checkCancellation()
+            }
+        }
+        return nil
+    }
+
     private func withStagedArchive<Result>(
-        id: UUID, source: URL, pack: PublishedPack?, moving: Bool,
+        id: UUID, source: URL, pack: PublishedPack?, moving: Bool, expectedByteCount: Int64? = nil,
         progress: @escaping @Sendable (Double) -> Void = { _ in },
-        publish: (URL, String?) throws -> Result
+        publish: (URL, String?) async throws -> Result
     ) async throws -> Result {
         guard source.isFileURL, source.pathExtension.lowercased() == "zim" else {
             throw ImportError.invalidFile
@@ -209,13 +267,14 @@ public actor InstalledLibrary {
             try Task.checkCancellation()
             let candidate: URL
             if moving {
-                try Self.checkRegularFile(source)
+                _ = try Self.regularFileSize(source)
                 candidate = source
             } else {
-                try Self.stageCopy(source, to: stagedFile, storage: storage, progress: progress)
+                try Self.stageCopy(source, to: stagedFile, storage: storage,
+                                   expectedByteCount: expectedByteCount, progress: progress)
                 candidate = stagedFile
             }
-            if let pack { try Self.verify(candidate, expectedHash: pack.sha256) }
+            if let pack { try Self.verify(candidate, expectedHash: pack.sha256, expectedByteCount: expectedByteCount) }
             try Task.checkCancellation()
             let archive = try ZIMArchive(fileURL: candidate)
             guard archive.entryCount > 0 else { throw ImportError.emptyArchive }
@@ -228,7 +287,7 @@ public actor InstalledLibrary {
         }
         try Task.checkCancellation()
         if moving { try files.moveItem(at: source, to: stagedFile) }
-        return try publish(stagedFile, archiveTitle)
+        return try await publish(stagedFile, archiveTitle)
     }
 
     public func fileURL(for id: UUID) -> URL {
@@ -249,10 +308,14 @@ public actor InstalledLibrary {
     }
 
     public func verifyArchive(_ entry: InstalledArchive) async throws {
+        try await verifyArchive(entry, expectedByteCount: nil)
+    }
+
+    private func verifyArchive(_ entry: InstalledArchive, expectedByteCount: Int64?) async throws {
         let file = fileURL(for: entry.id)
         let verification = Task.detached(priority: .utility) {
             if let pack = entry.pack {
-                try Self.verify(file, expectedHash: pack.sha256)
+                try Self.verify(file, expectedHash: pack.sha256, expectedByteCount: expectedByteCount)
             }
             let archive = try ZIMArchive(fileURL: file)
             guard archive.entryCount > 0 else { throw ImportError.emptyArchive }
@@ -272,20 +335,22 @@ public actor InstalledLibrary {
     }
 
     private static func stageCopy(
-        _ source: URL, to destination: URL, storage: URL,
+        _ source: URL, to destination: URL, storage: URL, expectedByteCount: Int64?,
         progress: @escaping @Sendable (Double) -> Void
     ) throws {
         let accessed = source.startAccessingSecurityScopedResource()
         defer { if accessed { source.stopAccessingSecurityScopedResource() } }
         guard accessed else {
-            try copy(source, to: destination, storage: storage, progress: progress)
+            try copy(source, to: destination, storage: storage,
+                     expectedByteCount: expectedByteCount, progress: progress)
             return
         }
         var coordinationError: NSError?
         var copyError: Error?
         NSFileCoordinator().coordinate(readingItemAt: source, options: .withoutChanges, error: &coordinationError) { file in
             do {
-                try copy(file, to: destination, storage: storage, progress: progress)
+                try copy(file, to: destination, storage: storage,
+                         expectedByteCount: expectedByteCount, progress: progress)
             } catch {
                 copyError = error
             }
@@ -294,18 +359,22 @@ public actor InstalledLibrary {
         if let error = copyError { throw error }
     }
 
-    private static func checkRegularFile(_ file: URL) throws {
-        let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
-        guard values.isRegularFile == true, values.isSymbolicLink != true else {
+    private static func regularFileSize(_ file: URL) throws -> Int64 {
+        // A download can replace or truncate the file while reusing the original URL.
+        let current = URL(fileURLWithPath: file.path)
+        let values = try current.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true, let size = values.fileSize else {
             throw ImportError.invalidFile
         }
+        return Int64(size)
     }
 
     private static func copy(
-        _ file: URL, to destination: URL, storage: URL, progress: @escaping @Sendable (Double) -> Void
+        _ file: URL, to destination: URL, storage: URL, expectedByteCount: Int64?,
+        progress: @escaping @Sendable (Double) -> Void
     ) throws {
-        try checkRegularFile(file)
-        let size = Int64(try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+        let size = try regularFileSize(file)
+        if let expectedByteCount, size != expectedByteCount { throw ImportError.sizeMismatch }
         let available = try storage.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             .volumeAvailableCapacityForImportantUsage
         let required = requiredBytes(forArchiveOf: size)
@@ -325,6 +394,9 @@ public actor InstalledLibrary {
         progress(0)
         while let chunk = try input.read(upToCount: 4 * 1024 * 1024), !chunk.isEmpty {
             try Task.checkCancellation()
+            if let expectedByteCount, Int64(chunk.count) > expectedByteCount - copied {
+                throw ImportError.sizeMismatch
+            }
             try output.write(contentsOf: chunk)
             copied += Int64(chunk.count)
             let fraction = size > 0 ? min(1, Double(copied) / Double(size)) : 1
@@ -333,10 +405,14 @@ public actor InstalledLibrary {
                 progress(fraction)
             }
         }
+        if let expectedByteCount, copied != expectedByteCount { throw ImportError.sizeMismatch }
         progress(1)
     }
 
-    private static func verify(_ file: URL, expectedHash: String) throws {
+    private static func verify(_ file: URL, expectedHash: String, expectedByteCount: Int64?) throws {
+        if let expectedByteCount, try regularFileSize(file) != expectedByteCount {
+            throw ImportError.sizeMismatch
+        }
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
         var hasher = SHA256()
@@ -345,7 +421,7 @@ public actor InstalledLibrary {
             hasher.update(data: bytes)
         }
         let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        guard digest == expectedHash else { throw ImportError.checksumMismatch }
+        guard digest == expectedHash else { throw PublisherChecksumMismatch() }
     }
 
     private func prepareDirectory() throws {
@@ -375,7 +451,7 @@ public actor InstalledLibrary {
         case invalidFile
         case emptyArchive
         case busy
-        case checksumMismatch
+        case sizeMismatch
         case invalidRepair
         case invalidUpdate
 
@@ -384,7 +460,7 @@ public actor InstalledLibrary {
             case .invalidFile: "Choose a single .zim archive from Files."
             case .emptyArchive: "This archive has no entries."
             case .busy: "An archive operation is already in progress. Try again when it finishes."
-            case .checksumMismatch: "The download does not match the publisher’s checksum."
+            case .sizeMismatch: "The archive size does not match the publisher’s exact byte count."
             case .invalidRepair: "This edition is no longer installed. Download it from Content packs."
             case .invalidUpdate: "This archive can no longer be updated to the selected edition."
             }

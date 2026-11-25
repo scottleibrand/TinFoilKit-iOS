@@ -3,9 +3,25 @@ import MapLibre
 import SwiftUI
 import UniformTypeIdentifiers
 
+struct MapOpenRequest: Identifiable {
+    struct Route {
+        let origin: HouseholdPlace
+        let mode: MapTravelMode
+    }
+
+    let id = UUID()
+    let place: MapPlace
+    let route: Route?
+
+    init(place: MapPlace, route: Route? = nil) {
+        self.place = place
+        self.route = route
+    }
+}
+
 struct OfflineMapView: View {
     @ObservedObject var household: HouseholdStore
-    @Binding var pendingPlace: MapPlace?
+    @Binding var pendingMapRequest: MapOpenRequest?
     @Environment(\.openURL) private var openURL
     @EnvironmentObject private var wsdotClosures: WSDOTClosureStore
     @State private var storage = MapStorage()
@@ -32,6 +48,7 @@ struct OfflineMapView: View {
     @State private var routeMode = MapTravelMode.walking
     @State private var route: DisplayedRoute?
     @State private var routeRequest: RouteRequest?
+    @State private var planningRoute = false
     @State private var showingSteps = false
     @State private var activeImport: MapImportKind?
     @State private var importTask: Task<Void, Never>?
@@ -148,6 +165,7 @@ struct OfflineMapView: View {
             .sheet(isPresented: $searchingPlaces, onDismiss: { routeOrigin = nil }) {
                 placeSearch
             }
+            .sheet(isPresented: $planningRoute) { routePlanner }
             .sheet(isPresented: $showingSteps) {
                 if let route { steps(for: route) }
             }
@@ -189,13 +207,16 @@ struct OfflineMapView: View {
                 location.setVisible(true, centerInitially: savedPosition.isEmpty)
                 exploration.setVisible(true)
             }
-            .task(id: pendingPlace?.id) {
-                if let place = pendingPlace {
-                    pendingPlace = nil
+            .task(id: loading ? nil : pendingMapRequest?.id) {
+                if !loading, !Task.isCancelled, let request = pendingMapRequest {
+                    pendingMapRequest = nil
                     if location.following { location.toggleFollowing() }
                     routeRequest = nil
                     route = nil
-                    show(place)
+                    show(request.place)
+                    if let route = request.route {
+                        startRoute(from: route.origin.coordinate, to: request.place.coordinate, mode: route.mode)
+                    }
                 }
             }
             .onDisappear {
@@ -209,7 +230,7 @@ struct OfflineMapView: View {
                 beginImport(result, kind: importKind)
             }
             .sheet(isPresented: $choosingBundle) {
-                RegionalBundleFolderPicker { folder in
+                DocumentFolderPicker { folder in
                     choosingBundle = false
                     if let folder { beginImport(.success(folder), kind: .bundle) }
                 }
@@ -272,8 +293,12 @@ struct OfflineMapView: View {
                         if let message = location.message {
                             Text(message)
                         }
-                        Text(mapTitle)
-                            .font(.footnote.weight(.semibold))
+                        HStack {
+                            Text(mapTitle).font(.footnote.weight(.semibold))
+                            Spacer()
+                            Button("Directions", systemImage: "signpost.right") { planningRoute = true }
+                                .font(.footnote)
+                        }
                         if !placeRegions.isEmpty {
                             Button("Installed place data") { showingPlaceRegions = true }
                                 .font(.caption)
@@ -434,6 +459,21 @@ struct OfflineMapView: View {
                 routeOrigin = nil
                 startRoute(from: origin.coordinate, to: place.coordinate, mode: routeMode)
             }
+        }
+    }
+
+    private var routePlanner: some View {
+        let current = location.fix.map { fix in
+            MapPlace(id: "current-position", name: "Current position", kind: MapCoordinateText.decimal(fix.coordinate),
+                     latitude: fix.coordinate.latitude, longitude: fix.coordinate.longitude)
+        }
+        return MapRoutePlanner(index: placeIndex, regions: placeRegions, savedPlaces: savedPlaces,
+                               home: household.snapshot.home, currentLocation: current, destination: selectedPlace,
+                               coverage: routingRegions.map(\.pack.bounds), walkingPreview: walkingIndex == nil ? nil : map?.bounds) {
+            origin, destination, mode in
+            if location.following { location.toggleFollowing() }
+            show(destination)
+            startRoute(from: origin.coordinate, to: destination.coordinate, mode: mode)
         }
     }
 
@@ -695,38 +735,6 @@ struct OfflineMapView: View {
         let origin: MapRoute.Point
         let destination: MapRoute.Point
         let mode: MapTravelMode
-    }
-}
-
-private struct RegionalBundleFolderPicker: UIViewControllerRepresentable {
-    let completion: (URL?) -> Void
-
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(completion: completion)
-    }
-
-    final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let completion: (URL?) -> Void
-
-        init(completion: @escaping (URL?) -> Void) {
-            self.completion = completion
-        }
-
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            completion(urls.first)
-        }
-
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-            completion(nil)
-        }
     }
 }
 

@@ -100,9 +100,22 @@ struct RegionalPlaceIndex: Sendable {
     }
 
     func search(_ query: String, limit: Int = 40) throws -> [Place] {
+        try search(query, limit: limit, destination: nil)
+    }
+
+    func destinations(matching question: HomeRouteQuestion, limit: Int) throws -> [Place] {
+        try search(question.destination, limit: limit, destination: question)
+    }
+
+    private func search(_ query: String, limit: Int, destination: HomeRouteQuestion?) throws -> [Place] {
         let words = query.prefix(256).split { !$0.isLetter && !$0.isNumber }.prefix(12)
         guard !words.isEmpty, limit > 0 else { return [] }
-        let expression = words.map { "\"\($0)\"*" }.joined(separator: " AND ")
+        let expression = if let destination {
+            "\(destination.isStreetAddress ? "address" : "title") : \"\(words.joined(separator: " "))\""
+        } else {
+            words.map { "\"\($0)\"*" }.joined(separator: " AND ")
+        }
+        let count = min(limit, 100)
         return try withDatabase { db in
             try withStatement(db, """
                 SELECT p.id, p.title, p.category, p.category_words, p.address, p.latitude, p.longitude
@@ -112,14 +125,21 @@ struct RegionalPlaceIndex: Sendable {
                 LIMIT ?
                 """) { statement in
                 try Self.bind(expression, at: 1, on: statement)
-                guard sqlite3_bind_int(statement, 2, Int32(min(limit, 100))) == SQLITE_OK else {
+                guard sqlite3_bind_int(statement, 2, destination == nil ? Int32(count) : -1) == SQLITE_OK else {
                     throw IndexError.unreadable
                 }
                 var places: [Place] = []
                 var status = sqlite3_step(statement)
                 while status == SQLITE_ROW {
                     try Task.checkCancellation()
-                    places.append(try Self.place(statement))
+                    let place = try Self.place(statement)
+                    let matches = destination.map {
+                        $0.isStreetAddress ? $0.matchesAddress(place.address) : $0.matchesName(place.name)
+                    } ?? true
+                    if matches {
+                        places.append(place)
+                        if places.count == count { return places }
+                    }
                     status = sqlite3_step(statement)
                 }
                 guard status == SQLITE_DONE else { throw IndexError.unreadable }
