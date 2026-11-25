@@ -69,6 +69,43 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["Open in Google Maps"].firstMatch.exists)
     }
 
+    func testAskHandsOfflineDirectionsToMap() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-askUsesOnDeviceModel", "NO", "-mapDownloadPolicy", "off"]
+        for (query, choice, clear) in [
+            ("Drive from Home to Meeting Point", "Driving to Meeting Point", "Clear driving route"),
+            ("Walk from Home to 10 East Main", "Walking to 10 East Main", "Clear walking route"),
+            ("How do I get to the nearest pharmacy?", "Drive from Home", "Clear driving route")
+        ] {
+            app.launch()
+            app.tabBars.buttons["Ask"].tap()
+            let question = app.descendants(matching: .any)["ask-question"].firstMatch
+            XCTAssertTrue(question.waitForExistence(timeout: 10))
+            question.tap()
+            question.typeText(query)
+            app.buttons["ask-submit"].tap()
+            let directions = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", choice)).firstMatch
+            guard directions.waitForExistence(timeout: 8) else {
+                if app.buttons["Open Map"].exists {
+                    throw XCTSkip("Seed the synthetic regional bundle and route-test household in the dedicated simulator.")
+                }
+                XCTFail("No directions choice for " + query)
+                return
+            }
+            directions.tap()
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            let denyLocation = springboard.alerts.buttons.matching(
+                NSPredicate(format: "label BEGINSWITH 'Don' AND label ENDSWITH 'Allow'")
+            ).firstMatch
+            if denyLocation.waitForExistence(timeout: 3) { denyLocation.tap() }
+            XCTAssertTrue(app.navigationBars["Map"].waitForExistence(timeout: 8))
+            XCTAssertTrue(app.buttons[clear].waitForExistence(timeout: 12),
+                          app.alerts["Map error"].staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " · "))
+            XCTAssertTrue(app.buttons["Route steps"].exists)
+            app.terminate()
+        }
+    }
+
     func testHouseholdNotesSurviveSwitchingTabsAndRelaunch() {
         let app = XCUIApplication()
         let tab = app.tabBars.buttons["Household"]

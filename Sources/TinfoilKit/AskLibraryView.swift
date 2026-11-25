@@ -79,7 +79,6 @@ struct AskLibraryView: View {
                 results
             }
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: question) { homeRoutes = [] }
             .navigationTitle("Ask")
             .toolbar {
                 if questionFocused || serviceAreaFocused {
