@@ -12,6 +12,8 @@ Download packs individually over Wi-Fi or choose Download Essentials or Download
 
 Pack downloads retry after temporary connection failures and publisher errors. A saved cellular transfer can be resumed from its own row, and the button indicates that cellular data is allowed. Bulk downloads use Wi-Fi. When the publisher supports resuming and iOS still has the partial file, the retry picks up where it left off. Otherwise it starts the file again. [Apple’s download resumption guide](https://developer.apple.com/documentation/foundation/pausing-and-resuming-downloads)
 
+Download **Ready.gov Preparedness Guides** individually from Extended Library (about 2.06 GB). Open it in Library to read the archived preparedness site, or use **Household → Print the essentials** for its two-page power outage guide. [Kiwix edition manifest](https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim.meta4)
+
 Press and hold an installed archive in Library to verify its checksum or remove it. Catalog packs use the publisher’s SHA-256 checksum. Files imports use the ZIM’s embedded checksum to check for corruption. Catalog packs also support repair and updates. Repair replaces a same-edition copy after checksum verification. An update keeps the earlier edition and its index available until the new one is verified and searchable.
 
 Library and Ask can search article text and PDF pages as indexes build. Indexing resumes after an interruption when storage is available. Results from PDFs open to the matching page. Ask can stream a cited answer on devices with Apple Intelligence, and you can turn its on-device model off from the options menu.
@@ -102,6 +104,8 @@ The local ZIP measures this build. Use App Store Connect device-specific size re
 ## Test
 
 Run the `ZIMArchive` scheme on a dedicated simulator for library and search tests. For the `TinfoilKit` UI test scheme, install the debug app in a dedicated simulator and copy `.build/fixtures/climate.zim` into its Documents folder as `Climate Test.zim`. The test uses the Files picker to import it on a fresh install.
+
+For the Ready.gov acceptance check, install the pinned edition from Content Packs on a dedicated simulator or test iPhone. Run `MapTileTests/HouseholdPrintingTests/testInstalledReadyGovEditionOpensAndPrintsThePowerOutageGuide` with the same app data. On the iPhone, cold-launch in Airplane Mode with Wi-Fi off, open Ready.gov in Library, follow the Power Outages, Earthquakes, and Be Informed links, and open the two-page Power outages preview in Household. Check local navigation while WebKit’s network block is active.
 
 For the nearby-service Ask UI test, build an index from `Tests/RegionalPlaceIndexFixture/places.osm` with `Scripts/build-regional-place-index.py`. Import it from Files using **Map → + → Import regional place data** on the dedicated simulator and set Home at latitude 47.610, longitude −122.330. The synthetic fixture should resolve to Central Hospital.
 

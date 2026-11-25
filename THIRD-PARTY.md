@@ -56,6 +56,7 @@ Valhalla Mobile packages Valhalla and its dependencies. [Scripts/routing/README.
 - **Content packs:** downloaded from Kiwix and its official mirrors when a user chooses them. Each pack lists its own attribution and terms in Content Packs. In summary:
   - Wikipedia packs and Appropedia: CC BY-SA. Images carry their own licenses.
   - iFixit: CC BY-NC-SA 3.0, which prohibits commercial use.
+  - Ready.gov Preparedness Guides: FEMA Ready.gov material archived by openZIM and distributed by Kiwix as an individual download. Content retains its source terms, including third-party documents published with scoped permissions. Archive sharing is disabled. [Edition metadata](https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim.meta4) · [Example publisher terms](https://www.ready.gov/sites/default/files/2020-03/ready_emergency-financial-first-aid-toolkit.pdf)
   - The water and field medicine libraries: collections of documents under their authors' individual terms.
 - **Printable references:** Household prints page ranges from installed packs. They include *Where There Is No Doctor* (Hesperian Health Guides) and Washington State Department of Health guidance, under their publishers' terms.
 

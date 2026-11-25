@@ -7,8 +7,13 @@ final class ArchiveWebAddressTests: XCTestCase {
         let home = try XCTUnwrap(ArchiveWebAddress.url(for: "www.ready.gov/", fragment: "intro"))
         XCTAssertEqual(ArchiveWebAddress.path(in: home), "www.ready.gov/")
         XCTAssertEqual(home.fragment, "intro")
-        let article = try XCTUnwrap(URL(string: "power-outages/", relativeTo: home)?.absoluteURL)
-        XCTAssertEqual(ArchiveWebAddress.path(in: article), "www.ready.gov/power-outages/")
+        let article = try XCTUnwrap(URL(string: "power-outages#during", relativeTo: home)?.absoluteURL)
+        XCTAssertEqual(ArchiveWebAddress.path(in: article), "www.ready.gov/power-outages")
+        XCTAssertEqual(article.fragment, "during")
+        let localPDF = try XCTUnwrap(URL(string: "sites/default/files/2024-08/ready.gov_power-outage_info-sheet.pdf",
+                                         relativeTo: home)?.absoluteURL)
+        XCTAssertEqual(ArchiveWebAddress.path(in: localPDF),
+                       "www.ready.gov/sites/default/files/2024-08/ready.gov_power-outage_info-sheet.pdf")
     }
 
     func testDoesNotDoubleDecodeOrAcceptExternalURLs() throws {

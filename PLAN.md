@@ -58,6 +58,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 ### Household
 
 - Household notes, home and pins can move through an iPhone backup file or the desktop kit's notes and places files. Verify Files import, export and damaged-data recovery on a device.
+- The Ready.gov 2026-10 candidate exposes the existing two-page power outage guide through an individual publisher download. Bounded archive reads confirmed the exact home key, three linked preparedness articles, and two paths to the same PDF. Verify WebKit navigation and the PDFKit print preview in Airplane Mode. Links with query-dependent archive keys and relative navigation after cross-directory redirects need separate reader coverage. [Kiwix edition manifest](https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim.meta4)
 - Printable references depend on exact edition filenames and page numbers. A catalog update silently drops them. The post-disaster source isn't in the catalog. Check page ranges whenever the catalog changes an edition.
 
 ### Tests and build
