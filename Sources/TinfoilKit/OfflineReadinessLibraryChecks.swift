@@ -50,8 +50,7 @@ enum OfflineReadinessLibraryChecks {
                     couldNotRead = true
                     continue
                 }
-                guard archive.entryCount <= pdfEntryLimit else { continue }
-                guard let entries = try? archive.pdfEntries() else {
+                guard let entries = try? archive.pdfEntries(inspectingFirst: pdfEntryLimit) else {
                     try Task.checkCancellation()
                     couldNotRead = true
                     continue
@@ -66,7 +65,7 @@ enum OfflineReadinessLibraryChecks {
             }
             return couldNotRead
                 ? .failed("Couldn't open a PDF in the sampled archives.")
-                : .unavailable("No PDF found in the sampled small archives.")
+                : .unavailable("No PDF found among the sampled archive entries.")
         }
     }
 
