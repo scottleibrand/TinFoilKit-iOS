@@ -9,11 +9,13 @@ enum NearbyPublicTLS {
         case original = "tfk-public/1"
         case resumable = "tfk-public/2"
         case catalog = "tfk-public/3"
+        case archive = "tfk-public/4"
     }
     private static let trustQueue = DispatchQueue(label: "org.tinfoilkit.nearby-public-tls")
 
-    static func listenerParameters() throws -> NWParameters {
-        let options = makeTLSOptions()
+    static func listenerParameters(archives: Bool = false) throws -> NWParameters {
+        let versions: [Version] = archives ? [.archive, .catalog, .resumable, .original] : [.catalog, .resumable, .original]
+        let options = makeTLSOptions(versions)
         let identity = try PublicCertificate.makeIdentity()
         guard let protocolIdentity = sec_identity_create(identity) else { throw IdentityError.cannotCreateIdentity }
         sec_protocol_options_set_local_identity(options.securityProtocolOptions, protocolIdentity)
@@ -22,8 +24,8 @@ enum NearbyPublicTLS {
         return parameters
     }
 
-    static func clientParameters() -> NWParameters {
-        let options = makeTLSOptions()
+    static func clientParameters(archive: Bool = false) -> NWParameters {
+        let options = makeTLSOptions(archive ? [.archive] : [.catalog, .resumable, .original])
         sec_protocol_options_set_verify_block(options.securityProtocolOptions, { _, _, complete in
             // Trust comes from verifying the fetched public bytes against a local publisher pin.
             // TLS still requires the server to prove possession of its ephemeral certificate key.
@@ -50,14 +52,12 @@ enum NearbyPublicTLS {
         return Version(rawValue: String(cString: negotiated))
     }
 
-    private static func makeTLSOptions() -> NWProtocolTLS.Options {
+    private static func makeTLSOptions(_ versions: [Version]) -> NWProtocolTLS.Options {
         let options = NWProtocolTLS.Options()
         let security = options.securityProtocolOptions
         sec_protocol_options_set_min_tls_protocol_version(security, .TLSv13)
         sec_protocol_options_set_max_tls_protocol_version(security, .TLSv13)
-        sec_protocol_options_add_tls_application_protocol(security, Version.catalog.rawValue)
-        sec_protocol_options_add_tls_application_protocol(security, Version.resumable.rawValue)
-        sec_protocol_options_add_tls_application_protocol(security, Version.original.rawValue)
+        for version in versions { sec_protocol_options_add_tls_application_protocol(security, version.rawValue) }
         return options
     }
 
