@@ -101,6 +101,14 @@ The local ZIP measures this build. Use App Store Connect device-specific size re
 
 ## Test
 
+On an Apple Silicon Mac with Xcode, prepare the Rust targets listed above and run the candidate checks on a dedicated simulator. The runner keeps app and archive test results in separate DerivedData directories and records the tested revision.
+
+```sh
+bash Scripts/verify-apple-candidate.sh "$TFK_SIMULATOR_UDID" .build/candidate-check
+```
+
+Use a new output directory for each run. Add `--ui-test TinfoilKitUITests/ClassName/testName` for each selected UI test after seeding its fixtures on that simulator. Add `--device "$TFK_IPHONE_ID" --team "$TFK_TEAM_ID"` for a signed build with the Mac’s existing signing configuration, and `--install` to install it after verification. Add `--lightweight` to build and measure the unsigned lightweight release. Keep run outputs local since build logs can include device and signing identifiers.
+
 Run the `ZIMArchive` scheme on a dedicated simulator for library and search tests. For the `TinfoilKit` UI test scheme, install the debug app in a dedicated simulator and copy `.build/fixtures/climate.zim` into its Documents folder as `Climate Test.zim`. The test uses the Files picker to import it on a fresh install.
 
 For the nearby-service Ask UI test, build an index from `Tests/RegionalPlaceIndexFixture/places.osm` with `Scripts/build-regional-place-index.py`. Import it from Files using **Map → + → Import regional place data** on the dedicated simulator and set Home at latitude 47.610, longitude −122.330. The synthetic fixture should resolve to Central Hospital.
