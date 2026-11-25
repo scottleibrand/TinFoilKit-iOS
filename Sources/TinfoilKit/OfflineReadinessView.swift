@@ -11,6 +11,11 @@ struct OfflineReadinessView: View {
 
     var body: some View {
         List {
+            Section {
+                NavigationLink("Run offline checks", destination: OfflineFunctionalChecksView(indexing: indexing))
+            } footer: {
+                Text("Open installed content, search locally, and calculate a route. To rehearse a disconnect, turn on Airplane Mode and turn Wi-Fi off first.")
+            }
             Section("Storage") {
                 LabeledContent("Available", value: availableBytes?.formatted(.byteCount(style: .file)) ?? "Unknown")
                 LabeledContent("Installed archives", value: indexing.archives.reduce(Int64(0)) {
