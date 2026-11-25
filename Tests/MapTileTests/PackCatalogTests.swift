@@ -5,6 +5,22 @@ import XCTest
 @testable import TinfoilKit
 
 final class PackCatalogTests: XCTestCase {
+    func testLibraryPresetsRespectLanguageAndBulkEligibility() {
+        let essentials = PackCatalog.packs(for: .essentials, language: .english).map(\.id)
+        let recommended = PackCatalog.packs(for: .recommended, language: .english).map(\.id)
+        let all = PackCatalog.packs(for: .all, language: nil).map(\.id)
+        XCTAssertTrue(essentials.contains("wikipedia-en-simple-mini"))
+        XCTAssertFalse(recommended.contains("wikipedia-en-simple-mini"))
+        XCTAssertTrue(recommended.contains("wikipedia-en-top-nopic"))
+        XCTAssertTrue(recommended.contains("ifixit-en-all"))
+        XCTAssertFalse(all.contains("wikipedia-en-all-maxi"))
+        XCTAssertFalse(all.contains("wikipedia-en-all-nopic"))
+        XCTAssertEqual(Set(all).count, all.count)
+        for preset in PackCatalog.Preset.allCases {
+            XCTAssertEqual(PackCatalog.packs(for: preset, language: .spanish).map(\.id), ["wikipedia-es-top-mini"])
+        }
+    }
+
     @MainActor
     func testOnlyThePinnedMITStarterIsApprovedForNearbyAndStandardShipsItsExactBytes() async throws {
         let entry = try XCTUnwrap(PackCatalog.entries.first { $0.allowsArchiveSharing })

@@ -8,34 +8,38 @@ struct PacksView: View {
     @State private var language: PackCatalog.Language?
 
     var body: some View {
-        let downloadSize = downloads.downloadAllSizeEstimate
-        let essentialsSize = downloads.essentialsSizeEstimate
         List {
-            Section {
-                Button {
-                    downloads.startEssentials()
-                } label: {
-                    HStack {
-                        Label("Download Essentials", systemImage: "arrow.down.circle")
-                        if !downloads.restoring, essentialsSize > 0 {
-                            Spacer()
-                            Text(essentialsSize.formatted(.byteCount(style: .file)))
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
+            Section("Library downloads") {
+                Picker("Language", selection: $language) {
+                    Text("All languages").tag(nil as PackCatalog.Language?)
+                    ForEach(PackCatalog.Language.allCases, id: \.self) { option in
+                        Text(option.title).tag(Optional(option))
                     }
                 }
-                .disabled(downloads.restoring || essentialsSize == 0)
-                Button("Download all", systemImage: "arrow.down.circle") { downloads.startAll() }
-                    .disabled(downloads.restoring || downloadSize == 0)
+                ForEach(PackCatalog.Preset.allCases, id: \.self) { preset in
+                    let bytes = downloads.sizeEstimate(for: preset, language: language)
+                    Button {
+                        downloads.start(preset, language: language)
+                    } label: {
+                        HStack {
+                            Label(preset.action, systemImage: "arrow.down.circle")
+                            if !downloads.restoring, bytes > 0 {
+                                Spacer()
+                                Text(bytes.formatted(.byteCount(style: .file)))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .accessibilityIdentifier(preset.action)
+                    .disabled(downloads.restoring || bytes == 0)
+                }
                 if let error = downloads.downloadAllError {
                     Text(error).font(.footnote).foregroundStyle(.secondary)
-                } else if !downloads.restoring, downloadSize > 0 {
-                    Text("Up to \(downloadSize.formatted(.byteCount(style: .file))) to download")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
                 }
-            } footer: {
-                Text("Bulk downloads use Wi-Fi. Start packs marked Individual download from their own rows. Resume cellular transfers individually.")
+            }
+            Section {
+                Text("Essentials includes compact references. Recommended adds repair guides and a larger English Wikipedia selection. Download all includes every pack eligible for bulk download in the selected languages. Bulk downloads use Wi-Fi.")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
             if let error = PackCatalog.loadError {
                 Text(error).foregroundStyle(.secondary)
@@ -60,12 +64,6 @@ struct PacksView: View {
                             PackDownloadControls(downloads: downloads, pack: pack)
                         }
                     }
-                }
-            }
-            Picker("Language", selection: $language) {
-                Text("All languages").tag(nil as PackCatalog.Language?)
-                ForEach(PackCatalog.Language.allCases, id: \.self) { option in
-                    Text(option.title).tag(Optional(option))
                 }
             }
             ForEach(PackCatalog.Section.allCases, id: \.self) { section in

@@ -26,6 +26,37 @@ enum PackCatalog {
         }
     }
 
+    enum Preset: CaseIterable {
+        case essentials, recommended, all
+
+        var action: String {
+            switch self {
+            case .essentials: "Download Essentials"
+            case .recommended: "Download Recommended"
+            case .all: "Download all"
+            }
+        }
+    }
+
+    static func packs(for preset: Preset, language: Language?) -> [PublishedPack] {
+        let hasLargerEnglishWikipedia = entries.contains {
+            $0.isBulkEligible && $0.pack.id == "wikipedia-en-top-nopic"
+        }
+        return entries.filter { entry in
+            guard entry.isBulkEligible, language == nil || entry.language == language else { return false }
+            switch preset {
+            case .essentials:
+                return entry.section == .essentials
+            case .recommended:
+                if entry.pack.id == "wikipedia-en-simple-mini" && hasLargerEnglishWikipedia { return false }
+                return entry.section == .essentials || entry.pack.id == "wikipedia-en-top-nopic"
+                    || entry.pack.id == "ifixit-en-all"
+            case .all:
+                return true
+            }
+        }.map(\.pack)
+    }
+
     struct Entry: Identifiable, Decodable {
         let pack: PublishedPack
         let section: Section
