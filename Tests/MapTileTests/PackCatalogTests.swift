@@ -13,8 +13,8 @@ final class PackCatalogTests: XCTestCase {
         XCTAssertFalse(recommended.contains("wikipedia-en-simple-mini"))
         XCTAssertTrue(recommended.contains("wikipedia-en-top-nopic"))
         XCTAssertTrue(recommended.contains("ifixit-en-all"))
-        XCTAssertFalse(all.contains("wikipedia-en-all-maxi"))
-        XCTAssertFalse(all.contains("wikipedia-en-all-nopic"))
+        XCTAssertTrue(all.contains("wikipedia-en-all-maxi"))
+        XCTAssertTrue(all.contains("wikipedia-en-all-nopic"))
         XCTAssertEqual(Set(all).count, all.count)
         for preset in PackCatalog.Preset.allCases {
             XCTAssertEqual(PackCatalog.packs(for: preset, language: .spanish).map(\.id), ["wikipedia-es-top-mini"])
