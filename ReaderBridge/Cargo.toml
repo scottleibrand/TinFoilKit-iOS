@@ -9,5 +9,6 @@ publish = false
 crate-type = ["staticlib"]
 
 [dependencies]
+lzma-rust2 = { version = "=0.25.0", default-features = false, features = ["std", "xz"] }
 zimru = { path = "../.build/zimru", default-features = false }
 zstd = { version = "=0.13.5", default-features = false }

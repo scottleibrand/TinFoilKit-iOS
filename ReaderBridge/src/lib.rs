@@ -121,27 +121,34 @@ fn extract_compressed_pdf(
         return Err("The archive cluster is missing.".into());
     }
     // The low nibble identifies compression and bit 4 selects 64-bit blob offsets.
-    if info[0] & 0x0f != 5 {
+    let compression = info[0] & 0x0f;
+    if !matches!(compression, 4 | 5) {
         return Ok(false);
     }
-    if range.end - range.start > LIMITS.cluster.unwrap().max_stored_bytes {
+    let limits = LIMITS.cluster.unwrap();
+    if range.end - range.start > limits.max_stored_bytes {
         return Err("The compressed PDF cluster exceeds the stored size limit.".into());
     }
     range.start += 1;
-    let mut decoder = zstd::stream::read::Decoder::new(ArchiveSlice { archive, range })
-        .map_err(|error| error.to_string())?;
-    decoder
-        .window_log_max(LIMITS.cluster.unwrap().zstd_window_log)
-        .map_err(|error| error.to_string())?;
+    let source = ArchiveSlice { archive, range };
     let width = if info[0] & 0x10 == 0 { 4 } else { 8 };
-    extract_pdf_blob(
-        &mut decoder,
-        width,
-        item.blob_index(),
-        output,
-        check_cancelled,
-    )
-    .map_err(|error| error.to_string())
+    if compression == 4 {
+        let mut decoder = lzma_rust2::XzReader::new_mem_limit(
+            source, false, (limits.xz_memory_bytes / 1024) as u32,
+        );
+        let extracted = extract_pdf_blob(&mut decoder, width, item.blob_index(), output, check_cancelled)
+            .map_err(|error| error.to_string())?;
+        if extracted && !decoder.into_inner().range.is_empty() {
+            return Err("Unexpected data after the XZ cluster.".into());
+        }
+        return Ok(extracted);
+    }
+
+    let mut decoder = zstd::stream::read::Decoder::new(source)
+        .map_err(|error| error.to_string())?;
+    decoder.window_log_max(limits.zstd_window_log).map_err(|error| error.to_string())?;
+    extract_pdf_blob(&mut decoder, width, item.blob_index(), output, check_cancelled)
+        .map_err(|error| error.to_string())
 }
 
 fn extract_pdf_blob(
