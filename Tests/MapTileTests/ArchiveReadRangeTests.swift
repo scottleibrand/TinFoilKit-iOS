@@ -9,6 +9,9 @@ final class ArchiveReadRangeTests: XCTestCase {
         try XCTSkipUnless(FileManager.default.fileExists(atPath: fixture.path),
                           "Build and stage the LargePDFFixture in the dedicated simulator’s Documents.")
         let reader = ArchiveReader(file: fixture)
+        let documents = try await reader.pdfEntries()
+        XCTAssertEqual(documents.map(\.title), ["Large offline PDF fixture"])
+        XCTAssertEqual(documents.map(\.path), ["large.pdf"])
         var staged = try await reader.prepareLargePDF(at: "large.pdf")
         let url = try XCTUnwrap(staged?.url)
         var document = staged.flatMap(FileBackedArchivePDF.init)

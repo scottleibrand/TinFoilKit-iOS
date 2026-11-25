@@ -10,7 +10,7 @@ struct ArchiveReaderView: View {
     var initialFragment: String? = nil
     @State private var reader: ArchiveReader?
     @State private var page: URL?
-    @State private var documents: [ZIMArchive.PDFEntry]?
+    @State private var opensDocumentList = false
     @State private var pdfReference: (path: String, pageIndex: Int)?
     @State private var errorMessage: String?
 
@@ -19,19 +19,20 @@ struct ArchiveReaderView: View {
             if let reader, let pdfReference {
                 ArchivePDFReader(reader: reader, archiveID: archive.id, path: pdfReference.path,
                                  initialPage: pdfReference.pageIndex)
-            } else if let reader, let documents {
-                if documents.isEmpty {
-                    ContentUnavailableView("No documents", systemImage: "doc")
-                } else {
-                    List(documents) { document in
-                        NavigationLink(document.title) {
-                            ArchivePDFReader(reader: reader, archiveID: archive.id, path: document.path,
-                                             title: document.title)
-                        }
-                    }
-                }
+            } else if let reader, opensDocumentList {
+                ArchiveDocumentList(reader: reader, archiveID: archive.id)
             } else if let reader, let page {
                 ArchiveHTMLReader(reader: reader, page: page, archive: archive)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            NavigationLink {
+                                ArchiveDocumentList(reader: ArchiveReader(file: reader.file), archiveID: archive.id)
+                                    .navigationTitle("PDF documents")
+                            } label: {
+                                Label("PDF documents", systemImage: "doc.on.doc")
+                            }
+                        }
+                    }
             } else if let errorMessage {
                 ContentUnavailableView("Can't open archive", systemImage: "book.closed", description: Text(errorMessage))
             } else {
@@ -55,9 +56,7 @@ struct ArchiveReaderView: View {
                     return
                 }
                 if articlePath == nil, let pack = archive.pack, PackDownloads.usesPDFDirectory(pack) {
-                    documents = try await reader.pdfEntries().sorted {
-                        $0.title.localizedStandardCompare($1.title) == .orderedAscending
-                    }
+                    opensDocumentList = true
                     self.reader = reader
                     return
                 }
@@ -65,11 +64,63 @@ struct ArchiveReaderView: View {
                 if let articlePath {
                     path = articlePath
                 } else {
-                    path = try await reader.mainPath()
+                    do {
+                        let landing = try await reader.landingPage()
+                        if landing.mimeType == "application/pdf" {
+                            pdfReference = (landing.path, 0)
+                            self.reader = reader
+                            return
+                        }
+                        path = landing.path
+                    } catch {
+                        // A documents-only import can have no readable landing article.
+                        guard !Task.isCancelled else { return }
+                        opensDocumentList = true
+                        self.reader = reader
+                        return
+                    }
                 }
                 guard let url = ArchiveWebAddress.url(for: path, fragment: initialFragment) else { throw URLError(.badURL) }
                 self.reader = reader
                 page = url
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+}
+
+private struct ArchiveDocumentList: View {
+    let reader: ArchiveReader
+    let archiveID: UUID
+    @State private var documents: [ZIMArchive.PDFEntry]?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if let documents {
+                if documents.isEmpty {
+                    ContentUnavailableView("No PDF documents", systemImage: "doc")
+                } else {
+                    List(documents) { document in
+                        NavigationLink(document.title) {
+                            ArchivePDFReader(reader: reader, archiveID: archiveID, path: document.path,
+                                             title: document.title)
+                        }
+                    }
+                }
+            } else if let errorMessage {
+                ContentUnavailableView("Can't list documents", systemImage: "doc", description: Text(errorMessage))
+            } else {
+                ProgressView("Finding PDF documents")
+            }
+        }
+        .task {
+            do {
+                let entries = try await reader.pdfEntries()
+                try Task.checkCancellation()
+                documents = entries
+            } catch is CancellationError {
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -85,8 +136,9 @@ actor ArchiveReader {
         self.file = file
     }
 
-    func mainPath() throws -> String {
-        try open().mainArticle().path
+    func landingPage() throws -> (path: String, mimeType: String) {
+        let main = try open().mainArticle()
+        return (main.path, main.mimeType)
     }
 
     func resource(at path: String) throws -> ZIMArchive.Resource {
@@ -165,7 +217,7 @@ actor ArchiveReader {
     }
 
     func pdfEntries() throws -> [ZIMArchive.PDFEntry] {
-        try open().pdfEntries()
+        try open().pdfEntries().sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
     }
 
     private func open() throws -> ZIMArchive {
