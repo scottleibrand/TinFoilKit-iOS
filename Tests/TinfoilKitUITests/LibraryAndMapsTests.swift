@@ -33,6 +33,28 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertFalse(app.buttons["Search Kiwix"].isEnabled)
     }
 
+    func testOfflineAskQuoteOpensItsPDFWithoutAModel() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-askUsesOnDeviceModel", "NO"]
+        app.launch()
+        guard app.staticTexts["Offline Ask PDF Fixture"].waitForExistence(timeout: 8) else {
+            throw XCTSkip("Stage the synthetic PDF fixture as an installed Library archive.")
+        }
+        app.tabBars.buttons["Ask"].tap()
+        let question = app.descendants(matching: .any)["ask-question"].firstMatch
+        XCTAssertTrue(question.waitForExistence(timeout: 10))
+        question.tap()
+        question.typeText("ceramic filtration protozoa")
+        app.buttons["ask-submit"].tap()
+
+        let quote = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "ask-quote-")).firstMatch
+        XCTAssertTrue(quote.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Ceramic filtration"))
+            .firstMatch.exists)
+        quote.tap()
+        XCTAssertTrue(app.buttons["Find in document"].waitForExistence(timeout: 10))
+    }
+
     func testWaterOutageAsksForTheServiceArea() {
         let app = XCUIApplication()
         app.launchArguments = ["-askUsesOnDeviceModel", "NO"]
