@@ -93,11 +93,30 @@ actor ArchiveReader {
         try open().resource(at: path)
     }
 
-    func resource(for request: URL) throws -> ZIMArchive.Resource {
+    enum WebResource: Sendable {
+        case direct(path: String, info: ZIMArchive.DirectResourceInfo)
+        case buffered(ZIMArchive.Resource)
+
+        var properties: (mimeType: String, count: Int) {
+            switch self {
+            case let .direct(_, info): (info.mimeType, info.byteCount)
+            case let .buffered(resource): (resource.mimeType, resource.data.count)
+            }
+        }
+    }
+
+    func webResource(for request: URL) throws -> WebResource {
         let candidates = ArchiveWebAddress.candidates(in: request)
         guard let first = candidates.first else { throw URLError(.unsupportedURL) }
-        if candidates.count == 1 { return try resource(at: first) }
-        return try resource(at: resolvedPath(in: candidates) ?? first)
+        let path = candidates.count == 1 ? first : try resolvedPath(in: candidates) ?? first
+        let archive = try open()
+        if let info = try archive.directResourceInfo(at: path) { return .direct(path: path, info: info) }
+        return .buffered(try archive.resource(at: path))
+    }
+
+    func webResourceBytes(at path: String, offset: Int, count: Int) throws -> Data {
+        try Task.checkCancellation()
+        return try open().directResourceBytes(at: path, offset: offset, count: count)
     }
 
     func canonicalURL(for request: URL) throws -> URL? {
@@ -317,24 +336,41 @@ private struct ArchiveWebView: UIViewRepresentable {
             tasks[id] = Task { @MainActor in
                 defer { tasks[id] = nil }
                 do {
-                    let resource = try await reader.resource(for: url)
-                    guard !Task.isCancelled else { return }
-                    let count = resource.data.count
+                    let resource = try await reader.webResource(for: url)
+                    try Task.checkCancellation()
+                    let (mimeType, count) = resource.properties
                     let selection = ArchiveReadRange.parse(rangeHeader, count: count)
+                    let range: Range<Int>
                     switch selection {
                     case .full:
-                        urlSchemeTask.didReceive(URLResponse(url: url, mimeType: resource.mimeType,
+                        urlSchemeTask.didReceive(URLResponse(url: url, mimeType: mimeType,
                             expectedContentLength: count, textEncodingName: nil))
-                        if !headOnly { urlSchemeTask.didReceive(resource.data) }
-                    case .partial(let range):
-                        urlSchemeTask.didReceive(try rangeResponse(url, status: 206, mimeType: resource.mimeType,
-                            length: range.count, contentRange: selection.contentRange(count: count)))
-                        urlSchemeTask.didReceive(Data(resource.data.dropFirst(range.lowerBound).prefix(range.count)))
+                        range = 0..<count
+                    case .partial(let selected):
+                        urlSchemeTask.didReceive(try rangeResponse(url, status: 206, mimeType: mimeType,
+                            length: selected.count, contentRange: selection.contentRange(count: count)))
+                        range = selected
                     case .unsatisfiable:
-                        urlSchemeTask.didReceive(try rangeResponse(url, status: 416, mimeType: resource.mimeType,
+                        urlSchemeTask.didReceive(try rangeResponse(url, status: 416, mimeType: mimeType,
                             length: 0, contentRange: selection.contentRange(count: count)))
+                        range = 0..<0
                     }
-                    urlSchemeTask.didFinish()
+                    if !headOnly, !range.isEmpty {
+                        switch resource {
+                        case let .buffered(item):
+                            urlSchemeTask.didReceive(Data(item.data[range]))
+                        case let .direct(path, _):
+                            var offset = range.lowerBound
+                            while offset < range.upperBound {
+                                let count = min(256 * 1024, range.upperBound - offset)
+                                let data = try await reader.webResourceBytes(at: path, offset: offset, count: count)
+                                try Task.checkCancellation()
+                                urlSchemeTask.didReceive(data)
+                                offset += count
+                            }
+                        }
+                    }
+                    if !Task.isCancelled { urlSchemeTask.didFinish() }
                 } catch {
                     if !Task.isCancelled { urlSchemeTask.didFailWithError(error) }
                 }

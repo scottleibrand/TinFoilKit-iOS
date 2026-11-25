@@ -82,6 +82,52 @@ public final class ZIMArchive {
         return try Self.read(resource)
     }
 
+    public struct DirectResourceInfo: Sendable {
+        public let mimeType: String
+        public let byteCount: Int
+    }
+
+    public func directResourceInfo(at path: String) throws -> DirectResourceInfo? {
+        try withDirectResource(at: path) { resource in
+            guard let count = Int(exactly: tfk_direct_resource_size(resource)) else {
+                throw ReadError(errorDescription: "The archive resource is too large for this device.")
+            }
+            return DirectResourceInfo(mimeType: String(cString: tfk_direct_resource_mime(resource)),
+                                      byteCount: count)
+        }
+    }
+
+    public func directResourceBytes(at path: String, offset: Int, count: Int) throws -> Data {
+        guard offset >= 0, (1...1_048_576).contains(count) else {
+            throw ReadError(errorDescription: "The archive resource range is invalid.")
+        }
+        let data = try withDirectResource(at: path) { resource in
+            var bytes = Data(count: count)
+            var error: UnsafeMutablePointer<CChar>?
+            let success = bytes.withUnsafeMutableBytes { buffer in
+                tfk_direct_resource_read(resource, UInt64(offset), buffer.bindMemory(to: UInt8.self).baseAddress,
+                                         count, &error)
+            }
+            guard success else { throw Self.readError(error, fallback: "The archive resource could not be read.") }
+            return bytes
+        }
+        guard let data else { throw ReadError(errorDescription: "The archive resource cannot be read in ranges.") }
+        return data
+    }
+
+    private func withDirectResource<Value>(at path: String, _ operation: (OpaquePointer) throws -> Value) throws -> Value? {
+        guard !path.utf8.contains(0) else {
+            throw ReadError(errorDescription: "An archive path cannot contain a null byte.")
+        }
+        var error: UnsafeMutablePointer<CChar>?
+        guard let resource = tfk_archive_direct_resource(archive, path, &error) else {
+            if let error { throw Self.readError(error, fallback: "The archive resource could not be opened.") }
+            return nil
+        }
+        defer { tfk_direct_resource_close(resource) }
+        return try operation(resource)
+    }
+
     /// Follows redirects without loading resource bytes. Returns nil if the requested path is absent.
     public func resolvedPath(at path: String) throws -> String? {
         guard !path.utf8.contains(0) else {

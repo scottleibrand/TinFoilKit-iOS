@@ -48,7 +48,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 - Verify that interrupted Files imports, map imports, pack installs and repairs recover correctly on an iPhone. Imports check storage, report progress and can be cancelled. Unreadable archive folders are reported separately from healthy archives.
 - Measure PDF page indexing and search on the actual Essentials packs. Library merges hits by each archive's rank and supports partial-word searches.
 - Library search refreshes as each archive commits more of its index. Embedded article titles are searchable during indexing. Full-text results become available as batches commit.
-- The reader loads each resource fully into memory and refuses anything over 32 MiB, so large PDFs and videos fail. The scheme handler answers byte-range requests within that limit. Stream larger resources and verify audio and video playback with real archives.
+- The WebKit reader streams uncompressed archive resources in bounded chunks, including byte ranges for media. Compressed resources and the dedicated PDFKit view still use the 32 MiB buffered reader. Verify real audio and video playback and extend large PDF support.
 - JavaScript is off for every archive, which breaks interactive content such as collapsible sections. Decide per pack, and keep the network block in place.
 - The PDF document list only appears for catalog packs marked as PDF collections. An imported PDF collection opens its main page instead. Listing the documents also scans every entry in the archive.
 - Library can verify the embedded ZIM checksum of imported files and the publisher SHA-256 checksum of catalog packs. Verify both on a device.
