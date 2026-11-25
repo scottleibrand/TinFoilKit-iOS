@@ -82,9 +82,6 @@ struct PacksView: View {
             if !entry.isDefault {
                 Text("Earlier edition").font(.footnote).foregroundStyle(.secondary)
             }
-            if entry.individualDownloadOnly == true {
-                Text("Individual download").font(.footnote).foregroundStyle(.secondary)
-            }
             Text(pack.attribution)
                 .font(.footnote)
             if let termsURL = entry.termsURL {
