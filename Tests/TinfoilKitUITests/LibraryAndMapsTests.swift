@@ -20,6 +20,18 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Ask"].exists)
     }
 
+    func testPublisherSearchOpensFromContentPacks() {
+        let app = XCUIApplication()
+        app.launch()
+        let contentPacks = app.buttons["Content packs"]
+        XCTAssertTrue(contentPacks.waitForExistence(timeout: 10))
+        contentPacks.tap()
+        app.buttons["Find publisher books"].tap()
+        XCTAssertTrue(app.navigationBars["Find publisher books"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["Book title or topic"].exists)
+        XCTAssertFalse(app.buttons["Search Kiwix"].isEnabled)
+    }
+
     func testWaterOutageAsksForTheServiceArea() {
         let app = XCUIApplication()
         app.launchArguments = ["-askUsesOnDeviceModel", "NO"]

@@ -3,6 +3,8 @@ import ZIMArchive
 
 struct PacksView: View {
     @ObservedObject var downloads: PackDownloads
+    let library: InstalledLibrary
+    let onPublisherImport: () async -> Void
     @State private var language: PackCatalog.Language?
     @State private var cellularPack: PublishedPack?
 
@@ -38,6 +40,11 @@ struct PacksView: View {
             }
             if let error = PackCatalog.loadError {
                 Text(error).foregroundStyle(.secondary)
+            }
+            NavigationLink {
+                KiwixDiscoveryView(library: library, onImport: onPublisherImport)
+            } label: {
+                Label("Find publisher books", systemImage: "magnifyingglass")
             }
             Picker("Language", selection: $language) {
                 Text("All languages").tag(nil as PackCatalog.Language?)
