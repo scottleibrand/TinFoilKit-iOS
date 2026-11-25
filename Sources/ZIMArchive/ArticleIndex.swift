@@ -44,13 +44,16 @@ public struct ArticleIndex: Sendable {
 
     private let file: URL
     private var staging: URL {
-        file.deletingLastPathComponent().appendingPathComponent(".articles-v2-in-progress.sqlite")
+        file.deletingLastPathComponent().appendingPathComponent(".articles-v3-in-progress.sqlite")
     }
-    private var previousFiles: [URL] {
+    private var previousIndexes: [(file: URL, partial: Bool, hasLabels: Bool)] {
         let directory = file.deletingLastPathComponent()
-        return ["articles-v1.sqlite", ".articles-v1-in-progress.sqlite"].map {
-            directory.appendingPathComponent($0)
-        }
+        return [
+            (directory.appendingPathComponent("articles-v2.sqlite"), false, true),
+            (directory.appendingPathComponent("articles-v1.sqlite"), false, false),
+            (directory.appendingPathComponent(".articles-v2-in-progress.sqlite"), true, true),
+            (directory.appendingPathComponent(".articles-v1-in-progress.sqlite"), true, false)
+        ]
     }
     private static let buildLock = NSLock()
     private static let publicationLock = NSLock()
@@ -59,7 +62,7 @@ public struct ArticleIndex: Sendable {
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     public init(archiveURL: URL) {
-        file = archiveURL.deletingLastPathComponent().appendingPathComponent("articles-v2.sqlite")
+        file = archiveURL.deletingLastPathComponent().appendingPathComponent("articles-v3.sqlite")
     }
 
     public var isReady: Bool {
@@ -67,7 +70,7 @@ public struct ArticleIndex: Sendable {
     }
 
     public var hasSearchableIndex: Bool {
-        ([staging] + previousFiles).contains { FileManager.default.fileExists(atPath: $0.path) } || isReady
+        ([staging] + previousIndexes.map(\.file)).contains { FileManager.default.fileExists(atPath: $0.path) } || isReady
     }
 
     /// Use a background task. Committed batches survive interruption and can be searched while building.
@@ -83,6 +86,10 @@ public struct ArticleIndex: Sendable {
     private func buildLocked(archiveURL: URL, progress: (Double) -> Void) throws {
         guard !isReady else { return }
         try Task.checkCancellation()
+        if try promoteUnchangedIndex() {
+            progress(1)
+            return
+        }
         let archive = try ZIMArchive(fileURL: archiveURL)
         let directory = file.deletingLastPathComponent()
         let total = archive.entryCount
@@ -144,9 +151,36 @@ public struct ArticleIndex: Sendable {
         }
         try Self.publicationLock.withLock {
             try FileManager.default.moveItem(at: staging, to: file)
-            for previous in previousFiles { try? FileManager.default.removeItem(at: previous) }
+            for previous in previousIndexes { try? FileManager.default.removeItem(at: previous.file) }
         }
         progress(1)
+    }
+
+    // A v2 index with no title-only PDF rows already contains everything v3 would add.
+    private func promoteUnchangedIndex() throws -> Bool {
+        let previous = previousIndexes[0].file
+        guard FileManager.default.fileExists(atPath: previous.path),
+              !FileManager.default.fileExists(atPath: staging.path) else { return false }
+        let needsRebuild = try? withDatabase(at: previous, flags: SQLITE_OPEN_READONLY) { db in
+            try withStatement("""
+                SELECT 1 FROM articles
+                WHERE path GLOB 'tinfoil-pdf-page:*' AND body = '' AND title = label
+                LIMIT 1
+                """, on: db) { statement in
+                switch sqlite3_step(statement) {
+                case SQLITE_ROW: return true
+                case SQLITE_DONE: return false
+                default: throw error(for: db)
+                }
+            }
+        }
+        try Task.checkCancellation()
+        guard needsRebuild == false else { return false }
+        try Self.publicationLock.withLock {
+            try FileManager.default.moveItem(at: previous, to: file)
+            for previous in previousIndexes { try? FileManager.default.removeItem(at: previous.file) }
+        }
+        return true
     }
 
     private static func indexEntry(
@@ -158,9 +192,22 @@ public struct ArticleIndex: Sendable {
             return
         }
         guard let entry = try archive.pdfEntry(at: index) else { return }
-        guard let resource = try? archive.resource(at: entry.path),
-              let document = PDFDocument(data: resource.data),
-              document.pageCount > 0 else {
+        let candidate: PDFDocument?
+        do {
+            if let temporary = try archive.prepareLargePDF(at: entry.path) {
+                candidate = FileBackedArchivePDF(temporary)
+            } else {
+                let resource = try archive.resource(at: entry.path)
+                candidate = PDFDocument(data: resource.data)
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as CocoaError where error.code == .fileWriteOutOfSpace {
+            throw error
+        } catch {
+            candidate = nil
+        }
+        guard let document = candidate, document.pageCount > 0 else {
             let reference = ArchivePDFReference(path: entry.path, pageIndex: 0)
             try add(reference.articlePath, entry.title, "", entry.title)
             return
@@ -210,14 +257,16 @@ public struct ArticleIndex: Sendable {
                     ? searchStagedIndex(at: staging, expression: expression, passageWords: passageWords, hasLabels: true)
                     : []
             }
-            let previous = previousFiles[0]
             let older = Result {
-                if FileManager.default.fileExists(atPath: previous.path) {
-                    return try searchIndex(at: previous, expression: expression, passageWords: passageWords, hasLabels: false)
+                guard let previous = previousIndexes.first(where: {
+                    (includeIncomplete || !$0.partial) && FileManager.default.fileExists(atPath: $0.file.path)
+                }) else { return [Match]() }
+                if previous.partial {
+                    return try searchStagedIndex(at: previous.file, expression: expression,
+                                                 passageWords: passageWords, hasLabels: previous.hasLabels)
                 }
-                return try includeIncomplete
-                    ? searchStagedIndex(at: previousFiles[1], expression: expression, passageWords: passageWords, hasLabels: false)
-                    : []
+                return try searchIndex(at: previous.file, expression: expression,
+                                       passageWords: passageWords, hasLabels: previous.hasLabels)
             }
             try Task.checkCancellation()
             let groups = [staged, older].compactMap { try? $0.get() }

@@ -62,6 +62,27 @@ final class ArchivePDFIndexTests: XCTestCase {
         }
     }
 
+    func testV2IndexWithoutTitleOnlyPDFsPromotesWithoutReopeningArchive() throws {
+        try withArchive { file in
+            let previous = file.deletingLastPathComponent().appendingPathComponent("articles-v2.sqlite")
+            var connection: OpaquePointer?
+            XCTAssertEqual(sqlite3_open(previous.path, &connection), SQLITE_OK)
+            do {
+                defer { sqlite3_close(connection) }
+                XCTAssertEqual(sqlite3_exec(connection, """
+                    CREATE VIRTUAL TABLE articles USING fts5(path UNINDEXED, title, body, label UNINDEXED);
+                    INSERT INTO articles VALUES ('tinfoil-pdf-page:0/Water.pdf', 'Water', 'ceramic filtration', 'Water · p. 1');
+                    """, nil, nil, nil), SQLITE_OK)
+            }
+            let index = ArticleIndex(archiveURL: file)
+            try FileManager.default.removeItem(at: file)
+            try index.build(archiveURL: file)
+            XCTAssertTrue(index.isReady)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: previous.path))
+            XCTAssertEqual(try index.search("ceramic").first?.title, "Water · p. 1")
+        }
+    }
+
     private func withArchive(_ body: (URL) throws -> Void) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
