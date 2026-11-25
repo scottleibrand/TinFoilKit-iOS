@@ -57,9 +57,10 @@ enum OfflineReadinessLibraryChecks {
                 }
                 for entry in entries.prefix(2) {
                     try Task.checkCancellation()
-                    if let resource = try? archive.resource(at: entry.path), isReadablePDF(resource, pageIndex: 0) {
+                    if isReadablePDF(in: archive, path: entry.path, pageIndex: 0) {
                         return .passed("Opened a local PDF page from \(item.title).")
                     }
+                    try Task.checkCancellation()
                     couldNotRead = true
                 }
             }
@@ -93,9 +94,13 @@ enum OfflineReadinessLibraryChecks {
                     guard let item = samples.first(where: { $0.archive.id == source.archive.id }),
                           let archive = try? ZIMArchive(fileURL: item.file) else { continue }
                     let pdf = ArchivePDFReference(articlePath: source.match.path)
-                    guard let resource = try? archive.resource(at: pdf?.path ?? source.match.path) else { continue }
-                    let readable = pdf.map { isReadablePDF(resource, pageIndex: $0.pageIndex) }
-                        ?? isReadableHTML(resource)
+                    let readable: Bool
+                    if let pdf {
+                        readable = isReadablePDF(in: archive, path: pdf.path, pageIndex: pdf.pageIndex)
+                    } else {
+                        readable = (try? archive.resource(at: source.match.path)).map(isReadableHTML) == true
+                    }
+                    try Task.checkCancellation()
                     if readable {
                         return .passed("Found a local passage and opened its source in \(item.title).")
                     }
@@ -143,8 +148,8 @@ enum OfflineReadinessLibraryChecks {
         resource.mimeType.hasPrefix("text/html") && !resource.path.isEmpty && !resource.data.isEmpty
     }
 
-    private static func isReadablePDF(_ resource: ZIMArchive.Resource, pageIndex: Int) -> Bool {
-        guard resource.mimeType == "application/pdf", let document = PDFDocument(data: resource.data),
+    static func isReadablePDF(in archive: ZIMArchive, path: String, pageIndex: Int) -> Bool {
+        guard pageIndex >= 0, let document = try? archive.pdfDocument(at: path),
               !document.isLocked, pageIndex < document.pageCount else { return false }
         return document.page(at: pageIndex) != nil
     }
