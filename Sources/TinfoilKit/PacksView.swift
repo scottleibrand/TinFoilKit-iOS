@@ -34,7 +34,7 @@ struct PacksView: View {
                         .foregroundStyle(.secondary)
                 }
             } footer: {
-                Text("Bulk downloads use Wi-Fi. Download either complete English Wikipedia edition separately and resume cellular transfers individually.")
+                Text("Bulk downloads use Wi-Fi. Start packs marked Individual download from their own rows. Resume cellular transfers individually.")
             }
             if let error = PackCatalog.loadError {
                 Text(error).foregroundStyle(.secondary)
@@ -76,6 +76,9 @@ struct PacksView: View {
             }
             Text("\(pack.version) · \(pack.sizeEstimate.formatted(.byteCount(style: .file)))")
                 .font(.footnote)
+            if entry.individualDownloadOnly == true {
+                Text("Individual download").font(.footnote).foregroundStyle(.secondary)
+            }
             if !entry.isDefault {
                 Text("Earlier edition").font(.footnote).foregroundStyle(.secondary)
             }
