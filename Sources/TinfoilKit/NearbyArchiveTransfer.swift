@@ -193,15 +193,9 @@ final class NearbyArchiveTransfer {
                     guard let bytes = reply.data, !bytes.isEmpty, bytes.count <= length else { return }
                     offset = try await files.append(bytes, at: offset, digest: pin.sha256, byteCount: total)
                     if offset < total, reply.complete || reply.error != nil { return }
-                    if offset == total, !reply.complete, reply.error == nil {
-                        let tail = await link.read(1)
-                        if let data = tail.data, !data.isEmpty {
-                            try await files.discard(digest: pin.sha256)
-                            return
-                        }
-                    }
                 }
             }
+            // The trusted size frames the archive. A TLS peer can keep the stream open after sending it.
             guard offset == total, !link.closed else { return }
             link.finishNetwork()
             let file = try await files.verifiedFile(digest: pin.sha256, byteCount: total)
