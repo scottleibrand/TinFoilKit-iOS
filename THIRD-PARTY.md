@@ -63,6 +63,12 @@ Valhalla Mobile packages Valhalla and its dependencies. [Scripts/routing/README.
   - Archive sharing is disabled for these collections.
 - **Printable references:** Household prints page ranges from installed packs. They include *Where There Is No Doctor* (Hesperian Health Guides) and Washington State Department of Health guidance, under their publishers' terms.
 
+### Publisher book discovery
+
+The app searches the official Kiwix OPDS catalog and reads per-edition Metalink metadata from Kiwix. The result carries publisher attribution, exact file size and SHA-256. The app can download a selected edition or verify a copy supplied through Files. Discovered editions are for local use and carry the terms of their original works. The app includes its own catalog and Metalink readers. [Kiwix catalog](https://library.kiwix.org/) · [Kiwix terms](https://get.kiwix.org/en/terms-conditions/)
+
+The Spanish Wikipedia highlights edition `2026-10` can fall back from FAU to Wikimedia using the same publisher SHA-256. Kiwix lists both locations for the 217,314,941-byte edition. [Kiwix Metalink](https://download.kiwix.org/zim/wikipedia/wikipedia_es_top_mini_2026-10.zim.meta4)
+
 ## Build and test tools
 
 These run on the developer's Mac and aren't shipped in the app.
