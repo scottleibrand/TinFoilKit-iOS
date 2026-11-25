@@ -4,7 +4,7 @@ The goal is desktop feature parity for Tinfoil Kit on iOS. [PLAN.md](PLAN.md) tr
 
 ## Start here
 
-Fetch `origin` and check both `origin/develop` and `origin/main`. Both branches were synced at `c122b2c` after PR #16. Recheck the branch tips and the work below before starting an overlapping change.
+Fetch `origin` and check both `origin/develop` and `origin/main`. Both branches were synced at `2ca44fe` after PR #18. Recheck the branch tips and the work below before starting an overlapping change.
 
 Use a fresh `codex/` feature branch from the current `origin/develop` for work awaiting Apple tests. Keep each feature in its own commits so it can move to `develop` after verification. Push the feature branch for the Mac session to retrieve. Open and merge one tested feature at a time through a `develop` → `main` PR.
 
@@ -22,6 +22,15 @@ The upstream desktop checkout and generated build inputs are ignored. For parity
 - Content Packs offers complete English Wikipedia in separate text-only and illustrated downloads. Publisher manifests and range probes confirmed both byte counts and checksums. All 66 app tests, 18 reader tests and the catalog UI test passed. The signed phone build succeeded, with installation pending when the phone is reachable. Full-archive indexing remains a device check. [PR #15](https://github.com/scottleibrand/TinFoilKit-iOS/pull/15)
 
 - Map downloads a regional bundle from a trusted HTTPS manifest and SHA-256. Transfers retain checked partial bytes and the network preference across launches. All 77 app tests passed, including an interrupted HTTPS range request, and the Map relaunch and install test passed. The signed iPhone build succeeded while the phone was unavailable. [PR #16](https://github.com/scottleibrand/TinFoilKit-iOS/pull/16)
+
+- The pinned starter catalog includes additional desktop references and individual Ready.gov and WikiMed packs. Offline reading resolves paths and redirects before navigation and handles bounded byte ranges. On the exact release revision, 88 app tests and all 20 reader tests passed, and the signed build succeeded. [PR #17](https://github.com/scottleibrand/TinFoilKit-iOS/pull/17)
+- Print the Essentials verifies the exact PDF before selecting its pages. The pinned Water and Medicine archives produced all four expected excerpts on the simulator. Ninety app tests passed, and the signed build succeeded. The system print sheet and additional fallback editions still need Apple verification. [PR #18](https://github.com/scottleibrand/TinFoilKit-iOS/pull/18)
+
+## Cloud preview verification
+
+The Cloud assembled a cumulative preview and recorded its ordered release candidates in the product plan. Local Apple fixes are on `codex/cloud-apple-integration` at `b8c29a2`. This branch rebuilds the native reader for its new C interface, fixes publisher verification when a download reuses a path, and tracks the exact interrupted Nearby reference. The signed standard preview was installed over Wi-Fi. The app and reader unit suites passed with 161 and 30 passing tests respectively. The coordinate route, publisher search and readiness UI tests also passed. Three app tests require opt-in fixtures. [Corrected preview](https://github.com/scottleibrand/TinFoilKit-iOS/tree/codex/cloud-apple-integration) · [Mac verification order](https://github.com/scottleibrand/TinFoilKit-iOS/blob/codex/product-roadmap/PLAN.md#mac-verification-order)
+
+Promote the Cloud candidates individually through `develop` and `main`. Carry `71b9305` into the Nearby catalog and recovery candidate, and `b8c29a2` into verified publisher installation. Preserve the exact-address lookup and UI coverage at `1a19405` when integrating the broader Cloud Ask parser. Work beyond the cumulative preview includes guest-browser Ask, the combined Monitor candidate, deferred Online Ask, offline photo preparation and Seattle publication staging. Review their own acceptance requirements before promotion.
 
 ## Cloud branches awaiting integration
 
