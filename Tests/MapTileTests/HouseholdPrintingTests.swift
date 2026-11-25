@@ -56,6 +56,24 @@ final class HouseholdPrintingTests: XCTestCase {
         XCTAssertTrue(pdf.page(at: pdf.pageCount - 1)?.string?.contains("Last line of notes") == true)
     }
 
+    func testPinnedWaterAndMedicineEditionsPrintExpectedPageCounts() throws {
+        let root = URL.documentsDirectory.appendingPathComponent("Print Editions")
+        let archives = ["zimgit-water_en_2024-08.zim", "zimgit-medicine_en_2024-08.zim"]
+        let installed = archives.map {
+            HouseholdPrinting.InstalledSource(archive: $0, file: root.appendingPathComponent($0),
+                                             attribution: "Publisher edition fixture")
+        }
+        try XCTSkipUnless(installed.allSatisfy { FileManager.default.fileExists(atPath: $0.file.path) },
+                          "Stage the pinned Water Treatment and Field Medicine archives in Documents/Print Editions.")
+        let references = try HouseholdPrinting.availableReferences(in: installed)
+        for (id, pages) in [("water", 2), ("first-aid", 6), ("injuries", 5), ("bleeding", 5)] {
+            let reference = try XCTUnwrap(references.first { $0.id == id }, id)
+            let pdf = try XCTUnwrap(PDFDocument(data: reference.printablePDF()), id)
+            XCTAssertEqual(pdf.pageCount, pages, id)
+            XCTAssertFalse(pdf.string?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true, id)
+        }
+    }
+
     func testPrintReferenceVerifiesDocumentBytesBeforeSelectingPhysicalPages() throws {
         let file = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "pdf-collection", withExtension: "zim"))
         let title = "Water Guide"
