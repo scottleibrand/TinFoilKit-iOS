@@ -58,13 +58,34 @@ struct HouseholdShareAddress: Equatable, Sendable {
     }
 }
 
+struct HouseholdSharePublicReference: Identifiable, Sendable {
+    let id: String
+    let title: String
+    let text: String
+
+    private init(id: String, title: String, text: String) {
+        self.id = id
+        self.title = title
+        self.text = text
+    }
+
+    static func verified(from references: [NearbyPublicReference]) -> [Self] {
+        references.compactMap { reference in
+            guard NearbyPublicReference.mainCatalog.contains(reference.entry),
+                  let bytes = reference.loadVerified(),
+                  let text = String(data: bytes, encoding: .utf8) else { return nil }
+            return Self(id: reference.entry.id, title: reference.entry.title, text: text)
+        }
+    }
+}
+
 struct HouseholdSharePage: Sendable {
     static let basePolicy = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
     let body: Data
     let contentSecurityPolicy: String
     let acceptsNotes: Bool
 
-    init(snapshot: HouseholdSnapshot, publicWorksheet: String? = nil, acceptsNotes: Bool = false) {
+    init(snapshot: HouseholdSnapshot, publicReferences: [HouseholdSharePublicReference] = [], acceptsNotes: Bool = false) {
         self.acceptsNotes = acceptsNotes
         var content = ""
         if !snapshot.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -76,8 +97,8 @@ struct HouseholdSharePage: Sendable {
         if !snapshot.pins.isEmpty {
             content += "<section><h2>Pins</h2>" + snapshot.pins.map(Self.place).joined() + "</section>"
         }
-        if let publicWorksheet {
-            content += "<section><h2>Public check-in worksheet</h2><p>\(Self.escape(publicWorksheet))</p></section>"
+        for reference in publicReferences {
+            content += "<section><h2>\(Self.escape(reference.title))</h2><p>\(Self.escape(reference.text))</p></section>"
         }
         let nonce = UUID().uuidString
         let notePolicy = acceptsNotes ? "; connect-src 'self'" : ""
