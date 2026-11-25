@@ -258,6 +258,7 @@ final class LibraryAndMapsTests: XCTestCase {
 
     func testLibraryCatalogAndRegionalMap() {
         let app = XCUIApplication()
+        app.launchArguments = ["-lastOfflineMapPosition", "default"]
         app.launch()
 
         XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
