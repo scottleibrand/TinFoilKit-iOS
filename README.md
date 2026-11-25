@@ -103,6 +103,8 @@ The local ZIP measures this build. Use App Store Connect device-specific size re
 
 Run the `ZIMArchive` scheme on a dedicated simulator for library and search tests. For the `TinfoilKit` UI test scheme, install the debug app in a dedicated simulator and copy `.build/fixtures/climate.zim` into its Documents folder as `Climate Test.zim`. The test uses the Files picker to import it on a fresh install.
 
+For offline web archive navigation, use the pinned Ready.gov 2026-10 ZIM on a dedicated Apple device. With Wi-Fi off in Airplane Mode, open the home page and a paginated collection, then follow a link that redirects to a different archived directory. Confirm that its relative links, in-page anchors, back navigation, and saved bookmarks reopen the intended local pages. [Ready.gov edition metadata](https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim.meta4)
+
 For the nearby-service Ask UI test, build an index from `Tests/RegionalPlaceIndexFixture/places.osm` with `Scripts/build-regional-place-index.py`. Import it from Files using **Map → + → Import regional place data** on the dedicated simulator and set Home at latitude 47.610, longitude −122.330. The synthetic fixture should resolve to Central Hospital.
 
 For the regional bundle import UI test, copy a valid synthetic bundle folder named `Synthetic Regional Fixture` into the app’s Documents folder on the dedicated simulator. Set the dataset region to `Routing test fixture` when preparing the bundle. The test imports and removes that edition.
