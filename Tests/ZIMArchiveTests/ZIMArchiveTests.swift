@@ -406,6 +406,110 @@ final class ZIMArchiveTests: XCTestCase {
         try handle.write(contentsOf: Data(checksum.finalize()))
     }
 
+    func testPublishedFilesImportRejectsWrongSizeAndSameSizeWrongBytes() async throws {
+        let root = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "climate", withExtension: "zim"))
+        let payload = try Data(contentsOf: fixture)
+        let pack = publisherFixture(fixture, byteCount: Int64(payload.count))
+        let libraryDirectory = root.appendingPathComponent("Library")
+        let library = InstalledLibrary(directory: libraryDirectory)
+        let selected = root.appendingPathComponent("selected.zim")
+
+        for bytes in [Data(payload.dropLast()), payload + Data([0])] {
+            try bytes.write(to: selected)
+            do {
+                try await library.importPublishedPack(pack, from: selected)
+                XCTFail("Expected exact-byte verification to reject the selection")
+            } catch {
+                XCTAssertTrue(error.localizedDescription.contains("byte count"))
+            }
+        }
+
+        var wrongBytes = payload
+        wrongBytes[wrongBytes.count - 1] ^= 1
+        try wrongBytes.write(to: selected)
+        do {
+            try await library.importPublishedPack(pack, from: selected)
+            XCTFail("Expected checksum verification to reject same-size wrong bytes")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("checksum"))
+        }
+        let afterFailure = try await library.archives()
+        XCTAssertTrue(afterFailure.isEmpty)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: libraryDirectory.path).isEmpty)
+
+        try payload.write(to: selected)
+        let reported = Fractions()
+        let imported = try await library.importPublishedPack(pack, from: selected) { reported.append($0) }
+        XCTAssertEqual(imported.pack, pack)
+        XCTAssertEqual(imported.byteCount, Int64(payload.count))
+        XCTAssertEqual(reported.values.last, 1)
+        XCTAssertEqual(try Data(contentsOf: selected), payload)
+        try await library.verifyArchive(imported)
+    }
+
+    func testPublishedFilesImportRejectsFileThatGrowsDuringCopy() async throws {
+        let root = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "climate", withExtension: "zim"))
+        let selected = root.appendingPathComponent("selected.zim")
+        try FileManager.default.copyItem(at: fixture, to: selected)
+        let byteCount = Int64(try XCTUnwrap(selected.resourceValues(forKeys: [.fileSizeKey]).fileSize))
+        let pack = publisherFixture(fixture, byteCount: byteCount)
+        let library = InstalledLibrary(directory: root.appendingPathComponent("Library"))
+
+        do {
+            try await library.importPublishedPack(pack, from: selected) { fraction in
+                guard fraction == 0, let writer = try? FileHandle(forWritingTo: selected) else { return }
+                defer { try? writer.close() }
+                _ = try? writer.seekToEnd()
+                try? writer.write(contentsOf: Data([0]))
+            }
+            XCTFail("Expected copy to reject growth beyond the confirmed size")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("byte count"))
+        }
+        let installed = try await library.archives()
+        XCTAssertTrue(installed.isEmpty)
+        let attributes = try FileManager.default.attributesOfItem(atPath: selected.path)
+        XCTAssertEqual((attributes[.size] as? NSNumber)?.int64Value, byteCount + 1)
+    }
+
+    func testPublishedFilesImportReusesVerifiedContentAcrossEditionMetadata() async throws {
+        let directory = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "climate", withExtension: "zim"))
+        let data = try Data(contentsOf: fixture)
+        let library = InstalledLibrary(directory: directory)
+        // Curated installs historically use estimates. Only the Files publisher import requires exact length.
+        let curated = publisherFixture(fixture, id: "curated-climate", byteCount: 1)
+        let approved = publisherFixture(fixture, byteCount: Int64(data.count))
+        let existing = try await library.installPack(curated, from: fixture)
+        let reused = try await library.importPublishedPack(approved, from: fixture)
+        XCTAssertEqual(reused, existing)
+        let beforeDamage = try await library.archives()
+        XCTAssertEqual(beforeDamage, [existing])
+
+        let installedFile = await library.fileURL(for: existing.id)
+        var changed = data
+        changed[changed.count - 1] ^= 1
+        try changed.write(to: installedFile, options: .atomic)
+        let imported = try await library.importPublishedPack(approved, from: fixture)
+        XCTAssertNotEqual(imported.id, existing.id)
+        XCTAssertEqual(imported.pack, approved)
+        XCTAssertEqual(try Data(contentsOf: installedFile), changed)
+        try await library.verifyArchive(imported)
+    }
+
+    private func publisherFixture(_ source: URL, id: String = "publisher-climate", byteCount: Int64) -> PublishedPack {
+        PublishedPack(id: id, title: "Climate test pack", version: "2024-06", source: source,
+                      sha256: "448327659c3981918da00f12f8427996f6bbc4efb4d5c14ba39704122483f0f4",
+                      sizeEstimate: byteCount, attribution: "Wikipedia contributors")
+    }
+
     func testPublisherVerificationPreservesInstalledEdition() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

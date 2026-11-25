@@ -26,6 +26,8 @@ When local evidence is insufficient, use **Ask online** to search Google or copy
 
 After finding an article or PDF in your browser, copy its link and paste it into **Ask online → Save a web source**. You can also open **Saved web sources** from Ask options. Ask can cite readable text the publisher allows the app to save, and you can reopen or remove the source from that list. These copies stay on the device.
 
+Use **Library → Content packs → Find publisher books** to search Kiwix for more offline archives. This sends your typed search to Kiwix. Open a result to see its creator, catalog date, and estimated size. Choose **Check publisher file** to get the exact size and SHA-256. Save the archive to Files using the Kiwix download link, then use **Verify and import downloaded ZIM** to check it and add it to Library for offline reading and search.
+
 For questions about water service during a power outage, include your utility or service area. Ask looks for a saved reference that matches the area and quotes the passage if it gives an operating duration. The cited source shows which facilities and conditions the statement covers.
 
 With Home set and regional place data installed, ask “Where’s the nearest pharmacy?” or “Find a hospital near home.” Ask finds the closest matching place in the installed data and shows its straight-line distance from Home. Open the result in Map or choose **Open in Google Maps** to pass along the destination coordinates. The Google Maps option is also available for selected places and dropped pins in Map. [Google Maps links](https://developers.google.com/maps/documentation/urls/get-started)
