@@ -9,6 +9,31 @@ enum MapTravelMode: String, CaseIterable, Identifiable, Sendable {
     var costing: String { self == .walking ? "pedestrian" : "auto" }
 }
 
+struct MapRouteDraft {
+    var origin: MapRoute.Point?
+    var destination: MapRoute.Point?
+    var mode: MapTravelMode
+
+    enum Availability: Equatable { case needsEndpoints, sameLocation, outsideCoverage, ready }
+
+    func availability(coverage: [RoutingPack.Bounds], walkingPreview: RoutingPack.Bounds?) -> Availability {
+        guard let origin, let destination,
+              CLLocationCoordinate2DIsValid(origin.coordinate), CLLocationCoordinate2DIsValid(destination.coordinate) else {
+            return .needsEndpoints
+        }
+        if origin.latitude == destination.latitude && origin.longitude == destination.longitude {
+            return .sameLocation
+        }
+        if coverage.contains(where: { $0.contains(origin) && $0.contains(destination) }) {
+            return .ready
+        }
+        if mode == .walking, let walkingPreview, walkingPreview.contains(origin), walkingPreview.contains(destination) {
+            return .ready
+        }
+        return .outsideCoverage
+    }
+}
+
 struct MapRoute: Sendable {
     struct Point: Codable, Sendable {
         let latitude: Double

@@ -254,6 +254,14 @@ final class LibraryAndMapsTests: XCTestCase {
 
         let credit = app.descendants(matching: .any)["Tinfoil Kit synthetic basemap fixture"].firstMatch
         XCTAssertTrue(credit.waitForExistence(timeout: 20), "Expected the resumed bundle to install and show its basemap.")
+        app.terminate()
+        app.launchArguments = ["-mapDownloadPolicy", "off"]
+        app.launch()
+        app.tabBars.buttons["Map"].tap()
+        XCTAssertTrue(credit.waitForExistence(timeout: 15), "Expected the installed basemap after a cold launch.")
+        for mode in ["Walking", "Driving"] {
+            verifyFixtureRoute(in: app, mode: mode)
+        }
         app.buttons["Import map data"].tap()
         app.buttons["Installed regional bundles"].tap()
         let region = app.staticTexts["Synthetic region"].firstMatch
@@ -262,6 +270,48 @@ final class LibraryAndMapsTests: XCTestCase {
         app.buttons["Remove Synthetic region"].tap()
         let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: region)
         wait(for: [removed], timeout: 5)
+    }
+
+    private func verifyFixtureRoute(in app: XCUIApplication, mode: String) {
+        let directions = app.buttons["Directions"]
+        XCTAssertTrue(directions.waitForExistence(timeout: 8))
+        directions.tap()
+        let origin = app.buttons["route-endpoint-origin"]
+        XCTAssertTrue(origin.waitForExistence(timeout: 5))
+        origin.tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("24 West Bypass")
+        let address = app.staticTexts["24 West Bypass"].firstMatch
+        XCTAssertTrue(address.waitForExistence(timeout: 8))
+        address.tap()
+
+        let destination = app.buttons["route-endpoint-destination"]
+        XCTAssertTrue(destination.waitForExistence(timeout: 5))
+        destination.tap()
+        let services = app.buttons["Nearby services"]
+        XCTAssertTrue(services.waitForExistence(timeout: 5))
+        services.tap()
+        let pharmacyCategory = app.buttons["Pharmacy"]
+        XCTAssertTrue(pharmacyCategory.waitForExistence(timeout: 5))
+        pharmacyCategory.tap()
+        let pharmacy = app.staticTexts["Fixture Pharmacy"].firstMatch
+        XCTAssertTrue(pharmacy.waitForExistence(timeout: 8))
+        pharmacy.tap()
+
+        let travelMode = app.segmentedControls.buttons[mode]
+        XCTAssertTrue(travelMode.waitForExistence(timeout: 5))
+        travelMode.tap()
+        let find = app.buttons["Find offline route"]
+        XCTAssertTrue(find.isEnabled)
+        find.tap()
+        let summary = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "\(mode) · ")).firstMatch
+        XCTAssertTrue(summary.waitForExistence(timeout: 15), "Expected a route from the installed regional graph.")
+        app.buttons["Route steps"].tap()
+        XCTAssertTrue(app.navigationBars["Route steps"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.cells.firstMatch.exists)
+        app.buttons["Done"].tap()
     }
 
     private func openRegionalDownload(in app: XCUIApplication) {
