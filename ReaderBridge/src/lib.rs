@@ -5,6 +5,7 @@ use zimru::{Archive, ArchiveLimits, Blob, ClusterReadLimits, Entry, Item};
 
 const MIB: u64 = 1024 * 1024;
 const MAX_RESOURCE_BYTES: u64 = 32 * MIB;
+const MAX_DIRECT_READ_BYTES: usize = MIB as usize;
 const LIMITS: ArchiveLimits = ArchiveLimits {
     max_metadata_record_bytes: MIB as usize,
     max_entries: 40_000_000,
@@ -18,6 +19,58 @@ const LIMITS: ArchiveLimits = ArchiveLimits {
 };
 
 pub struct TFKArchive(Archive);
+
+pub struct TFKDirectResource {
+    archive: Archive,
+    file_offset: u64,
+    size: u64,
+    mime: CString,
+}
+
+impl TFKDirectResource {
+    fn open(archive: &Archive, path: &str) -> Result<Option<Self>, String> {
+        let entry = archive
+            .get_entry_by_path(path)
+            .map_err(|error| error.to_string())?;
+        let item = entry.get_item(true).map_err(|error| error.to_string())?;
+        let direct = archive
+            .blob_direct_access(item.cluster_index(), item.blob_index())
+            .map_err(|error| error.to_string())?;
+        if !direct.is_direct {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            archive: archive.clone(),
+            file_offset: direct.file_offset,
+            size: direct.size,
+            mime: CString::new(item.mimetype()).map_err(|error| error.to_string())?,
+        }))
+    }
+
+    fn read(&self, offset: u64, bytes: &mut [u8]) -> Result<(), String> {
+        if bytes.len() > MAX_DIRECT_READ_BYTES {
+            return Err("An archive resource read cannot exceed 1 MiB.".into());
+        }
+        if offset > self.size || bytes.len() as u64 > self.size - offset {
+            return Err("The read exceeds the archive resource bounds.".into());
+        }
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        let absolute = self
+            .file_offset
+            .checked_add(offset)
+            .ok_or("The archive resource offset is invalid.")?;
+        let length = self
+            .archive
+            .read_at(absolute, bytes)
+            .map_err(|error| error.to_string())?;
+        if length != bytes.len() {
+            return Err("The archive resource ended before its declared size.".into());
+        }
+        Ok(())
+    }
+}
 
 pub struct TFKResource {
     path: CString,
@@ -56,7 +109,11 @@ fn read_item(item: Item, legacy: bool) -> Result<TFKResource, String> {
     resource(&item, legacy, ResourceData::Cluster(blob, length))
 }
 
-fn read_item_prefix(item: Item, legacy: bool, maximum: usize) -> Result<Option<TFKResource>, String> {
+fn read_item_prefix(
+    item: Item,
+    legacy: bool,
+    maximum: usize,
+) -> Result<Option<TFKResource>, String> {
     let direct = item
         .archive()
         .blob_direct_access(item.cluster_index(), item.blob_index())
@@ -206,6 +263,65 @@ pub unsafe extern "C" fn tfk_archive_resource(
             )
         });
     return_result(result, error)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tfk_archive_direct_resource(
+    archive: &TFKArchive,
+    path: *const c_char,
+    error: *mut *mut c_char,
+) -> *mut TFKDirectResource {
+    let result = CStr::from_ptr(path)
+        .to_str()
+        .map_err(|error| error.to_string())
+        .and_then(|path| TFKDirectResource::open(&archive.0, path));
+    match result {
+        Ok(Some(resource)) => Box::into_raw(Box::new(resource)),
+        Ok(None) => ptr::null_mut(),
+        Err(message) => {
+            write_error(error, message);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tfk_direct_resource_mime(resource: &TFKDirectResource) -> *const c_char {
+    resource.mime.as_ptr()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tfk_direct_resource_size(resource: &TFKDirectResource) -> u64 {
+    resource.size
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tfk_direct_resource_read(
+    resource: &TFKDirectResource,
+    offset: u64,
+    buffer: *mut u8,
+    count: usize,
+    error: *mut *mut c_char,
+) -> bool {
+    let result = if count == 0 {
+        resource.read(offset, &mut [])
+    } else if count > MAX_DIRECT_READ_BYTES || buffer.is_null() {
+        Err("The archive resource read buffer is invalid.".into())
+    } else {
+        resource.read(offset, std::slice::from_raw_parts_mut(buffer, count))
+    };
+    match result {
+        Ok(()) => true,
+        Err(message) => {
+            write_error(error, message);
+            false
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tfk_direct_resource_close(resource: *mut TFKDirectResource) {
+    drop(Box::from_raw(resource));
 }
 
 #[no_mangle]
@@ -429,4 +545,43 @@ pub unsafe extern "C" fn tfk_resource_close(resource: *mut TFKResource) {
 #[no_mangle]
 pub unsafe extern "C" fn tfk_string_free(value: *mut c_char) {
     drop(CString::from_raw(value));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn direct_resource_retains_archive_and_reads_exact_ranges() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../Resources/NearbyPublic/tinfoil-kit-offline-starter_2026-11.zim"
+        );
+        let archive = Archive::from_file_with_limits(File::open(path).unwrap(), LIMITS).unwrap();
+        let item = archive
+            .get_entry_by_path("earthquake-safety.html")
+            .unwrap()
+            .get_item(true)
+            .unwrap();
+        let expected = item.bytes().unwrap();
+        let resource = TFKDirectResource::open(&archive, "earthquake-safety.html")
+            .unwrap()
+            .unwrap();
+        drop(item);
+        drop(archive);
+
+        assert_eq!(resource.size, expected.len() as u64);
+        assert_eq!(resource.mime.to_str().unwrap(), "text/html");
+        let mut bytes = [0; 7];
+        resource.read(9, &mut bytes).unwrap();
+        assert_eq!(&bytes, &expected[9..16]);
+        resource.read(resource.size - 7, &mut bytes).unwrap();
+        assert_eq!(&bytes, &expected[expected.len() - 7..]);
+        resource.read(resource.size, &mut []).unwrap();
+        assert!(resource.read(resource.size, &mut bytes).is_err());
+        assert!(resource.read(u64::MAX, &mut bytes).is_err());
+        assert!(resource
+            .read(0, &mut vec![0; MAX_DIRECT_READ_BYTES + 1])
+            .is_err());
+    }
 }

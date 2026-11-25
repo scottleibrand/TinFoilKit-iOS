@@ -47,6 +47,30 @@ final class PackCatalogTests: XCTestCase {
         XCTAssertFalse(html.contains("offline-starter-prepare-offline"))
     }
 
+    @MainActor
+    func testWebReaderReadsExactRangesFromTheUncompressedStarter() async throws {
+        let entry = try XCTUnwrap(PackCatalog.entries.first { $0.pack.id == "tinfoil-kit-offline-starter" })
+        guard let file = PackCatalog.bundledCopy(for: entry.pack) else {
+            throw XCTSkip("The standard profile bundles the starter edition.")
+        }
+        let path = "earthquake-safety.html"
+        let reader = ArchiveReader(file: file)
+        let url = try XCTUnwrap(ArchiveWebAddress.url(for: path))
+        let resource = try await reader.webResource(for: url)
+        guard case let .direct(resolved, info) = resource else {
+            return XCTFail("The starter is expected to open as a direct resource.")
+        }
+        XCTAssertEqual(info.mimeType, "text/html")
+        let all = try await reader.resource(at: path)
+        XCTAssertEqual(info.byteCount, all.data.count)
+        let tail = try await reader.webResourceBytes(at: resolved, offset: info.byteCount - 16, count: 16)
+        XCTAssertEqual(tail, Data(all.data.suffix(16)))
+        do {
+            _ = try await reader.webResourceBytes(at: resolved, offset: info.byteCount, count: 1)
+            XCTFail("A read beyond the resource must fail.")
+        } catch {}
+    }
+
     func testReadyGovIsAnIndividualArchiveWithExactPublisherPin() throws {
         let catalog = try XCTUnwrap(Bundle.main.url(forResource: "PackCatalog", withExtension: "json"))
         let entries = try PackCatalog.load(from: catalog)

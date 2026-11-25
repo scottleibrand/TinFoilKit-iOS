@@ -1,10 +1,12 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 typedef struct TFKArchive TFKArchive;
 typedef struct TFKResource TFKResource;
+typedef struct TFKDirectResource TFKDirectResource;
 typedef struct TFKEntryMetadata TFKEntryMetadata;
 typedef struct TFKTitleMatches TFKTitleMatches;
 
@@ -19,6 +21,16 @@ char *tfk_archive_verify_checksum(const TFKArchive *archive);
 char *tfk_archive_title(const TFKArchive *archive);
 TFKResource *tfk_archive_main(const TFKArchive *archive, char **error);
 TFKResource *tfk_archive_resource(const TFKArchive *archive, const char *path, char **error);
+/* Resolves redirects and opens an uncompressed item without reading its bytes.
+ * A null result with no error means the item needs the ordinary compressed reader.
+ * The handle retains the open archive, and its MIME string is borrowed. */
+TFKDirectResource *tfk_archive_direct_resource(const TFKArchive *archive, const char *path, char **error);
+const char *tfk_direct_resource_mime(const TFKDirectResource *resource);
+uint64_t tfk_direct_resource_size(const TFKDirectResource *resource);
+/* Reads exactly count bytes into caller-owned storage. Each read is limited to 1 MiB.
+ * On failure the buffer may contain a partial read. */
+bool tfk_direct_resource_read(const TFKDirectResource *resource, uint64_t offset, uint8_t *buffer, size_t count, char **error);
+void tfk_direct_resource_close(TFKDirectResource *resource);
 /* Follows redirects using directory entries only. Free the returned path
  * with tfk_string_free. A null result with no error means the path is absent. */
 char *tfk_archive_resolved_path(const TFKArchive *archive, const char *path, char **error);
