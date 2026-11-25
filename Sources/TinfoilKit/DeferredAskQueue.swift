@@ -92,6 +92,15 @@ actor DeferredAskQueue {
         return current[index]
     }
 
+    func releaseUnsentClaim(_ id: UUID) throws {
+        var current = try read()
+        guard let index = current.firstIndex(where: { $0.id == id }),
+              current[index].state == .running else { return }
+        current[index].state = .queued
+        current[index].attempts -= 1
+        try write(current)
+    }
+
     func finish(_ id: UUID, state: DeferredAskJob.State, note: String? = nil, nextAttemptAt: Date? = nil) throws {
         var current = try read()
         guard let index = current.firstIndex(where: { $0.id == id }), current[index].state == .running else { return }

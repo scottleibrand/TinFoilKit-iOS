@@ -31,6 +31,18 @@ final class DeferredAskQueueTests: XCTestCase {
         XCTAssertNil(duplicate)
     }
 
+    func testConnectionLossBeforeSendingDoesNotConsumeAnAttempt() async throws {
+        let directory = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let queue = DeferredAskQueue(directory: directory)
+        let job = try await queue.enqueue(question: "Where is the advisory?", provider: .gpt, allowMetered: false)
+        _ = try await queue.claim(job.id, now: .now)
+        try await queue.releaseUnsentClaim(job.id)
+        let jobs = try await queue.jobs()
+        XCTAssertEqual(jobs.first?.state, .queued)
+        XCTAssertEqual(jobs.first?.attempts, 0)
+    }
+
     func testScheduledAndExplicitRetryAreDifferentTransitions() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

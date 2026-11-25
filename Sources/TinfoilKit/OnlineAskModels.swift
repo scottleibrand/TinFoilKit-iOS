@@ -128,6 +128,14 @@ actor OnlineAskCache {
         )
     }
 
+    func updateSources(_ sources: [OnlineAskSavedSource], for id: UUID) throws -> Bool {
+        try Task.checkCancellation()
+        guard let existing = try answer(id), existing.sources.map(\.id) == sources.map(\.id) else { return false }
+        try save(OnlineAskSavedAnswer(id: id, savedAt: existing.savedAt, provider: existing.provider,
+                                      question: existing.question, answer: existing.answer, sources: sources))
+        return true
+    }
+
     func answer(_ id: UUID) throws -> OnlineAskSavedAnswer? {
         let file = answerFile(id)
         guard FileManager.default.fileExists(atPath: file.path) else { return nil }

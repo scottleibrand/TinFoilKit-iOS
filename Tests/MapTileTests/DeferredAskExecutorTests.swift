@@ -91,6 +91,33 @@ final class DeferredAskExecutorTests: XCTestCase {
         XCTAssertEqual(jobs.first?.state, .saved)
     }
 
+    func testCapturedSourcesEnrichTheSavedAnswerWithoutRecreatingItAfterDeletion() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = OnlineAskCache(directory: directory)
+        let citation = OnlineAskCitation(url: URL(string: "https://weather.gov/forecast")!, title: "Forecast", excerpt: nil)
+        let initial = OnlineAskSavedSource(citation: citation, resolvedURL: nil, text: nil, note: nil)
+        let entry = OnlineAskSavedAnswer(provider: .gpt, question: "Where is the weather report?",
+                                         answer: "Fixture [1]", sources: [initial])
+        try await cache.save(entry)
+
+        let captured = OnlineAskSavedSource(citation: citation, resolvedURL: citation.url,
+                                             text: "Fixture source describes a weather bulletin.", note: nil)
+        let updated = try await cache.updateSources([captured], for: entry.id)
+        let saved = try await cache.answer(entry.id)
+        XCTAssertTrue(updated)
+        XCTAssertEqual(saved?.id, entry.id)
+        XCTAssertEqual(saved?.answer, entry.answer)
+        XCTAssertEqual(saved?.savedAt, entry.savedAt)
+        XCTAssertEqual(saved?.sources.first?.text, captured.text)
+
+        try await cache.removeAnswer(entry.id)
+        let recreated = try await cache.updateSources([captured], for: entry.id)
+        let removed = try await cache.answer(entry.id)
+        XCTAssertFalse(recreated)
+        XCTAssertNil(removed)
+    }
+
     private func executor(_ queue: DeferredAskQueue, cache: FixtureCache = FixtureCache(),
                           request: @escaping @Sendable (DeferredAskJob, String) async throws -> OnlineAskResponse)
         -> DeferredAskExecutor {

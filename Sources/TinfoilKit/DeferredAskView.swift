@@ -31,7 +31,7 @@ struct DeferredAskConfirmationView: View {
                 }
                 Section {
                     Text("Tinfoil Kit keeps this question on this device until it can send while the app is open. The selected provider receives the question and may charge for processing and web search. Provider rate limits may require a retry.")
-                    Text("The answer and citation details are saved on this device. Open original source links when connected.")
+                    Text("Sending requires a provider API key. Tinfoil Kit saves the answer, citation details, and readable source copies where the publisher permits.")
                 }
                 if let error {
                     Section { Label(error, systemImage: "exclamationmark.circle") }
@@ -123,9 +123,9 @@ private struct DeferredAskJobView: View {
 
         var button: String {
             switch self {
-            case .cancel: "Cancel request"
+            case .cancel: "Cancel deferred request"
             case .retry: "Retry question"
-            case .remove: "Remove queue entry"
+            case .remove: "Remove from queue"
             }
         }
 
@@ -153,6 +153,10 @@ private struct DeferredAskJobView: View {
                     LabeledContent("Added to queue", value: job.createdAt.formatted(date: .abbreviated, time: .shortened))
                     LabeledContent("Network", value: job.allowMetered ? "Metered allowed" : "Unmetered only")
                     LabeledContent("Attempts", value: job.attempts.formatted())
+                    if job.state == .queued, !deferredAsk.configuredProviders.contains(job.provider) {
+                        Text("Add the provider’s API key in Online providers to send this question.")
+                            .foregroundStyle(.secondary)
+                    }
                     if let next = job.nextAttemptAt {
                         LabeledContent("Earliest next attempt", value: next.formatted(date: .abbreviated, time: .shortened))
                     }
@@ -249,7 +253,7 @@ private struct DeferredAskSavedAnswerView: View {
                 .navigationBarTitleDisplayMode(.inline)
             }
         }
-        .task(id: id) {
+        .task(id: deferredAsk.savedContentRevision) {
             defer { isLoading = false }
             do { answer = try await deferredAsk.savedAnswer(id) }
             catch is CancellationError {}
