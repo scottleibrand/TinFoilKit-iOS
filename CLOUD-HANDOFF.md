@@ -49,7 +49,9 @@ Offline Ask shipped with exact address, saved pin, nearby service and coordinate
 
 Regional Updates shipped with cached official NWS alerts, daily and hourly forecasts for opted-in Home locations, and Puget Sound WSDOT route advisories. The signed build installed on the paired iPhone. The simulator passed 196 unit tests and two regional UI tests. The Swift decoders read live NWS and WSDOT responses. A physical offline relaunch and foreground reconnect remain open. [PR #29](https://github.com/scottleibrand/TinFoilKit-iOS/pull/29)
 
-Deferred Online Ask, offline photo preparation and regional publication staging still need their own acceptance checks. General queries over eligible installed references and guest-browser route generation remain open.
+Deferred Online Ask shipped for approved GPT and Claude questions. Requests wait for the provider key, foreground app and allowed connection. The answer and citations are saved before source capture, which can restart independently. The signed build installed on the paired iPhone. The simulator passed 208 app unit tests and queued, restored, cancelled and removed a request without any provider credentials. A live provider flow still needs a device check. [PR #30](https://github.com/scottleibrand/TinFoilKit-iOS/pull/30)
+
+Offline photo preparation and regional publication staging still need their own acceptance checks. General queries over eligible installed references and guest-browser route generation remain open.
 
 ## Cloud branches awaiting integration
 
