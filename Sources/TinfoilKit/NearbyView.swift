@@ -63,7 +63,7 @@ struct NearbyView: View {
                     }
                 }
             } footer: {
-                Text("Tinfoil Kit syncs verified public references while you use the app. An active transfer can finish if you switch apps.")
+                Text("Tinfoil Kit syncs verified public references while you use the app. The shared starter archive appears in Library. An active transfer can finish if you switch apps.")
             }
         }
         .navigationTitle("Nearby")

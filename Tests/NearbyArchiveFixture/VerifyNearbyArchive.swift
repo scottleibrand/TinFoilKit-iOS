@@ -19,8 +19,13 @@ struct VerifyNearbyArchive {
         precondition(NearbyArchiveRequest(Data(repeating: 0, count: NearbyArchiveRequest.length)) == nil)
         precondition(!NearbyArchiveRequest(pin: pin, offset: fixtureBytes).matches(pin))
 
+        let seed = URL(fileURLWithPath: "Resources/NearbyPublic/tinfoil-kit-offline-starter_2026-11.zim")
+        let seedData = try Data(contentsOf: seed)
+        let seedPin = NearbyPublicManifest(id: "offline-starter", byteCount: seedData.count,
+                                          sha256: SHA256.hash(data: seedData).map { String(format: "%02x", $0) }.joined())!
         let sender = NearbyArchiveTransfer(catalog: .init(
-            pins: [pin], needs: { _ in false }, source: { _ in source }, install: { _, _ in }
+            pins: [pin, seedPin], needs: { _ in false },
+            source: { $0 == pin ? source : seed }, install: { _, _ in }
         ), directory: working.appendingPathComponent("sender-stage"))
         let worksheet = URL(fileURLWithPath: "Resources/NearbyPublic/household-check-in-v1.txt")
         let bundledReference = NearbyPublicReference(directory: working.appendingPathComponent("templates"),
@@ -72,6 +77,23 @@ struct VerifyNearbyArchive {
         })
         precondition(templateOnly.loadVerified() == bundledReference.loadVerified())
         print("A template-only client negotiated the existing protocol with the archive-capable peer.")
+        templateClient.stop()
+
+        let installedSeed = working.appendingPathComponent("starter-received.zim")
+        let newReceiver = NearbyArchiveTransfer(catalog: .init(
+            pins: [seedPin], needs: { _ in !FileManager.default.fileExists(atPath: installedSeed.path) },
+            source: { _ in nil },
+            install: { _, file in try FileManager.default.moveItem(at: file, to: installedSeed) }
+        ), directory: working.appendingPathComponent("seed-stage"))
+        let newDiscovery = NearbyDiscovery(publicReferences: [], archiveTransfer: newReceiver)
+        newDiscovery.start(publicSync: true)
+        defer { newDiscovery.stop() }
+        try await wait("starter archive received", seconds: 45, for: {
+            newReceiver.receivedIDs.contains("archive-" + seedPin.sha256)
+        })
+        let receivedSeed = try Data(contentsOf: installedSeed)
+        precondition(receivedSeed == seedData)
+        print("A receiver without the bundled copy obtained the exact MIT starter archive.")
     }
 
     @MainActor

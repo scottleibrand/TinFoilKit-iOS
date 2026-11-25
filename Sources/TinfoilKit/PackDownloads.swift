@@ -260,6 +260,15 @@ final class PackDownloads: ObservableObject {
         }
     }
 
+    func installBundledCopy(_ pack: PublishedPack) async throws {
+        guard let file = PackCatalog.bundledCopy(for: pack), canInstallLocalCopy(pack) else {
+            throw LocalCopyUnavailable()
+        }
+        try await installLocalEdition(key: pack.editionKey) {
+            try await library.importPublishedPack(pack, from: file)
+        }
+    }
+
     func canInstallLocalCopy(_ pack: PublishedPack) -> Bool {
         let key = pack.editionKey
         return !restoring && canStart(pack) && updateTarget(key) == nil && repairTarget(key) == nil

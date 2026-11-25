@@ -20,10 +20,14 @@ final class NearbyLifecycle: ObservableObject {
         self.defaults = defaults
         publicSyncEnabled = defaults.bool(forKey: Self.preferenceKey)
         let catalog = NearbyArchiveCatalog(downloads: .shared)
+        let archiveStage = URL.applicationSupportDirectory.appendingPathComponent("NearbyArchives", isDirectory: true)
         let archiveTransfer = catalog.pins.isEmpty ? nil : NearbyArchiveTransfer(
             catalog: .init(pins: catalog.pins, needs: catalog.needs, source: catalog.source, install: catalog.install),
-            directory: URL.applicationSupportDirectory.appendingPathComponent("NearbyArchives", isDirectory: true)
+            directory: archiveStage
         )
+        if archiveTransfer == nil {
+            Task { try? await NearbyArchiveFiles(directory: archiveStage).prune(keeping: []) }
+        }
         discovery = NearbyDiscovery(archiveTransfer: archiveTransfer)
         notifications = NearbyResumeNotifications(defaults: defaults)
         discovery.activityDidChange = { [weak self] active in self?.transferActivityChanged(active) }
