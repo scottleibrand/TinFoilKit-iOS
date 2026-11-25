@@ -117,7 +117,7 @@ struct HouseholdSharePage: Sendable {
             content += "</section>"
         }
         for reference in publicReferences {
-            content += "<section><h2>\(Self.escape(reference.title))</h2><p>\(Self.escape(reference.text))</p></section>"
+            content += Self.publicReference(reference)
         }
         let nonce = UUID().uuidString
         let submissions = acceptsNotes || acceptsPins
@@ -141,17 +141,99 @@ struct HouseholdSharePage: Sendable {
         <input id="query" type="search" maxlength="120" autocomplete="off">
         <p id="search-status" role="status"></p>
         </div>
+        \(publicReferences.isEmpty ? "" : Self.sharedAskForm)
         \(content)
         \(waypointDownload == nil ? "" : Self.waypointLink)
         \(acceptsNotes ? Self.noteForm : "")
         \(acceptsPins ? Self.pinForm : "")
         </main>
         <script nonce="\(nonce)">\(Self.searchScript)
+        \(publicReferences.isEmpty ? "" : Self.sharedAskScript)
         \(submissions ? Self.proposalScript : "")</script>
         </html>
         """
         body = Data(html.utf8)
     }
+
+    private static func publicReference(_ reference: HouseholdSharePublicReference) -> String {
+        var includesPassages = true
+        let paragraphs = reference.text.components(separatedBy: "\n\n").enumerated().map { index, paragraph in
+            if paragraph.hasPrefix("Blank ") || paragraph.hasPrefix("Original Tinfoil Kit reference") {
+                includesPassages = false
+            }
+            let text = escape(paragraph)
+            guard index > 0, includesPassages, !paragraph.hasPrefix("Example:") else { return "<p>\(text)</p>" }
+            return "<p id=\"reference-\(escape(reference.id))-\(index)\" data-reference-passage>\(text)</p>"
+        }
+        return "<section data-public-reference><h2>\(escape(reference.title))</h2>\(paragraphs.joined())</section>"
+    }
+
+    private static let sharedAskForm = """
+        <div id="shared-ask" hidden>
+        <h2>Ask shared public references</h2>
+        <form>
+        <label for="shared-question">Question</label>
+        <input id="shared-question" maxlength="120" autocomplete="off" required>
+        <button type="submit">Find cited quotes</button>
+        </form>
+        <p>Questions stay in this browser.</p>
+        <p id="shared-ask-status" role="status"></p>
+        <div id="shared-ask-results"></div>
+        </div>
+        """
+
+    private static let sharedAskScript = #"""
+        {
+            const panel = document.querySelector("#shared-ask");
+            const question = document.querySelector("#shared-question");
+            const feedback = document.querySelector("#shared-ask-status");
+            const results = document.querySelector("#shared-ask-results");
+            const words = text => new Set(normalize(text).match(/[\p{L}\p{N}]+/gu) || []);
+            const filler = new Set("a an and are as at be can could did do does for from had has have how i in is it me my of on or our please should tell that the their this to was we were what when where which who why will with would you your".split(" "));
+            const references = Array.from(document.querySelectorAll("[data-public-reference]"), section => ({
+                section,
+                title: section.querySelector("h2").textContent,
+                passages: Array.from(section.querySelectorAll("[data-reference-passage]"), node => ({
+                    id: node.id, text: node.textContent, keywords: words(node.textContent)
+                }))
+            }));
+            panel.hidden = false;
+            question.addEventListener("input", () => {
+                results.replaceChildren();
+                feedback.textContent = "";
+            });
+            panel.querySelector("form").addEventListener("submit", event => {
+                event.preventDefault();
+                results.replaceChildren();
+                const terms = Array.from(words(question.value.slice(0, 120))).filter(word => !filler.has(word));
+                if (terms.length < 2) {
+                    feedback.textContent = "Enter at least two topic words.";
+                    return;
+                }
+                let count = 0;
+                for (const reference of references) {
+                    const match = reference.passages.find(passage => terms.every(word => passage.keywords.has(word)));
+                    if (!match) continue;
+                    const quote = document.createElement("blockquote");
+                    quote.textContent = match.text;
+                    const citation = document.createElement("a");
+                    citation.href = "#" + match.id;
+                    citation.textContent = "[" + (++count) + "] " + reference.title;
+                    citation.addEventListener("click", () => {
+                        if (reference.section.hidden) {
+                            input.value = "";
+                            input.dispatchEvent(new Event("input"));
+                        }
+                    });
+                    const row = document.createElement("div");
+                    row.append(quote, citation);
+                    results.append(row);
+                    if (count == 2) break;
+                }
+                feedback.textContent = count ? "Matching quotes" : "No matching quote in the shared public references.";
+            });
+        }
+        """#
 
     private static let waypointLink = """
         <p><a href="?\(waypointQuery)" download="household-waypoints.gpx">Download shared locations (.gpx)</a></p>
@@ -189,9 +271,9 @@ struct HouseholdSharePage: Sendable {
         const input = document.querySelector("#query");
         const status = document.querySelector("#search-status");
         const sections = Array.from(document.querySelectorAll("main > section"));
+        const normalize = text => text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
         if (sections.length) {
             search.hidden = false;
-            const normalize = text => text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
             const entries = sections.map(section => {
                 const pins = Array.from(section.querySelectorAll("article"));
                 return { section, pins, text: normalize(section.textContent),
