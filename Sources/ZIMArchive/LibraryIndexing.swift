@@ -30,9 +30,24 @@ public final class LibraryIndexing: ObservableObject {
     private var inventoryRevision = 0
     private var refreshGeneration = 0
     private var nextSearchUpdate = ContinuousClock.now
+    private var processingAllowed = true
 
     public init(library: InstalledLibrary) {
         self.library = library
+    }
+
+    public func setProcessingAllowed(_ allowed: Bool) {
+        guard processingAllowed != allowed else { return }
+        processingAllowed = allowed
+        if allowed {
+            startIfNeeded()
+        } else {
+            activeBuild?.task.cancel()
+        }
+    }
+
+    public func waitForProcessing() async {
+        await worker?.value
     }
 
     public func refresh() async {
@@ -105,7 +120,7 @@ public final class LibraryIndexing: ObservableObject {
     }
 
     private func startIfNeeded() {
-        guard worker == nil else { return }
+        guard processingAllowed, worker == nil else { return }
         worker = Task { await drainQueue() }
     }
 
@@ -115,12 +130,13 @@ public final class LibraryIndexing: ObservableObject {
             worker = nil
         }
         for archive in archives where completedIndexes.contains(archive.id) {
+            guard processingAllowed else { return }
             await finishUpdate(archive)
         }
         // Finish smaller packs first so they are searchable while larger editions keep indexing.
-        while let archive = nextArchive {
+        while processingAllowed, let archive = nextArchive {
             let url = await library.fileURL(for: archive.id)
-            guard nextArchive?.id == archive.id else { continue }
+            guard processingAllowed, nextArchive?.id == archive.id else { continue }
             let index = ArticleIndex(archiveURL: url)
             if !index.isReady {
                 progress = Progress(id: archive.id, title: archive.title, fraction: 0)

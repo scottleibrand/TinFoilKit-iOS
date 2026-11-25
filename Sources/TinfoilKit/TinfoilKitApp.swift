@@ -9,7 +9,7 @@ struct TinfoilKitApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var wsdotClosures = WSDOTClosureStore()
     @StateObject private var packs = PackDownloads.shared
-    @StateObject private var indexing = LibraryIndexing(library: .standard)
+    @StateObject private var indexing = LibraryIndexingLifecycle.shared.indexing
     @StateObject private var household = HouseholdStore()
     @StateObject private var nearby = NearbyLifecycle()
     @StateObject private var deferredAsk = DeferredAskController()
@@ -48,6 +48,7 @@ struct TinfoilKitApp: App {
             }
             .task { await packs.restore() }
             .task(id: packs.installedRevision) { await indexing.refresh() }
+            .onChange(of: indexing.hasPendingIndexes) { LibraryIndexingLifecycle.shared.scheduleIfNeeded() }
             .onChange(of: scenePhase, initial: true) { deferredAsk.setForeground(scenePhase == .active) }
             .task {
                 if Bundle.main.object(forInfoDictionaryKey: "TFKLightweightProfile") as? Bool == true,
@@ -74,6 +75,7 @@ struct TinfoilKitApp: App {
                 nwsAlerts.setForecastHome(household.snapshot.home)
             }
             .onChange(of: scenePhase, initial: true) {
+                LibraryIndexingLifecycle.shared.updatePhase(scenePhase)
                 nearby.updatePhase(scenePhase)
                 nwsAlerts.setForeground(scenePhase == .active)
                 wsdotClosures.setForeground(scenePhase == .active)

@@ -224,6 +224,27 @@ final class ZIMArchiveTests: XCTestCase {
     }
 
     @MainActor
+    func testIndexingWaitsForProcessingPermission() async throws {
+        let directory = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "pdf-collection", withExtension: "zim"))
+        let library = InstalledLibrary(directory: directory)
+        let archive = try await library.importArchive(from: fixture)
+        let indexing = LibraryIndexing(library: library)
+        indexing.setProcessingAllowed(false)
+        await indexing.refresh()
+        await indexing.waitForProcessing()
+        XCTAssertTrue(indexing.hasPendingIndexes)
+        XCTAssertFalse(indexing.searchable.contains(archive.id))
+
+        indexing.setProcessingAllowed(true)
+        await indexing.waitForProcessing()
+        XCTAssertFalse(indexing.hasPendingIndexes)
+        XCTAssertTrue(indexing.searchable.contains(archive.id))
+        XCTAssertTrue(indexing.errors.isEmpty)
+    }
+
+    @MainActor
     func testSearchFindsCommittedBatchesBeforeIndexIsReady() async throws {
         let directory = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
