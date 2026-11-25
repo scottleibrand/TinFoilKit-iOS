@@ -127,6 +127,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 ## 2. Content packs
 
 - Use upstream's catalog and edition choices as inputs. Download each pack from its publisher or an official mirror such as download.kiwix.org, ftp.fau.de or dumps.wikimedia.org. Record version, bytes, digest, source and attribution for each supported asset, and verify the digest against the publisher's checksum.
+- The publisher discovery candidate searches Kiwix titles and descriptions and verifies a user-selected downloaded ZIM before importing it. OPDS sizes are estimates. The matching Metalink supplies the exact bytes and SHA-256. Keep discovered archives outside bulk downloads and automatic sharing. Direct in-app downloads for these editions require durable approval and verified transfer recovery. [Publisher book discovery](https://github.com/scottleibrand/TinFoilKit-iOS/tree/codex/publisher-book-discovery) · [Desktop catalog discovery](https://github.com/tudor-city-ventures/tinfoil-kit/blob/64179271bcebffc5d76f1e3d13d2592e0089b6b1/GUIDE.md#changing-whats-in-the-kit)
 - Add resumable background downloads, free-space checks for staging and indexing, and verification before install. Retain the working edition until its replacement and index are ready. Exercise interrupted downloads, low storage and failed upgrades. [Upstream download design](https://github.com/tudor-city-ventures/tinfoil-kit/blob/64179271bcebffc5d76f1e3d13d2592e0089b6b1/docs/DESIGN.md#downloading)
 
 ## 3. Maps
