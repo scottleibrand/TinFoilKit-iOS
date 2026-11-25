@@ -119,6 +119,18 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertFalse(app.buttons["Search Kiwix"].isEnabled)
     }
 
+    func testCatalogPackCanCheckForNewerPublisherEditions() {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Content packs"].tap()
+        let link = app.buttons["Find newer publisher editions"].firstMatch
+        if !link.isHittable { app.swipeUp() }
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        link.tap()
+        XCTAssertTrue(app.navigationBars["Newer editions"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Check Kiwix for newer editions"].isEnabled)
+    }
+
     func testOfflineAskQuoteOpensItsPDFWithoutAModel() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-askUsesOnDeviceModel", "NO"]

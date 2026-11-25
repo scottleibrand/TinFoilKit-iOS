@@ -22,6 +22,11 @@ enum KiwixPublisherClient {
         return try KiwixCatalog.parse(data)
     }
 
+    static func newerEditions(_ series: KiwixCatalog.EditionSeries) async throws -> [KiwixCatalog.Book] {
+        let data = try await receive(catalogRequest(key: "name", value: series.name), limit: maximumCatalogBytes)
+        return series.newerBooks(in: try KiwixCatalog.parse(data))
+    }
+
     static func metadata(for book: KiwixCatalog.Book) async throws -> KiwixMetalink {
         var request = URLRequest(url: book.metalinkURL)
         request.setValue("application/metalink4+xml, application/xml;q=0.8", forHTTPHeaderField: "Accept")
@@ -35,8 +40,12 @@ enum KiwixPublisherClient {
               query.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
             throw ClientError.invalidQuery
         }
+        return catalogRequest(key: "q", value: query)
+    }
+
+    private static func catalogRequest(key: String, value: String) -> URLRequest {
         var url = URLComponents(url: catalogueURL, resolvingAgainstBaseURL: false)!
-        url.queryItems = [URLQueryItem(name: "q", value: query), URLQueryItem(name: "count", value: String(resultLimit))]
+        url.queryItems = [URLQueryItem(name: key, value: value), URLQueryItem(name: "count", value: String(resultLimit))]
         url.percentEncodedQuery = url.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         var request = URLRequest(url: url.url!)
         request.setValue("application/atom+xml, application/xml;q=0.8", forHTTPHeaderField: "Accept")

@@ -18,6 +18,41 @@ enum KiwixCatalog {
         var archiveURL: URL { metalinkURL.deletingPathExtension() }
     }
 
+    struct EditionSeries: Sendable {
+        let name: String
+        let filenamePrefix: String
+        let baseline: String
+
+        init?(archiveURL: URL) {
+            guard archiveURL.pathComponents.contains("zim"), archiveURL.pathExtension == "zim" else { return nil }
+            let stem = archiveURL.deletingPathExtension().lastPathComponent
+            guard let separator = stem.lastIndex(of: "_") else { return nil }
+            let prefix = String(stem[..<separator])
+            let edition = String(stem[stem.index(after: separator)...])
+            guard !prefix.isEmpty, prefix.utf8.count <= 160,
+                  prefix.range(of: #"^[a-zA-Z0-9._-]+$"#, options: .regularExpression) != nil,
+                  Self.isDatedEdition(edition) else { return nil }
+            filenamePrefix = prefix + "_"
+            baseline = edition
+            name = prefix.replacingOccurrences(of: #"_(maxi|mini|nopic)$"#, with: "", options: .regularExpression)
+        }
+
+        func newerBooks(in books: [Book]) -> [Book] {
+            books.compactMap { book -> (Book, String)? in
+                let url = book.archiveURL
+                let stem = url.deletingPathExtension().lastPathComponent
+                guard KiwixCatalog.isTrustedArchiveURL(url), stem.hasPrefix(filenamePrefix) else { return nil }
+                let edition = String(stem.dropFirst(filenamePrefix.count))
+                guard Self.isDatedEdition(edition), edition > baseline else { return nil }
+                return (book, edition)
+            }.sorted { $0.1 > $1.1 }.map(\.0)
+        }
+
+        private static func isDatedEdition(_ text: String) -> Bool {
+            text.range(of: #"^[0-9]{4}-(0[1-9]|1[0-2])$"#, options: .regularExpression) != nil
+        }
+    }
+
     static func parse(_ data: Data) throws -> [Book] {
         guard data.count <= 512 * 1024 else { throw ParseError.tooLarge }
         guard !data.contains(0), var xml = String(data: data, encoding: .utf8),

@@ -27,6 +27,25 @@ final class KiwixCatalogTests: XCTestCase {
         XCTAssertEqual(book.readerURL?.absoluteString, reader)
     }
 
+    func testNewerEditionsMatchTheExactVariantAndSortByFilenameDate() throws {
+        let bundled = try XCTUnwrap(URL(string: "https://mirror.example/kiwix/zim/wikipedia/wiki_en_all_nopic_2026-06.zim"))
+        let series = try XCTUnwrap(KiwixCatalog.EditionSeries(archiveURL: bundled))
+        XCTAssertEqual(series.name, "wiki_en_all")
+        XCTAssertEqual(series.baseline, "2026-06")
+        let filenames = [
+            "wiki_en_all_nopic_2026-07", "wiki_en_all_maxi_2026-12", "wiki_en_all_nopic_2026-06",
+            "wiki_en_all_nopic_2025-12", "wiki_en_all_nopic_2026-14", "wiki_en_all_nopic_2026-12",
+            "wiki_es_all_nopic_2026-12"
+        ]
+        let books = try KiwixCatalog.parse(feed(filenames.map { filename in
+            entry(identifier: UUID().uuidString, title: filename,
+                  source: "https://download.kiwix.org/zim/wikipedia/\(filename).zim.meta4")
+        }.joined()))
+        XCTAssertEqual(series.newerBooks(in: books).map(\.title),
+                       ["wiki_en_all_nopic_2026-12", "wiki_en_all_nopic_2026-07"])
+        XCTAssertNil(KiwixCatalog.EditionSeries(archiveURL: URL(string: "https://example.com/Resources/kit_2026-06.zim")!))
+    }
+
     func testRejectsForgedOrNoncanonicalAcquisitionLinks() throws {
         for source in [
             "https://lb.download.kiwix.org.example.invalid/zim/other/fixture.zim.meta4",

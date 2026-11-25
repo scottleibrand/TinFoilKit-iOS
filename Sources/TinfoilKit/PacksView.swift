@@ -103,6 +103,14 @@ struct PacksView: View {
                 Link("Content license", destination: termsURL).font(.footnote)
             }
             PackDownloadControls(downloads: downloads, pack: pack)
+            if entry.isDefault, let series = KiwixCatalog.EditionSeries(archiveURL: pack.source) {
+                NavigationLink {
+                    KiwixDiscoveryView(downloads: downloads, library: library, onImport: onPublisherImport,
+                                       editionSeries: series)
+                } label: {
+                    Label("Find newer publisher editions", systemImage: "magnifyingglass")
+                }
+            }
         }
     }
 }
