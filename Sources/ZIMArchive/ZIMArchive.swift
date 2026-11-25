@@ -3,6 +3,14 @@ import Foundation
 
 /// Read-only access to a local ZIM file.
 public final class ZIMArchive {
+    /// Inspect at most the given number of archive entries for PDF documents.
+    public func pdfEntries(inspectingFirst maximumEntries: UInt32) throws -> [PDFEntry] {
+        try (0..<min(entryCount, maximumEntries)).compactMap { index in
+            try Task.checkCancellation()
+            return try pdfEntry(at: index)
+        }
+    }
+
     public struct Resource: Sendable {
         public let path: String
         public let title: String
@@ -126,10 +134,7 @@ public final class ZIMArchive {
     }
 
     public func pdfEntries() throws -> [PDFEntry] {
-        try (0..<entryCount).compactMap { index in
-            try Task.checkCancellation()
-            return try pdfEntry(at: index)
-        }
+        try pdfEntries(inspectingFirst: entryCount)
     }
 
     func pdfEntry(at index: UInt32) throws -> PDFEntry? {
