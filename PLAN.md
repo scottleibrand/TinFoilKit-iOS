@@ -35,7 +35,7 @@ This order reconciles the updated survey with the default-branch implementation 
 
 **Regional pilot.** Seattle is the first real-data test of the reusable regional pack format because the app already has basemap and walking-route fixtures there. Use the pilot to verify installation, address and service search, and walking and driving while the Seattle edition awaits hosting. Keep the pack format and core offline workflows applicable to any region. Exercise the same pack workflow with a second, non-Washington region before claiming geographic portability. Verify nationwide NWS alerts and point forecasts independently of the Puget Sound road source, and keep library, household, and sharing releases independent of regional publication.
 
-A small downtown Boston sample built a valid SQLite place index with 564 places, including 452 addressed entries and two pharmacies returned by full-text search. This check covers place-index generation and SQLite search. A Boston basemap, route graph, and iPhone installation still need verification. [OpenStreetMap source](https://api.openstreetmap.org/api/0.6/map?bbox=-71.0635,42.3525,-71.0570,42.3570)
+A small downtown Boston sample built a valid SQLite place index with 564 places, including 452 addressed entries and two pharmacies returned by full-text search. The pinned Protomaps v4 source also produced a verified 1.23 MB basemap at zooms 6–15 for the same bounds. A route graph and iPhone installation still need verification. [OpenStreetMap source](https://api.openstreetmap.org/api/0.6/map?bbox=-71.0635,42.3525,-71.0570,42.3570) · [Protomaps source](https://source.coop/protomaps/openstreetmap)
 
 The following work extends the parity candidates. The regional pilot can proceed alongside the release queue.
 
