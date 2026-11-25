@@ -52,6 +52,74 @@
   },
   {
     "pack": {
+      "id": "zimgit-post-disaster-en",
+      "title": "Post-Disaster Resource Library",
+      "version": "2024-05",
+      "source": "https://download.kiwix.org/zim/other/zimgit-post-disaster_en_2024-05.zim",
+      "sha256": "0ba9bb358b768b94eb0d7920752fe356bf097de514ee61843f3a4da6cce174f8",
+      "sizeEstimate": 644665513,
+      "attribution": "Collected by ZIM Git · Individual document terms · Packaged by openZIM · Distributed by Kiwix"
+    },
+    "section": "essentials",
+    "language": "en",
+    "isDefault": true,
+    "usesPDFDirectory": true,
+    "allowsArchiveSharing": false,
+    "detail": "Browse PDF references on disaster response and recovery."
+  },
+  {
+    "pack": {
+      "id": "zimgit-food-preparation-en",
+      "title": "Food for Preppers",
+      "version": "2025-04",
+      "source": "https://download.kiwix.org/zim/other/zimgit-food-preparation_en_2025-04.zim",
+      "sha256": "db92c6c9dac14ff30f1cbc15aa834a7c012c6e87d4ff0519f33a0902ab6e732b",
+      "sizeEstimate": 97822565,
+      "attribution": "Collected by ZIM Git · Individual document terms · Packaged by openZIM · Distributed by Kiwix"
+    },
+    "section": "essentials",
+    "language": "en",
+    "isDefault": true,
+    "usesPDFDirectory": true,
+    "allowsArchiveSharing": false,
+    "detail": "Browse PDF guides to food preparation and preservation."
+  },
+  {
+    "pack": {
+      "id": "zimgit-knots-en",
+      "title": "A Library of Knots",
+      "version": "2024-08",
+      "source": "https://download.kiwix.org/zim/other/zimgit-knots_en_2024-08.zim",
+      "sha256": "7c3120b19fc2dc190b5ebfee01af54150136643d7b9d29d7fa9a6ba29787a57b",
+      "sizeEstimate": 27945133,
+      "attribution": "Collected by ZIM Git · Individual document terms · Packaged by openZIM · Distributed by Kiwix"
+    },
+    "section": "essentials",
+    "language": "en",
+    "isDefault": true,
+    "usesPDFDirectory": true,
+    "allowsArchiveSharing": false,
+    "detail": "Browse illustrated PDF guides to tying knots."
+  },
+  {
+    "pack": {
+      "id": "fas-military-medicine-en",
+      "title": "Military Medicine Manuals",
+      "version": "2026-10",
+      "source": "https://download.kiwix.org/zim/zimit/irp.fas.org_en_military-medicine_2026-10.zim",
+      "sha256": "9fc5e5d0302504f57a33e0d3aad9c94761cfd6caab22354ed04b9e9bad2ff57f",
+      "sizeEstimate": 64986090,
+      "attribution": "Archived from the Federation of American Scientists · Individual document terms · Packaged by openZIM · Distributed by Kiwix"
+    },
+    "section": "essentials",
+    "language": "en",
+    "isDefault": true,
+    "usesPDFDirectory": true,
+    "allowsArchiveSharing": false,
+    "detail": "Browse PDF publications on first aid and field medicine."
+  },
+  {
+    "pack": {
       "id": "wikipedia-en-simple-mini",
       "title": "Simple English Wikipedia",
       "version": "2026-09",
@@ -74,7 +142,7 @@
       "version": "2026-10",
       "source": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_climate-change_mini_2026-10.zim",
       "sha256": "dbcc313b4dd30cf7abbb1e6481c493d82937262158ea97624ca879a0bcf98b67",
-      "sizeEstimate": 13000000,
+      "sizeEstimate": 12143778,
       "attribution": "Wikipedia contributors · CC BY-SA · Packaged by Kiwix"
     },
     "section": "topics",
@@ -154,6 +222,43 @@
     "allowsArchiveSharing": false,
     "detail": "Full articles without images. Download separately and allow extra space for the search index.",
     "termsURL": "https://en.wikipedia.org/wiki/Wikipedia:Copyrights"
+  },
+  {
+    "pack": {
+      "id": "mdwiki-en-all-maxi",
+      "title": "WikiMed Medical Encyclopedia",
+      "version": "2025-11",
+      "source": "https://download.kiwix.org/zim/other/mdwiki_en_all_maxi_2025-11.zim",
+      "sha256": "ee51df7860dbcab8c628aad32cf9972726ab708d784cdaf3e217d596920edf80",
+      "sizeEstimate": 2302838768,
+      "attribution": "WikiProjectMed contributors · CC BY-SA, CC BY and public-domain text · Media terms vary · Packaged by Kiwix"
+    },
+    "section": "extended",
+    "language": "en",
+    "isDefault": true,
+    "individualDownloadOnly": true,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false,
+    "detail": "Read and search illustrated health articles curated by WikiProjectMed.",
+    "termsURL": "https://www.mdwiki.org/wiki/WikiProjectMed:Copyright"
+  },
+  {
+    "pack": {
+      "id": "ready-gov-en-all",
+      "title": "Ready.gov Preparedness Guides",
+      "version": "2026-10",
+      "source": "https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim",
+      "sha256": "c88ce03db2a6dd855c1075d87abb6dceac678718e0dd3fa7912009469b9ca225",
+      "sizeEstimate": 2063895408,
+      "attribution": "FEMA Ready.gov · Individual content terms · Archived by openZIM · Distributed by Kiwix"
+    },
+    "section": "extended",
+    "language": "en",
+    "isDefault": true,
+    "individualDownloadOnly": true,
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": false,
+    "detail": "Read preparedness guidance for power outages, earthquakes, and other emergencies."
   },
   {
     "pack": {

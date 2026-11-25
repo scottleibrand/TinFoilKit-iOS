@@ -60,15 +60,19 @@ fn entry_resource(entry: zimru::Result<Entry>, legacy: bool) -> Result<TFKResour
     )
 }
 
+unsafe fn write_error(error: *mut *mut c_char, message: String) {
+    if !error.is_null() {
+        *error = CString::new(message)
+            .unwrap_or_else(|_| CString::new("Could not read the ZIM archive.").unwrap())
+            .into_raw();
+    }
+}
+
 unsafe fn return_result<T>(result: Result<T, String>, error: *mut *mut c_char) -> *mut T {
     match result {
         Ok(value) => Box::into_raw(Box::new(value)),
         Err(message) => {
-            if !error.is_null() {
-                *error = CString::new(message)
-                    .unwrap_or_else(|_| CString::new("Could not read the ZIM archive.").unwrap())
-                    .into_raw();
-            }
+            write_error(error, message);
             ptr::null_mut()
         }
     }
@@ -161,6 +165,33 @@ pub unsafe extern "C" fn tfk_archive_resource(
             )
         });
     return_result(result, error)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tfk_archive_resolved_path(
+    archive: &TFKArchive,
+    path: *const c_char,
+    error: *mut *mut c_char,
+) -> *mut c_char {
+    let result = (|| {
+        let path = CStr::from_ptr(path)
+            .to_str()
+            .map_err(|error| error.to_string())?;
+        let entry = match archive.0.get_entry_by_path(path) {
+            Ok(entry) => entry,
+            Err(zimru::Error::EntryNotFound) => return Ok(None),
+            Err(error) => return Err(error.to_string()),
+        };
+        let item = entry.get_item(true).map_err(|error| error.to_string())?;
+        item_path(&item, !archive.0.header().uses_new_namespaces()).map(Some)
+    })();
+    match result {
+        Ok(path) => path.map_or(ptr::null_mut(), CString::into_raw),
+        Err(message) => {
+            write_error(error, message);
+            ptr::null_mut()
+        }
+    }
 }
 
 #[no_mangle]

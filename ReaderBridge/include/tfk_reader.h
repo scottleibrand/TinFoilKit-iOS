@@ -18,6 +18,9 @@ char *tfk_archive_verify_checksum(const TFKArchive *archive);
 char *tfk_archive_title(const TFKArchive *archive);
 TFKResource *tfk_archive_main(const TFKArchive *archive, char **error);
 TFKResource *tfk_archive_resource(const TFKArchive *archive, const char *path, char **error);
+/* Follows redirects using directory entries only. Free the returned path
+ * with tfk_string_free. A null result with no error means the path is absent. */
+char *tfk_archive_resolved_path(const TFKArchive *archive, const char *path, char **error);
 
 /* Returns a non-redirect HTML article at a URL-table index. A null result
  * with no error means the entry is outside the searchable article set. */
