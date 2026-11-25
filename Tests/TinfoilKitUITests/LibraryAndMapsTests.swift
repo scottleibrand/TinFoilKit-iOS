@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 
 final class LibraryAndMapsTests: XCTestCase {
@@ -18,6 +19,18 @@ final class LibraryAndMapsTests: XCTestCase {
                       app.descendants(matching: .any)["Message"].firstMatch.exists)
         app.buttons["Done"].tap()
         XCTAssertTrue(app.navigationBars["Ask"].exists)
+    }
+
+    func testPublisherSearchOpensFromContentPacks() {
+        let app = XCUIApplication()
+        app.launch()
+        let contentPacks = app.buttons["Content packs"]
+        XCTAssertTrue(contentPacks.waitForExistence(timeout: 10))
+        contentPacks.tap()
+        app.buttons["Find publisher books"].tap()
+        XCTAssertTrue(app.navigationBars["Find publisher books"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["Book title or topic"].exists)
+        XCTAssertFalse(app.buttons["Search Kiwix"].isEnabled)
     }
 
     func testWaterOutageAsksForTheServiceArea() {
@@ -198,6 +211,136 @@ final class LibraryAndMapsTests: XCTestCase {
                                           attribution: "Tinfoil Kit synthetic basemap fixture")
     }
 
+    func testNamedRegionalCatalogDownloadResumesAfterRelaunch() throws {
+        struct Fixture: Decodable {
+            let url: String
+            let sha256: String
+            let downloadByteCount: Int64
+        }
+
+        guard let configuration = ProcessInfo.processInfo.environment["TINFOILKIT_REGIONAL_CATALOG_FIXTURE"] else {
+            throw XCTSkip("Pass the local HTTPS configuration in TEST_RUNNER_TINFOILKIT_REGIONAL_CATALOG_FIXTURE.")
+        }
+        let fixture = try JSONDecoder().decode(Fixture.self, from: Data(configuration.utf8))
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-mapDownloadPolicy", "off",
+            "-regionalCatalogFixtureURL", fixture.url,
+            "-regionalCatalogFixtureSHA256", fixture.sha256,
+            "-regionalCatalogFixtureBytes", String(fixture.downloadByteCount)
+        ]
+        app.launch()
+        openRegionalDownload(in: app)
+
+        let regionButton = app.buttons["regional-catalog-synthetic-regional-fixture"]
+        XCTAssertTrue(regionButton.waitForExistence(timeout: 8), "Expected the named fixture in the regional catalog.")
+        regionButton.tap()
+        let review = app.buttons["Review download"]
+        XCTAssertTrue(review.waitForExistence(timeout: 5))
+        XCTAssertTrue(review.isEnabled)
+        let size = fixture.downloadByteCount.formatted(.byteCount(style: .file))
+        let downloadSize = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@ OR value == %@", size, size)
+        ).firstMatch
+        XCTAssertTrue(downloadSize.exists)
+        let start = app.buttons["Download and install"]
+        XCTAssertFalse(start.exists, "Selecting a region should leave manifest review to the user.")
+        review.tap()
+        XCTAssertTrue(start.waitForExistence(timeout: 15), "Expected the verified fixture manifest to be ready to install.")
+        let edition = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "fixture-v1")).firstMatch
+        XCTAssertTrue(edition.exists)
+
+        start.tap()
+        let resume = app.buttons["Resume download"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 30), "The fixture should interrupt the first place-data transfer.")
+        app.terminate()
+        app.launch()
+        openRegionalDownload(in: app)
+        XCTAssertTrue(resume.waitForExistence(timeout: 8), "The interrupted download should take precedence over the catalog.")
+        XCTAssertFalse(regionButton.exists)
+        let network = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@ OR value == %@", "Wi-Fi only", "Wi-Fi only")
+        ).firstMatch
+        XCTAssertTrue(network.exists)
+        resume.tap()
+
+        let credit = app.descendants(matching: .any)["Tinfoil Kit synthetic basemap fixture"].firstMatch
+        XCTAssertTrue(credit.waitForExistence(timeout: 20), "Expected the resumed bundle to install and show its basemap.")
+        app.terminate()
+        app.launchArguments = ["-mapDownloadPolicy", "off"]
+        app.launch()
+        app.tabBars.buttons["Map"].tap()
+        XCTAssertTrue(credit.waitForExistence(timeout: 15), "Expected the installed basemap after a cold launch.")
+        for mode in ["Walking", "Driving"] {
+            verifyFixtureRoute(in: app, mode: mode)
+        }
+        app.buttons["Import map data"].tap()
+        app.buttons["Installed regional bundles"].tap()
+        let region = app.staticTexts["Synthetic region"].firstMatch
+        XCTAssertTrue(region.waitForExistence(timeout: 5))
+        app.buttons["Remove regional bundle"].tap()
+        app.buttons["Remove Synthetic region"].tap()
+        let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: region)
+        wait(for: [removed], timeout: 5)
+    }
+
+    private func verifyFixtureRoute(in app: XCUIApplication, mode: String) {
+        let directions = app.buttons["Directions"]
+        XCTAssertTrue(directions.waitForExistence(timeout: 8))
+        directions.tap()
+        let origin = app.buttons["route-endpoint-origin"]
+        XCTAssertTrue(origin.waitForExistence(timeout: 5))
+        origin.tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("24 West Bypass")
+        let address = app.staticTexts["24 West Bypass"].firstMatch
+        XCTAssertTrue(address.waitForExistence(timeout: 8))
+        address.tap()
+
+        let destination = app.buttons["route-endpoint-destination"]
+        XCTAssertTrue(destination.waitForExistence(timeout: 5))
+        destination.tap()
+        let services = app.buttons["Nearby services"]
+        XCTAssertTrue(services.waitForExistence(timeout: 5))
+        services.tap()
+        let pharmacyCategory = app.buttons["Pharmacy"]
+        XCTAssertTrue(pharmacyCategory.waitForExistence(timeout: 5))
+        pharmacyCategory.tap()
+        let pharmacy = app.staticTexts["Fixture Pharmacy"].firstMatch
+        XCTAssertTrue(pharmacy.waitForExistence(timeout: 8))
+        pharmacy.tap()
+
+        let travelMode = app.segmentedControls.buttons[mode]
+        XCTAssertTrue(travelMode.waitForExistence(timeout: 5))
+        travelMode.tap()
+        let find = app.buttons["Find offline route"]
+        XCTAssertTrue(find.isEnabled)
+        find.tap()
+        let summary = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "\(mode) · ")).firstMatch
+        XCTAssertTrue(summary.waitForExistence(timeout: 15), "Expected a route from the installed regional graph.")
+        app.buttons["Route steps"].tap()
+        XCTAssertTrue(app.navigationBars["Route steps"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.cells.firstMatch.exists)
+        app.buttons["Done"].tap()
+    }
+
+    private func openRegionalDownload(in app: XCUIApplication) {
+        app.tabBars.buttons["Map"].tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let denyLocation = springboard.alerts.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH 'Don' AND label ENDSWITH 'Allow'")
+        ).firstMatch
+        if denyLocation.waitForExistence(timeout: 3) { denyLocation.tap() }
+        let mapMenu = app.buttons["Import map data"]
+        let entryPoint = app.buttons["Download regional bundle"]
+        if !entryPoint.exists, mapMenu.waitForExistence(timeout: 10) { mapMenu.tap() }
+        XCTAssertTrue(entryPoint.waitForExistence(timeout: 8))
+        entryPoint.tap()
+        XCTAssertTrue(app.navigationBars["Download regional bundle"].waitForExistence(timeout: 5))
+    }
+
     func testRestoresAndInstallsPendingRegionalDownload() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-mapDownloadPolicy", "off"]
@@ -310,25 +453,42 @@ final class LibraryAndMapsTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
 
-        let fixture = app.staticTexts.containing(NSPredicate(format: "label CONTAINS[c] 'Climate'")).firstMatch
+        let fixture = app.staticTexts.matching(
+            NSPredicate(format: "label == %@ OR label == %@", "Climate change by Wikipedia", "Climate Test")
+        ).firstMatch
         if !fixture.exists {
             if app.buttons["Import from Files"].exists {
                 app.buttons["Import from Files"].tap()
             } else {
                 app.buttons["Import archive"].tap()
             }
-            let picker = XCUIApplication(bundleIdentifier: "com.apple.DocumentsApp")
+            let remotePicker = XCUIApplication(bundleIdentifier: "com.apple.DocumentsApp")
+            let picker = app.buttons["Cancel"].waitForExistence(timeout: 3) ? app : remotePicker
             let file = picker.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Climate Test'")).firstMatch
             if !file.waitForExistence(timeout: 3) {
-                if picker.buttons["Browse"].exists { picker.buttons["Browse"].tap() }
-                let local = picker.staticTexts["On My iPhone"].firstMatch
-                if local.waitForExistence(timeout: 4) { local.tap() }
+                let browse = picker.tabBars.buttons["Browse"].firstMatch
+                if browse.exists, !browse.isSelected {
+                    browse.tap()
+                } else if !browse.exists, picker.buttons["Browse"].firstMatch.exists {
+                    picker.buttons["Browse"].firstMatch.tap()
+                }
                 let folder = picker.staticTexts["Tinfoil Kit"].firstMatch
+                if !folder.exists {
+                    let local = picker.staticTexts["On My iPhone"].firstMatch
+                    if local.waitForExistence(timeout: 4) { local.tap() }
+                }
                 if folder.waitForExistence(timeout: 4) { folder.tap() }
             }
             XCTAssertTrue(file.waitForExistence(timeout: 10), "The simulator Documents folder needs Climate Test.zim")
-            file.tap()
-            XCTAssertTrue(fixture.waitForExistence(timeout: 20))
+            let tile = picker.cells.containing(NSPredicate(format: "label BEGINSWITH 'Climate Test'")).firstMatch
+            if tile.exists {
+                tile.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap()
+            } else {
+                file.tap()
+            }
+            let confirm = picker.buttons["Open"].firstMatch
+            if confirm.exists, confirm.isEnabled { confirm.tap() }
+            XCTAssertTrue(fixture.waitForExistence(timeout: 20), app.debugDescription)
         }
 
         app.terminate()

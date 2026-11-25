@@ -127,6 +127,36 @@ final class RegionalBundleTransferTests: XCTestCase {
         XCTAssertNil(remaining)
     }
 
+    func testRejectsCatalogMismatchWithoutSavingPendingJob() async throws {
+        struct Fixture: Decodable {
+            let url: String
+            let sha256: String
+        }
+
+        let fixtureFile = URL.documentsDirectory.appendingPathComponent("RegionalHTTPSFixture.json")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: fixtureFile.path), "Requires a local HTTPS fixture.")
+        let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: fixtureFile))
+        let pendingDirectory = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: pendingDirectory) }
+        let source = try RegionalBundleDownloadSource(url: fixture.url, sha256: fixture.sha256)
+        let download = RegionalBundleDownload(directory: pendingDirectory)
+        let manual = try await download.load(source, cellular: false)
+        try await download.discard()
+
+        let mismatch = RegionalBundleCatalog.Entry(
+            id: "fixture", region: manual.manifest.region + " (different region)",
+            edition: manual.manifest.dataVersion, byteCount: manual.manifest.assets.downloadByteCount, source: source
+        )
+        do {
+            _ = try await download.load(mismatch, cellular: false)
+            XCTFail("A verified manifest with mismatched catalog metadata was accepted.")
+        } catch RegionalBundleDownloadError.catalogMismatch {}
+        let pending = try await download.pending()
+        XCTAssertNil(pending)
+        let restored = try await download.load(source, cellular: false)
+        XCTAssertEqual(restored.manifest, manual.manifest)
+    }
+
     private func response(status: Int, headers: [String: String]) throws -> HTTPURLResponse {
         try XCTUnwrap(HTTPURLResponse(
             url: URL(string: "https://example.invalid/artifact")!, statusCode: status,
