@@ -12,13 +12,14 @@ struct TinfoilKitApp: App {
     @StateObject private var household = HouseholdStore()
     @StateObject private var nearby = NearbyLifecycle()
     @StateObject private var readingShelf = ReadingShelf()
+    @StateObject private var nwsAlerts = NWSAlertStore()
     @AppStorage("hasSeenOfflineStarterGuide") private var hasSeenOfflineStarterGuide = false
     @State private var showingOfflineStarterGuide = false
     @State private var selectedTab: Tab = .library
     @State private var pendingMapPlace: MapPlace?
 
     private enum Tab: Hashable {
-        case library, map, ask, household
+        case library, map, ask, household, updates
     }
 
     var body: some Scene {
@@ -39,6 +40,9 @@ struct TinfoilKitApp: App {
                 HouseholdView(household: household)
                     .tabItem { Label("Household", systemImage: "house") }
                     .tag(Tab.household)
+                NWSUpdatesView(store: nwsAlerts)
+                    .tabItem { Label("Updates", systemImage: "exclamationmark.triangle") }
+                    .tag(Tab.updates)
             }
             .task { await packs.restore() }
             .task(id: packs.installedRevision) { await indexing.refresh() }
@@ -66,7 +70,10 @@ struct TinfoilKitApp: App {
                     packs.archiveRemoved(archive)
                 }
             }
-            .onChange(of: scenePhase, initial: true) { nearby.updatePhase(scenePhase) }
+            .onChange(of: scenePhase, initial: true) {
+                nearby.updatePhase(scenePhase)
+                nwsAlerts.setForeground(scenePhase == .active)
+            }
             .environmentObject(nearby)
             .environmentObject(nearby.discovery)
             .environmentObject(nearby.notifications)

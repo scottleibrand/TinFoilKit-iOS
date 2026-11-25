@@ -52,6 +52,7 @@ Valhalla Mobile packages Valhalla and its dependencies. [Scripts/routing/README.
 
 ## Downloaded by the app
 
+- **Weather alerts** come directly from NOAA’s National Weather Service. Updates retains the publisher, issue, and expiration times with each alert. NWS content is generally public domain unless specifically marked otherwise. [NWS alerts API](https://www.weather.gov/documentation/services-web-alerts) · [NWS data terms](https://www.weather.gov/disclaimer)
 - **Map tiles:** the app's tile cache reads the same Protomaps v4 basemap, with the same OpenStreetMap attribution and license.
 - **Content packs:** downloaded from Kiwix and its official mirrors when a user chooses them. Each pack lists its own attribution and terms in Content Packs. In summary:
   - Wikipedia packs and Appropedia: CC BY-SA. Images carry their own licenses.
