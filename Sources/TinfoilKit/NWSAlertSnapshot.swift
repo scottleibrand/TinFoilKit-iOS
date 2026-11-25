@@ -125,13 +125,11 @@ struct NWSAlertCache: Sendable {
 enum NWSAlertError: LocalizedError {
     case invalidResponse
     case responseTooLarge
-    case httpStatus(Int)
 
     var errorDescription: String? {
         switch self {
         case .invalidResponse: "The National Weather Service response could not be verified as a complete alert list."
         case .responseTooLarge: "The National Weather Service alert list exceeded the download limit."
-        case let .httpStatus(status): "The National Weather Service returned HTTP \(status)."
         }
     }
 }
