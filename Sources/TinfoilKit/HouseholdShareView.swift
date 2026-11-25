@@ -1,8 +1,11 @@
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import CryptoKit
 import Foundation
 import Network
+import SwiftSoup
 import SwiftUI
+import ZIMArchive
 
 struct HouseholdShareView: View {
     let snapshot: HouseholdSnapshot
@@ -44,7 +47,7 @@ struct HouseholdShareView: View {
                 }
             }
             if !publicReferences.isEmpty {
-                Section("Public reference templates") {
+                Section("Public references") {
                     ForEach(publicReferences) { reference in
                         Toggle(reference.title, isOn: Binding(
                             get: { selectedReferenceIDs.contains(reference.id) },
@@ -128,7 +131,10 @@ struct HouseholdShareView: View {
         }
         .navigationTitle("Share on local network")
         .task {
-            publicReferences = HouseholdSharePublicReference.verified(from: NearbyPublicReference.catalogReferences)
+            let templates = HouseholdSharePublicReference.verified(from: NearbyPublicReference.catalogReferences)
+            let starter = await Self.starterReferences()
+            guard !Task.isCancelled else { return }
+            publicReferences = templates + starter
         }
         .onDisappear { session.stop() }
         .onChange(of: scenePhase) {
@@ -159,6 +165,31 @@ struct HouseholdShareView: View {
     }
 
     private var hasNotes: Bool { !snapshot.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    static func starterReferences() async -> [HouseholdSharePublicReference] {
+        let catalog = NearbyArchiveCatalog(downloads: .shared)
+        guard let pin = catalog.pins.first(where: { $0.id.hasPrefix("tinfoil-kit-offline-starter") }),
+              pin.byteCount <= 128 * 1024, let file = await catalog.source(pin),
+              let data = try? Data(contentsOf: file), data.count == pin.byteCount,
+              SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() == pin.sha256,
+              let archive = try? ZIMArchive(fileURL: file) else { return [] }
+
+        func chapterText(_ chapter: String) -> (ZIMArchive.Resource, String)? {
+            guard let resource = try? archive.resource(at: chapter + ".html"),
+                  let html = String(data: resource.data, encoding: .utf8),
+                  let document = try? SwiftSoup.parse(html),
+                  let main = try? document.select("main").first(),
+                  let text = try? main.text(), !text.isEmpty else { return nil }
+            return (resource, text)
+        }
+
+        guard let (_, license) = chapterText("license") else { return [] }
+        return ["earthquake-safety", "prepare-offline"].compactMap { chapter in
+            guard let (resource, text) = chapterText(chapter) else { return nil }
+            return HouseholdSharePublicReference(id: "offline-starter-" + chapter,
+                                                 title: resource.title, text: text + "\n\n" + license)
+        }
+    }
 
     private var selectedReferences: [HouseholdSharePublicReference] {
         publicReferences.filter { selectedReferenceIDs.contains($0.id) }
