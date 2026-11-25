@@ -179,7 +179,7 @@ private struct LibraryView: View {
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search installed articles")
         .toolbar {
             NavigationLink {
-                PacksView(downloads: packs)
+                PacksView(downloads: packs, library: library) { await indexing.refresh() }
             } label: {
                 Label("Content packs", systemImage: "arrow.down.circle")
             }
