@@ -1,40 +1,86 @@
 import CryptoKit
 import Foundation
 
-/// The first public item known to both builds. Only these exact bytes can enter this store.
+/// Storage for one public catalog edition. Only the exact pinned bytes can enter it.
 struct NearbyPublicReference: Sendable {
-    static let id = manifest.id
-    static let title = "Household check-in worksheet"
-    static let expectedByteCount = manifest.byteCount
-    static let resumePin = "\(manifest.id)-\(manifest.sha256)"
+    struct Entry: Equatable, Sendable {
+        let manifest: NearbyPublicManifest
+        let title: String
 
-    private static let manifest = NearbyPublicManifest(
-        id: "household-check-in-v1", byteCount: 1_977,
-        sha256: "4a3386d0c610571465db46352f3f395d768867e899e711de363b42cae4a9b18c"
-    )!
+        var id: String { manifest.id }
+        fileprivate var resumePin: String { "\(id)-\(manifest.sha256)" }
+    }
 
+    static let worksheet = Entry(
+        manifest: NearbyPublicManifest(
+            id: "household-check-in-v1", byteCount: 1_977,
+            sha256: "4a3386d0c610571465db46352f3f395d768867e899e711de363b42cae4a9b18c"
+        )!,
+        title: "Household check-in worksheet"
+    )
+    static let mainCatalog: [Entry] = [
+        worksheet,
+        Entry(
+            manifest: NearbyPublicManifest(
+                id: "neighborhood-status-log-v1", byteCount: 2_219,
+                sha256: "965c18d24c359b38e481b12d172a97f704208540260bc7900cd7c6d01ab71411"
+            )!,
+            title: "Neighborhood status log"
+        )
+    ]
+
+    // The original worksheet entry points are also used by the Darwin fixtures.
+    static let id = worksheet.id
+    static let title = worksheet.title
+    static let expectedByteCount = worksheet.manifest.byteCount
+    static let resumePin = worksheet.resumePin
+
+    static var catalogReferences: [Self] {
+        mainCatalog.map { entry in
+            Self(entry: entry, bundledFile: Bundle.main.url(forResource: entry.id, withExtension: "txt"))
+        }
+    }
+
+    let entry: Entry
     private let directory: URL
     private let bundledFile: URL?
     private let availableCapacity: @Sendable (URL) -> Int64?
 
+    var resumePin: String { entry.resumePin }
+
+    private static let defaultDirectory = URL.applicationSupportDirectory
+        .appendingPathComponent("NearbyPublic", isDirectory: true)
+
     init(
-        directory: URL = .applicationSupportDirectory.appendingPathComponent("NearbyPublic", isDirectory: true),
+        directory: URL = NearbyPublicReference.defaultDirectory,
         bundledFile: URL? = Bundle.main.url(forResource: NearbyPublicReference.id, withExtension: "txt"),
         availableCapacity: @escaping @Sendable (URL) -> Int64? = { NearbyPublicReference.volumeCapacity(at: $0) }
     ) {
+        self.init(entry: Self.worksheet, directory: directory, bundledFile: bundledFile,
+                  availableCapacity: availableCapacity)
+    }
+
+    init(
+        entry: Entry,
+        directory: URL = NearbyPublicReference.defaultDirectory,
+        bundledFile: URL? = nil,
+        availableCapacity: @escaping @Sendable (URL) -> Int64? = { NearbyPublicReference.volumeCapacity(at: $0) }
+    ) {
+        self.entry = entry
         self.directory = directory
         self.bundledFile = bundledFile
         self.availableCapacity = availableCapacity
     }
 
     func loadVerified() -> Data? {
-        if let bundledFile, let bytes = Self.readVerified(at: bundledFile) { return bytes }
-        return Self.readVerified(at: receivedFile)
+        if let bundledFile, let bytes = readVerified(at: bundledFile) { return bytes }
+        return readVerified(at: receivedFile)
     }
 
     func admission() -> NearbyPublicManifest.Admission {
-        let verified: Set<String> = loadVerified() == nil ? [] : [Self.manifest.sha256]
-        return Self.manifest.admit(Self.manifest, verifiedDigests: verified, availableBytes: storageCapacity())
+        let manifest = entry.manifest
+        let verified: Set<String> = loadVerified() == nil ? [] : [manifest.sha256]
+        return manifest.admit(manifest, verifiedDigests: verified, availableBytes: storageCapacity())
     }
 
     private func storageCapacity() -> Int64? {
@@ -49,7 +95,7 @@ struct NearbyPublicReference: Sendable {
     }
 
     func receiveVerified(_ data: Data) throws -> Bool {
-        guard Self.matches(data) else { throw StoreError.invalidReference }
+        guard matches(data) else { throw StoreError.invalidReference }
         switch admission() {
         case .alreadyInstalled: return false
         case .receive: break
@@ -74,15 +120,15 @@ struct NearbyPublicReference: Sendable {
 
     // The filename binds the prefix to this exact catalog edition and digest.
     private var checkpointFile: URL {
-        directory.appendingPathComponent("\(Self.resumePin).partial")
+        directory.appendingPathComponent("\(resumePin).partial")
     }
 
     func checkpoint() -> Data {
-        NearbyPublicResume.load(from: checkpointFile, byteCount: Self.expectedByteCount)
+        NearbyPublicResume.load(from: checkpointFile, byteCount: entry.manifest.byteCount)
     }
 
     func saveCheckpoint(_ data: Data) throws {
-        guard (1..<Self.expectedByteCount).contains(data.count) else { throw StoreError.invalidReference }
+        guard (1..<entry.manifest.byteCount).contains(data.count) else { throw StoreError.invalidReference }
         guard admission() == .receive else { throw StoreError.insufficientStorage }
         try prepareDirectory()
         try data.write(to: checkpointFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
@@ -93,22 +139,23 @@ struct NearbyPublicReference: Sendable {
     }
 
     private var receivedFile: URL {
-        directory.appendingPathComponent(Self.id).appendingPathExtension("txt")
+        directory.appendingPathComponent(entry.id).appendingPathExtension("txt")
     }
 
-    private static func readVerified(at url: URL) -> Data? {
+    private func readVerified(at url: URL) -> Data? {
+        let size = entry.manifest.byteCount
         guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
               values.isRegularFile == true, values.isSymbolicLink != true,
-              values.fileSize == Self.expectedByteCount,
+              values.fileSize == size, size < Int.max,
               let file = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? file.close() }
-        guard let bytes = try? file.read(upToCount: Self.expectedByteCount + 1), matches(bytes) else { return nil }
+        guard let bytes = try? file.read(upToCount: size + 1), matches(bytes) else { return nil }
         return bytes
     }
 
-    private static func matches(_ bytes: Data) -> Bool {
-        bytes.count == Self.expectedByteCount &&
-            SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined() == Self.manifest.sha256
+    private func matches(_ bytes: Data) -> Bool {
+        bytes.count == entry.manifest.byteCount &&
+            SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined() == entry.manifest.sha256
     }
 
     private static func volumeCapacity(at url: URL) -> Int64? {

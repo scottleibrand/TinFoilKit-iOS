@@ -6,8 +6,9 @@ struct VerifyNearbyPublic {
         let arguments = CommandLine.arguments
         guard arguments.count == 4 || arguments.count == 5 else { throw FixtureError.invalidArguments }
         let mode = arguments[1]
+        let directory = URL(fileURLWithPath: arguments[2])
         let reference = NearbyPublicReference(
-            directory: URL(fileURLWithPath: arguments[2]),
+            directory: directory,
             bundledFile: arguments[3] == "-" ? nil : URL(fileURLWithPath: arguments[3]),
             availableCapacity: { _ in 100_000_000 }
         )
@@ -18,7 +19,17 @@ struct VerifyNearbyPublic {
             try reference.saveCheckpoint(prefix)
             guard reference.checkpoint() == prefix else { throw FixtureError.unexpectedTransfer }
         }
-        let discovery = NearbyDiscovery(publicReference: reference)
+        var references = [reference]
+        if mode.hasSuffix("-catalog") {
+            guard let entry = NearbyPublicReference.mainCatalog.first(where: { $0.id == "neighborhood-status-log-v1" }),
+                  mode != "serve-catalog" || arguments.count == 5 else { throw FixtureError.invalidArguments }
+            references.append(NearbyPublicReference(
+                entry: entry, directory: directory,
+                bundledFile: mode == "serve-catalog" ? URL(fileURLWithPath: arguments[4]) : nil,
+                availableCapacity: { _ in 100_000_000 }
+            ))
+        }
+        let discovery = NearbyDiscovery(publicReferences: references)
         let draining = mode.hasSuffix("-draining")
         var stoppedDiscoveryForTransfer = false
         if draining {
@@ -33,14 +44,14 @@ struct VerifyNearbyPublic {
         defer { discovery.stop() }
 
         switch mode {
-        case "serve", "serve-draining":
-            guard reference.loadVerified() != nil else { throw FixtureError.missingReference }
+        case "serve", "serve-draining", "serve-catalog":
+            guard references.allSatisfy({ $0.loadVerified() != nil }) else { throw FixtureError.missingReference }
             try await Task.sleep(for: .seconds(50))
-        case "receive", "receive-draining", "receive-checkpoint", "disabled":
+        case "receive", "receive-draining", "receive-checkpoint", "receive-catalog", "disabled":
             let deadline = ContinuousClock.now + .seconds(mode == "disabled" ? 5 : 26)
             while ContinuousClock.now < deadline {
-                if discovery.publicReferenceText != nil {
-                    guard mode != "disabled", reference.loadVerified() != nil,
+                if discovery.publicReferences.count == references.count {
+                    guard mode != "disabled", references.allSatisfy({ $0.loadVerified() != nil }),
                           !draining || stoppedDiscoveryForTransfer,
                           mode != "receive-checkpoint" || reference.checkpoint().isEmpty else {
                         throw FixtureError.unexpectedTransfer

@@ -32,3 +32,13 @@ wait "$sender" 2>/dev/null || true
 "$output/verify" serve-draining "$output/third" - &
 sender=$!
 "$output/verify" receive-draining "$output/fourth" -
+kill "$sender"
+wait "$sender" 2>/dev/null || true
+
+log=Resources/NearbyPublic/neighborhood-status-log-v1.txt
+"$output/verify" serve-catalog "$output/catalog-source" "$seed" "$log" &
+sender=$!
+"$output/verify" receive-catalog "$output/catalog-receiver" -
+cmp "$seed" "$output/catalog-receiver/household-check-in-v1.txt"
+cmp "$log" "$output/catalog-receiver/neighborhood-status-log-v1.txt"
+echo "Verified both catalog references on one Nearby listener."
