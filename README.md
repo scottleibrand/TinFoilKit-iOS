@@ -18,7 +18,7 @@ Press and hold an installed archive in Library to verify its checksum or remove 
 
 Library and Ask can search article text and PDF pages as indexes build. Indexing resumes after an interruption when storage is available. Results from PDFs open to the matching page. Ask can stream a cited answer on devices with Apple Intelligence, and you can turn its on-device model off from the options menu. With the model off or unavailable, Ask highlights short matching quotes and links to their saved sources. Choose **Include household notes in the on-device answer** to use your notes for one local answer.
 
-Open **Ask options → Offline Chat** for a conversation with the model on your phone. It needs Apple Intelligence and iOS 26 or later. The conversation lasts while the chat is open. Use Ask for answers that cite your saved references. [Apple’s on-device models](https://developer.apple.com/foundation-models-framework/)
+Open **Ask options → Offline Chat** for a conversation with the model on your phone. It needs Apple Intelligence and iOS 26 or later. On iOS 27 with a supported on-device model, choose **Attach photo** and ask about it in the same conversation. Select a photo already on the phone when offline. The app prepares the image locally and passes it to the on-device model. Photos and messages stay in the conversation until you close it. Use Ask for answers that cite your saved references. [Apple’s on-device models](https://developer.apple.com/foundation-models-framework/)
 
 In an open article, use the archive back and forward buttons to retrace followed links, and **Find on page** to search the current article. In a PDF, use **Find in document** to jump between matches. Both reader searches work offline.
 
@@ -70,7 +70,7 @@ Turn on **Notify me about interrupted downloads** in Nearby to get a rate-limite
 
 ## Build locally
 
-Use an Apple Silicon Mac with Xcode 26 or later, XcodeGen, Rust, Node.js, and Python 3. Preparation downloads the reader, map and routing dependencies plus a public ZIM test fixture. Generated files and external data are stored in `.build/`.
+Use an Apple Silicon Mac with Xcode 26 or later, XcodeGen, Rust, Node.js, and Python 3. Build with Xcode 27 or later to enable Offline Chat photo input. Preparation downloads the reader, map and routing dependencies plus a public ZIM test fixture. Generated files and external data are stored in `.build/`.
 
 ```sh
 rustup target add aarch64-apple-ios-sim
