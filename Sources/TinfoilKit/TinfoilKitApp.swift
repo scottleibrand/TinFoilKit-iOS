@@ -24,7 +24,7 @@ struct TinfoilKitApp: App {
     var body: some Scene {
         WindowGroup {
             TabView(selection: $selectedTab) {
-                LibraryView(library: .standard, packs: packs, indexing: indexing)
+                LibraryView(library: .standard, packs: packs, indexing: indexing, household: household)
                     .tabItem { Label("Library", systemImage: "books.vertical") }
                     .tag(Tab.library)
                 OfflineMapView(household: household, pendingMapRequest: $pendingMapRequest)
@@ -79,6 +79,7 @@ private struct LibraryView: View {
     let library: InstalledLibrary
     @ObservedObject var packs: PackDownloads
     @ObservedObject var indexing: LibraryIndexing
+    @ObservedObject var household: HouseholdStore
     @EnvironmentObject private var readingShelf: ReadingShelf
     private var archives: [InstalledArchive] { indexing.archives }
     private var hasLibraryItems: Bool {
@@ -190,7 +191,7 @@ private struct LibraryView: View {
                 Label("Desktop kit", systemImage: "desktopcomputer")
             }
             NavigationLink {
-                OfflineReadinessView(indexing: indexing)
+                OfflineReadinessView(indexing: indexing, household: household)
             } label: {
                 Label("Offline readiness", systemImage: "checkmark.circle")
             }
