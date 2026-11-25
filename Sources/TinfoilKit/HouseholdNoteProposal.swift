@@ -3,9 +3,9 @@ import Foundation
 enum HouseholdNoteProposal {
     static let maximumBodyBytes = 8_192
 
-    static func bodyLength(headers: [String: [String]]) -> Int? {
+    static func bodyLength(headers: [String: [String]], marker: String = "x-tinfoil-guest-note") -> Int? {
         // A browser must send the custom marker. An ordinary cross-site form can't add it.
-        guard headers["x-tinfoil-guest-note"] == ["1"], headers["transfer-encoding"] == nil,
+        guard headers[marker] == ["1"], headers["transfer-encoding"] == nil,
               let lengths = headers["content-length"], lengths.count == 1, let length = lengths.first,
               !length.isEmpty, length.utf8.allSatisfy({ (48...57).contains($0) }),
               let count = Int(length), (1...maximumBodyBytes).contains(count),
@@ -30,7 +30,7 @@ enum HouseholdNoteProposal {
         return note
     }
 
-    private static func decode(_ bytes: Data) -> String? {
+    static func decode(_ bytes: Data) -> String? {
         String(data: bytes, encoding: .utf8)?
             .replacingOccurrences(of: "+", with: " ")
             .removingPercentEncoding

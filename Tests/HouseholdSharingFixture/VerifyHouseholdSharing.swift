@@ -7,7 +7,7 @@ enum VerifyHouseholdSharing {
         let page = HouseholdSharePage(snapshot: HouseholdSnapshot(notes: "Meet by A & B\n<gate>", home: home))
         let publicReferences = try verifyPublicReferences()
         let publicPage = HouseholdSharePage(snapshot: HouseholdSnapshot(), publicReferences: publicReferences,
-                                            acceptsNotes: true)
+                                            acceptsNotes: true, acceptsPins: true)
         let loopback = HouseholdShareAddress(interface: "lo0", host: "127.0.0.1", address: 0x7f000001, mask: UInt32.max)
 
         let (events, emitter) = AsyncStream<HouseholdShareServer.Event>.makeStream()
@@ -33,6 +33,8 @@ enum VerifyHouseholdSharing {
         let mutation = noteRequest("note=Being+safe", at: link)
         let (_, mutationResponse) = try await browser.data(for: mutation)
         precondition((mutationResponse as? HTTPURLResponse)?.statusCode == 404)
+        let (_, disabledPin) = try await browser.data(for: pinRequest(at: link))
+        precondition((disabledPin as? HTTPURLResponse)?.statusCode == 404)
 
         let (body, response) = try await browser.data(from: link)
         let received = String(decoding: body, as: UTF8.self)
@@ -72,6 +74,7 @@ enum VerifyHouseholdSharing {
         precondition(publicHTML.contains("<h2>Neighborhood status log</h2>"))
         precondition(publicHTML.contains("out-of-area contact"))
         precondition(publicHTML.contains("Correction to earlier entry and correction time"))
+        precondition(publicHTML.contains("Suggest a map pin"))
         precondition(!publicHTML.contains("<h2>Notes</h2>") && !publicHTML.contains("<h2>Home</h2>"))
 
         let unmarked = noteRequest("note=Unmarked", at: newLink, marked: false)
@@ -84,7 +87,7 @@ enum VerifyHouseholdSharing {
         let submission = noteRequest("note=At+the+library", at: newLink)
         let (_, acceptedResponse) = try await browser.data(for: submission)
         precondition((acceptedResponse as? HTTPURLResponse)?.statusCode == 202)
-        guard case let .noteProposed(note) = await newIterator.next(), note == "At the library" else {
+        guard case let .proposal(.note(note)) = await newIterator.next(), note == "At the library" else {
             fatalError("No note reached the host")
         }
         let (_, busyResponse) = try await browser.data(for: submission)
@@ -96,11 +99,21 @@ enum VerifyHouseholdSharing {
         try store.saveNotes("Host notes edited since sharing began")
         try store.appendGuestNote(note)
         precondition(store.snapshot.notes == "Host notes edited since sharing began\n\nGuest note\nAt the library")
-        stoppable.finishNoteReview()
+        let (_, pinWhileReviewing) = try await browser.data(for: pinRequest(at: newLink))
+        precondition((pinWhileReviewing as? HTTPURLResponse)?.statusCode == 409)
+        stoppable.finishProposalReview()
+        let (_, pinAccepted) = try await browser.data(for: pinRequest(at: newLink))
+        precondition((pinAccepted as? HTTPURLResponse)?.statusCode == 202)
+        guard case let .proposal(.pin(pin)) = await newIterator.next(), pin.name == "Library", pin.latitude == 47.6,
+              pin.longitude == -122.3 else { fatalError("No pin reached the host") }
+        precondition(store.snapshot.pins.isEmpty)
+        try store.savePin(pin)
+        precondition(store.snapshot.pins == [pin] && store.snapshot.home == nil)
+        stoppable.finishProposalReview()
         let next = noteRequest("note=Second+message", at: newLink)
         let (_, nextResponse) = try await browser.data(for: next)
         precondition((nextResponse as? HTTPURLResponse)?.statusCode == 202)
-        guard case .noteProposed("Second message") = await newIterator.next() else {
+        guard case .proposal(.note("Second message")) = await newIterator.next() else {
             fatalError("The host could not receive another note")
         }
 
@@ -132,7 +145,7 @@ enum VerifyHouseholdSharing {
                 _ = try await browser.data(for: request)
                 try await Task.sleep(for: .milliseconds(50))
             } catch let error as URLError where error.code == .cannotConnectToHost || error.code == .networkConnectionLost {
-                print("Verified household viewing, public references, note review, link replacement, expiry, and manual stop.")
+                print("Verified household viewing, public references, note and pin review, link replacement, expiry, and manual stop.")
                 return
             }
         }
@@ -196,6 +209,12 @@ enum VerifyHouseholdSharing {
         request.httpBody = Data(body.utf8)
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         if marked { request.setValue("1", forHTTPHeaderField: "X-Tinfoil-Guest-Note") }
+        return request
+    }
+
+    private static func pinRequest(at url: URL) -> URLRequest {
+        var request = noteRequest("name=Library&coordinates=47.6%2C+-122.3&note=Side+entrance", at: url, marked: false)
+        request.setValue("1", forHTTPHeaderField: "X-Tinfoil-Guest-Pin")
         return request
     }
 
