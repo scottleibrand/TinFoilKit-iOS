@@ -79,7 +79,9 @@ struct LibraryPassages: Sendable {
 
     static func queries(for question: String, suggested: [String]) -> [String] {
         let original = words(in: question)
-        let keywords = original.filter { !filler.contains($0.lowercased()) }
+        let isSpanish = isSpanishQuestion(question, terms: original.map(folded))
+        let filler = isSpanish ? spanishFiller : englishFiller
+        let keywords = original.filter { !filler.contains(folded($0)) }
         let usable = keywords.isEmpty ? original : keywords
         let fallback: [String]
         if SearchIntent(question).isWaterServiceOutage {
@@ -87,10 +89,13 @@ struct LibraryPassages: Sendable {
                         "water electricity", "pumping electricity", "water generator", "water blackout", "water power"]
         } else {
             // Keep a shorter query and single-term candidates for sparse indexes.
+            let pairs = isSpanish ? zip(usable, usable.dropFirst()).suffix(4).map { first, second in
+                "\(first) \(second)"
+            } : []
             fallback = [original.prefix(12).joined(separator: " "),
                         usable.prefix(5).joined(separator: " "),
                         usable.prefix(2).joined(separator: " ")]
-                + usable.filter { $0.count > 1 }.suffix(8)
+                + pairs + usable.filter { $0.count > 1 }.suffix(isSpanish ? 5 : 8)
         }
         let cleanedSuggestions = suggested.compactMap { phrase -> String? in
             let terms = words(in: phrase)
@@ -99,7 +104,7 @@ struct LibraryPassages: Sendable {
         }.prefix(3)
         var seen: Set<String> = []
         return (Array(cleanedSuggestions) + fallback).filter { query in
-            let normalized = query.lowercased().split(separator: " ").sorted().joined(separator: " ")
+            let normalized = folded(query).split(separator: " ").sorted().joined(separator: " ")
             return !normalized.isEmpty && seen.insert(normalized).inserted
         }
     }
@@ -108,13 +113,25 @@ struct LibraryPassages: Sendable {
         text.prefix(500).split { !$0.isLetter && !$0.isNumber }.map(String.init)
     }
 
+    private static func folded(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+    }
+
+    private static func isSpanishQuestion(_ question: String, terms: [String]) -> Bool {
+        if question.prefix(500).contains("¿") { return true }
+        guard let first = terms.first else { return false }
+        let hasSpanishOpening = spanishQuestionWords.contains(first) || terms.starts(with: ["por", "que"])
+        return hasSpanishOpening && terms.contains(where: spanishConnectors.contains)
+    }
+
     struct SearchIntent: Sendable {
         let isWaterServiceOutage: Bool
         private let topic: Set<String>
 
         init(_ question: String) {
-            let terms = LibraryPassages.words(in: question).map { $0.lowercased() }
-            topic = Set(terms).subtracting(LibraryPassages.filler)
+            let terms = LibraryPassages.words(in: question).map(LibraryPassages.folded)
+            let isSpanish = LibraryPassages.isSpanishQuestion(question, terms: terms)
+            topic = Set(terms).subtracting(isSpanish ? LibraryPassages.spanishFiller : LibraryPassages.englishFiller)
             let hasService = Self.hasPhrase(Self.waterUtilityQuestion, in: terms)
                 || (terms.contains("water") && Self.hasPhrase(["keep working", "still work", "stay on"], in: terms))
             let hasOutage = Self.hasPhrase(Self.powerInterruption, in: terms)
@@ -124,8 +141,8 @@ struct LibraryPassages: Sendable {
 
         func score(_ match: ArticleIndex.Match, rank: Int, queryOrder: Int) -> Double? {
             guard !match.excerpt.isEmpty else { return nil }
-            let title = LibraryPassages.words(in: match.title).map { $0.lowercased() }
-            let excerpt = LibraryPassages.words(in: match.excerpt).map { $0.lowercased() }
+            let title = LibraryPassages.words(in: match.title).map(LibraryPassages.folded)
+            let excerpt = LibraryPassages.words(in: match.excerpt).map(LibraryPassages.folded)
             var relationshipScore = 0.0
             if isWaterServiceOutage {
                 let serviceInExcerpt = Self.hasPhrase(Self.waterService, in: excerpt)
@@ -166,10 +183,24 @@ struct LibraryPassages: Sendable {
         ]
     }
 
-    private static let filler: Set<String> = [
+    private static let englishFiller: Set<String> = [
         "a", "an", "and", "are", "as", "at", "be", "by", "can", "could", "did", "do", "does", "for", "from",
         "had", "has", "have", "how", "i", "if", "in", "is", "it", "long", "me", "my", "of", "on", "or", "our", "please",
         "should", "that", "the", "their", "this", "to", "was", "we", "were", "what", "when", "where", "which",
         "who", "why", "will", "with", "would", "you", "your"
     ]
+
+    private static let spanishQuestionWords: Set<String> = [
+        "como", "cual", "cuales", "cuando", "cuanto", "cuanta", "cuantos", "cuantas", "donde", "que", "quien",
+        "quienes", "puede", "puedo", "podria"
+    ]
+
+    private static let spanishConnectors: Set<String> = [
+        "al", "con", "del", "durante", "el", "la", "las", "los", "para", "por", "sin", "una", "unos", "unas"
+    ]
+
+    private static let spanishFiller = spanishQuestionWords.union(spanishConnectors).union([
+        "a", "de", "debe", "deben", "deberia", "deberian", "en", "es", "esta", "estan", "este", "esto", "hay",
+        "lo", "me", "mi", "mis", "nos", "o", "podemos", "pueden", "se", "ser", "si", "son", "su", "sus", "un", "y"
+    ])
 }
