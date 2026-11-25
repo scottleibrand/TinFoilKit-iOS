@@ -25,7 +25,14 @@ enum RegionalBundleCatalog {
         #if DEBUG
         if let fixture = fixtureEntry(arguments: ProcessInfo.processInfo.arguments) { return [fixture] }
         #endif
-        return []
+        guard let source = try? RegionalBundleDownloadSource(
+            url: "https://github.com/scottleibrand/TinFoilKit-iOS/releases/download/region-seattle-2026-11-21/manifest.json",
+            sha256: "3480364f81f25611121baf9a22b9f0ad1a5a9952169e10594caa9ebfac80a352"
+        ) else { return [] }
+        return [
+            Entry(id: "seattle-2026-11-21", region: "Seattle area", edition: "2026-11-21T00:00:00Z",
+                  byteCount: 318_339_726, source: source)
+        ]
     }
 
     #if DEBUG

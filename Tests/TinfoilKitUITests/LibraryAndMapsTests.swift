@@ -422,6 +422,59 @@ final class LibraryAndMapsTests: XCTestCase {
         wait(for: [removed], timeout: 5)
     }
 
+    func testPublishedSeattleBundleInstallsAndRoutesAfterRelaunch() throws {
+        guard ProcessInfo.processInfo.environment["TINFOILKIT_TEST_PUBLISHED_REGION"] == "1" else {
+            throw XCTSkip("Enable the public regional download smoke test on a dedicated simulator.")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-mapDownloadPolicy", "off", "-hasSeenOfflineStarterGuide", "YES"]
+        app.launch()
+        openRegionalDownload(in: app)
+        let region = app.buttons["regional-catalog-seattle-2026-11-21"]
+        XCTAssertTrue(region.waitForExistence(timeout: 10))
+        region.tap()
+        app.buttons["Review download"].tap()
+        let install = app.buttons["Download and install"]
+        XCTAssertTrue(install.waitForExistence(timeout: 30))
+        install.tap()
+        let credit = app.descendants(matching: .any)["© OpenStreetMap contributors · Protomaps"].firstMatch
+        XCTAssertTrue(credit.waitForExistence(timeout: 180), "Expected the downloaded basemap to finish installing.")
+
+        app.terminate()
+        app.launch()
+        app.tabBars.buttons["Map"].tap()
+        XCTAssertTrue(credit.waitForExistence(timeout: 15))
+        for mode in ["Walking", "Driving"] {
+            app.buttons["Directions"].tap()
+            selectPublishedPlace(in: app, endpoint: "origin", query: "325 9th Avenue", title: "325 9th Avenue")
+            selectPublishedPlace(in: app, endpoint: "destination", query: "Swedish First Hill",
+                                 title: "Swedish First Hill Medical Center")
+            let travelMode = app.segmentedControls.buttons[mode]
+            XCTAssertTrue(travelMode.waitForExistence(timeout: 5))
+            travelMode.tap()
+            app.buttons["Find offline route"].tap()
+            let summary = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "\(mode) · ")).firstMatch
+            XCTAssertTrue(summary.waitForExistence(timeout: 20))
+            app.buttons["Route steps"].tap()
+            XCTAssertTrue(app.navigationBars["Route steps"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.cells.firstMatch.exists)
+            app.buttons["Done"].tap()
+        }
+    }
+
+    private func selectPublishedPlace(in app: XCUIApplication, endpoint: String, query: String, title: String) {
+        let field = app.buttons["route-endpoint-\(endpoint)"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText(query)
+        let result = app.staticTexts[title].firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        result.tap()
+    }
+
     private func verifyFixtureRoute(in app: XCUIApplication, mode: String) {
         let directions = app.buttons["Directions"]
         XCTAssertTrue(directions.waitForExistence(timeout: 8))
