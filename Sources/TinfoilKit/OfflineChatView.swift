@@ -46,7 +46,9 @@ private struct OfflineConversation: View {
     private var prompt: String { draft.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private var supportsPhotos: Bool {
+        #if compiler(>=6.4)
         if #available(iOS 27, *) { return SystemLanguageModel.default.capabilities.contains(.vision) }
+        #endif
         return false
     }
 
@@ -67,11 +69,10 @@ private struct OfflineConversation: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(message.isUser ? "You" : "Offline model").font(.subheadline.weight(.semibold))
                             if let photo = message.photo {
-                                Image(decorative: photo, scale: 1)
+                                Image(photo, scale: 1, label: Text("Attached photo"))
                                     .resizable()
                                     .scaledToFit()
                                     .frame(maxHeight: 200, alignment: .leading)
-                                    .accessibilityLabel("Attached photo")
                             }
                             if message.text.isEmpty {
                                 ProgressView("Preparing reply")
@@ -206,15 +207,7 @@ private struct OfflineConversation: View {
         }
         do {
             let options = GenerationOptions(maximumResponseTokens: 500)
-            let stream: LanguageModelSession.ResponseStream<String>
-            if #available(iOS 27, *), let photo {
-                stream = session.streamResponse(options: options) {
-                    prompt
-                    Attachment(photo)
-                }
-            } else {
-                stream = session.streamResponse(to: prompt, options: options)
-            }
+            let stream = responseStream(to: prompt, photo: photo, options: options)
             for try await update in stream {
                 try Task.checkCancellation()
                 messages[reply].text = update.content
@@ -235,6 +228,19 @@ private struct OfflineConversation: View {
         }
     }
 
+    private func responseStream(to prompt: String, photo: CGImage?, options: GenerationOptions)
+        -> LanguageModelSession.ResponseStream<String> {
+        #if compiler(>=6.4)
+        if #available(iOS 27, *), let photo {
+            return session.streamResponse(options: options) {
+                prompt
+                Attachment(photo)
+            }
+        }
+        #endif
+        return session.streamResponse(to: prompt, options: options)
+    }
+
     private func reset() {
         guard response == nil else { return }
         session = Self.makeSession()
@@ -253,8 +259,10 @@ private struct OfflineConversation: View {
     }
 
     private static func contextExceeded(_ error: Error) -> Bool {
+        #if compiler(>=6.4)
         if #available(iOS 27, *), let error = error as? LanguageModelError,
            case .contextSizeExceeded = error { return true }
+        #endif
         if let error = error as? LanguageModelSession.GenerationError,
            case .exceededContextWindowSize = error { return true }
         return false
