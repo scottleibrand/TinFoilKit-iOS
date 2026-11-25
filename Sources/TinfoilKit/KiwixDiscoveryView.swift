@@ -6,6 +6,7 @@ struct KiwixDiscoveryView: View {
     @ObservedObject var downloads: PackDownloads
     let library: InstalledLibrary
     let onImport: () async -> Void
+    var editionSeries: KiwixCatalog.EditionSeries? = nil
     @State private var query = ""
     @State private var books: [KiwixCatalog.Book]?
     @State private var searchTask: Task<Void, Never>?
@@ -14,24 +15,35 @@ struct KiwixDiscoveryView: View {
     var body: some View {
         List {
             Section {
-                TextField("Book title or topic", text: $query)
-                    .textInputAutocapitalization(.never)
-                    .submitLabel(.search)
-                    .onSubmit(search)
-                    .disabled(searchTask != nil)
-                Button("Search Kiwix", systemImage: "magnifyingglass", action: search)
-                    .disabled(searchTask != nil || query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if editionSeries == nil {
+                    TextField("Book title or topic", text: $query)
+                        .textInputAutocapitalization(.never)
+                        .submitLabel(.search)
+                        .onSubmit(search)
+                        .disabled(searchTask != nil)
+                }
+                Button(editionSeries == nil ? "Search Kiwix" : "Check Kiwix for newer editions",
+                       systemImage: "magnifyingglass", action: search)
+                    .disabled(searchTask != nil ||
+                              (editionSeries == nil && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
                 if searchTask != nil {
                     ProgressView("Searching the publisher catalog")
                     Button("Cancel search", role: .cancel) { searchTask?.cancel() }
                 }
                 if let error { Text(error).foregroundStyle(.secondary) }
             } footer: {
-                Text("Search sends the words you enter to the online Kiwix catalog. Use Library to search your installed books offline.")
+                if let editionSeries {
+                    Text("Checks Kiwix for editions newer than the catalog’s \(editionSeries.baseline) edition. Reviewed publisher downloads install separately.")
+                } else {
+                    Text("Search sends the words you enter to the online Kiwix catalog. Use Library to search your installed books offline.")
+                }
             }
             if let books {
                 Section {
-                    if books.isEmpty { Text("No matching downloadable books.").foregroundStyle(.secondary) }
+                    if books.isEmpty {
+                        Text(editionSeries == nil ? "No matching downloadable books." :
+                             "Kiwix returned no newer editions for this pack.").foregroundStyle(.secondary)
+                    }
                     ForEach(books) { book in
                         NavigationLink {
                             KiwixBookView(book: book, downloads: downloads, library: library, onImport: onImport)
@@ -49,11 +61,13 @@ struct KiwixDiscoveryView: View {
                 } header: {
                     Text("Publisher results")
                 } footer: {
-                    Text("Search shows up to \(KiwixPublisherClient.resultLimit) books. Narrow the topic to find a specific edition.")
+                    if editionSeries == nil {
+                        Text("Search shows up to \(KiwixPublisherClient.resultLimit) books. Narrow the topic to find a specific edition.")
+                    }
                 }
             }
         }
-        .navigationTitle("Find publisher books")
+        .navigationTitle(editionSeries == nil ? "Find publisher books" : "Newer editions")
         .onChange(of: query) {
             books = nil
             error = nil
@@ -69,7 +83,11 @@ struct KiwixDiscoveryView: View {
         searchTask = Task { @MainActor in
             defer { searchTask = nil }
             do {
-                let results = try await KiwixPublisherClient.search(requested)
+                let results = if let editionSeries {
+                    try await KiwixPublisherClient.newerEditions(editionSeries)
+                } else {
+                    try await KiwixPublisherClient.search(requested)
+                }
                 try Task.checkCancellation()
                 books = results
             } catch where Task.isCancelled {

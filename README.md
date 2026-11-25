@@ -30,6 +30,8 @@ Use **Queue for GPT** or **Queue for Claude** in Ask online to review and approv
 
 After finding an article or PDF in your browser, copy its link and paste it into **Ask online → Save a web source**. You can also open **Saved web sources** from Ask options. Ask can cite readable text the publisher allows the app to save, and you can reopen or remove the source from that list. These copies stay on the device. Saved online answers remain available in their own results section. Offline Ask uses installed references and readable saved source copies for citations.
 
+Choose **Find newer publisher editions** on a catalog pack to check Kiwix for the same language and archive variant. A newer edition is available as an individual download after you review the publisher’s file details.
+
 Use **Library → Content packs → Find publisher books** to search Kiwix for more offline archives. This sends your typed search to Kiwix. Open a result and choose **Check publisher file** for the exact size and SHA-256. Choose **Download** for Wi-Fi or explicitly allow cellular in the download options. **Publisher downloads** in Content Packs shows approved transfers after relaunch, with pause, resume, and retry controls. The app installs the archive for offline reading and search after verification. You can also save the archive from Kiwix to Files and choose **Verify and import downloaded ZIM**.
 
 For questions about water service during a power outage, include your utility or service area. Ask looks for a saved reference that matches the area and quotes the passage if it gives an operating duration. The cited source shows which facilities and conditions the statement covers.
