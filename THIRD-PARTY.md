@@ -57,8 +57,11 @@ Valhalla Mobile packages Valhalla and its dependencies. [Scripts/routing/README.
   - Wikipedia packs and Appropedia: CC BY-SA. Images carry their own licenses.
   - iFixit: CC BY-NC-SA 3.0, which prohibits commercial use.
   - The water and field medicine libraries: collections of documents under their authors' individual terms.
-- **Publisher book discovery:** searches the official Kiwix OPDS catalog and reads per-edition Metalink metadata from Kiwix. The result carries publisher attribution and an archive-specific SHA-256 and file size. The app can download a selected edition from the publisher or verify an edition supplied through Files. Content terms vary by archive and original work. Discovered editions are for local use and have no blanket redistribution permission. No Kiwix code is included for discovery. [Kiwix catalog](https://library.kiwix.org/) · [Kiwix terms](https://get.kiwix.org/en/terms-conditions/)
 - **Printable references:** Household prints page ranges from installed packs. They include *Where There Is No Doctor* (Hesperian Health Guides) and Washington State Department of Health guidance, under their publishers' terms.
+
+### Publisher book discovery
+
+The app searches the official Kiwix OPDS catalog and reads per-edition Metalink metadata from Kiwix. The result carries publisher attribution, exact file size and SHA-256. The app can download a selected edition or verify a copy supplied through Files. Discovered editions are for local use and carry the terms of their original works. The app includes its own catalog and Metalink readers. [Kiwix catalog](https://library.kiwix.org/) · [Kiwix terms](https://get.kiwix.org/en/terms-conditions/)
 
 ## Build and test tools
 
