@@ -39,6 +39,11 @@ struct PacksView: View {
             if let error = PackCatalog.loadError {
                 Text(error).foregroundStyle(.secondary)
             }
+            NavigationLink {
+                PortableLibraryView(downloads: downloads)
+            } label: {
+                Label("Install catalog packs from Files", systemImage: "folder")
+            }
             Picker("Language", selection: $language) {
                 Text("All languages").tag(nil as PackCatalog.Language?)
                 ForEach(PackCatalog.Language.allCases, id: \.self) { option in

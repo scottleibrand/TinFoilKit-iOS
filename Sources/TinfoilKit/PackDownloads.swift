@@ -168,6 +168,35 @@ final class PackDownloads: ObservableObject {
         }
     }
 
+    func canInstallLocalCopy(_ pack: PublishedPack) -> Bool {
+        let key = pack.editionKey
+        return !restoring && canStart(pack) && updateTarget(key) == nil && repairTarget(key) == nil
+    }
+
+    func installLocalCopy(_ match: PortableLibraryFolder.Match, progress: @escaping @Sendable (Double) -> Void) async throws {
+        let pack = match.pack
+        let key = pack.editionKey
+        guard Self.catalog.contains(pack), canInstallLocalCopy(pack) else {
+            throw LocalCopyUnavailable()
+        }
+        let previous = statuses[key]
+        statuses[key] = .verifying
+        do {
+            try await library.installPack(pack, from: match.file, progress: progress)
+            transfer.clearResume(key)
+            try? FileManager.default.removeItem(at: transfer.downloadURL(key))
+            statuses[key] = .installed
+            installedRevision += 1
+        } catch {
+            statuses[key] = previous
+            throw error
+        }
+    }
+
+    private struct LocalCopyUnavailable: LocalizedError {
+        var errorDescription: String? { "This edition is already installed or has an archive operation in progress." }
+    }
+
     func allowsCellular(for pack: PublishedPack) -> Bool {
         tasks[pack.editionKey]?.network == .cellularAllowed
     }
