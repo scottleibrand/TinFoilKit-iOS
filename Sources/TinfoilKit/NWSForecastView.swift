@@ -6,22 +6,35 @@ struct NWSForecastSection: View {
 
     var body: some View {
         Section {
-            forecastRow(.daily)
-            forecastRow(.hourly)
-            if let error = store.forecastErrorMessage {
-                Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.secondary)
-            }
-            if store.forecastIsRefreshing {
-                ProgressView("Checking Seattle forecasts")
-            } else {
-                Button("Check Seattle forecasts", systemImage: "arrow.clockwise") {
-                    Task { await store.refreshForecasts() }
-                }
+            Toggle("Use saved Home for forecasts", isOn: Binding(
+                get: { store.homeForecastsEnabled },
+                set: { store.setHomeForecastsEnabled($0) }
+            ))
+            if store.forecastLocation != nil {
+                forecastRows
+            } else if store.homeForecastsEnabled {
+                Text("Set Home in Household to get a forecast.").foregroundStyle(.secondary)
             }
         } header: {
-            Text("Seattle city center forecasts")
+            Text("Home forecast")
         } footer: {
-            Text("Forecasts use a fixed city-center location. Times are Pacific Time. Saved forecasts are available offline.")
+            Text("When enabled, forecast checks send Home coordinates rounded to about one kilometer to the National Weather Service. Saved forecasts are available offline. Forecast times use your device’s time zone.")
+        }
+    }
+
+    @ViewBuilder
+    private var forecastRows: some View {
+        forecastRow(.daily)
+        forecastRow(.hourly)
+        if let error = store.forecastErrorMessage {
+            Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.secondary)
+        }
+        if store.forecastIsRefreshing {
+            ProgressView("Checking Home forecasts")
+        } else {
+            Button("Check Home forecasts", systemImage: "arrow.clockwise") {
+                Task { await store.refreshForecasts() }
+            }
         }
     }
 
@@ -55,7 +68,7 @@ private struct NWSForecastDetailsView: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             List {
-                if store.area == "WA", let snapshot = store.forecasts[kind] {
+                if let snapshot = store.forecasts[kind] {
                     forecastStatus(snapshot, at: context.date)
                     periods(snapshot.periods, at: context.date)
                 } else {
@@ -82,7 +95,7 @@ private struct NWSForecastDetailsView: View {
                 Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.secondary)
             }
         } header: {
-            Text("Seattle city center · Pacific Time")
+            Text("Saved Home forecast")
         }
     }
 
@@ -122,8 +135,6 @@ private struct NWSForecastDetailsView: View {
 
 private enum NWSForecastDisplay {
     static let staleAfter: TimeInterval = 3 * 60 * 60
-    private static let seattleTime = TimeZone(identifier: "America/Los_Angeles")!
-    private static let dateStyle = Date.FormatStyle(date: .abbreviated, time: .shortened, timeZone: seattleTime)
 
     static func title(_ kind: NWSForecastKind) -> String {
         switch kind {
@@ -133,7 +144,7 @@ private enum NWSForecastDisplay {
     }
 
     static func timestamp(_ date: Date) -> String {
-        date.formatted(dateStyle)
+        date.formatted(date: .abbreviated, time: .shortened)
     }
 
     static func status(_ snapshot: NWSForecastSnapshot, at date: Date) -> String? {

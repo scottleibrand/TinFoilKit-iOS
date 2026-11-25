@@ -17,7 +17,14 @@ enum NWSForecastError: LocalizedError, Equatable {
 }
 
 struct NWSForecastPoint: Codable, Equatable, Sendable {
-    static let endpoint = URL(string: "https://api.weather.gov/points/47.6062,-122.3321")!
+    static func endpoint(latitude: Double, longitude: Double) -> URL? {
+        guard (-90...90).contains(latitude), (-180...180).contains(longitude) else { return nil }
+        let latitude = (latitude * 100).rounded() / 100 + 0
+        let longitude = (longitude * 100).rounded() / 100 + 0
+        let point = String(format: "%.2f,%.2f", locale: Locale(identifier: "en_US_POSIX"), latitude, longitude)
+        return URL(string: "https://api.weather.gov/points/" + point)
+    }
+
     static let maxResponseBytes = 65_536
 
     let fetchedAt: Date

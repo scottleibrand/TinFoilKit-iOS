@@ -71,6 +71,9 @@ struct TinfoilKitApp: App {
                     packs.archiveRemoved(archive)
                 }
             }
+            .onChange(of: household.snapshot.home, initial: true) {
+                nwsAlerts.setForecastHome(household.snapshot.home)
+            }
             .onChange(of: scenePhase, initial: true) {
                 nearby.updatePhase(scenePhase)
                 nwsAlerts.setForeground(scenePhase == .active)

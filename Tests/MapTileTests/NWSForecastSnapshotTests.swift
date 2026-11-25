@@ -7,15 +7,54 @@ final class NWSForecastSnapshotTests: XCTestCase {
     private let sourceTime = "2026-11-24T20:26:12+00:00"
     private let checkedAt = ISO8601DateFormatter().date(from: "2026-11-24T23:30:00Z")!
 
-    func testSeattlePointURLsAndCacheRoundTrip() throws {
+    func testPointURLsAndCacheRoundTrip() throws {
         let point = try NWSForecastPoint.decode(pointDocument(daily: dailyURL, hourly: dailyURL + "/hourly"),
                                                 fetchedAt: checkedAt)
-        XCTAssertEqual(NWSForecastPoint.endpoint.absoluteString, "https://api.weather.gov/points/47.6062,-122.3321")
+        XCTAssertEqual(NWSForecastPoint.endpoint(latitude: 45.5231, longitude: -122.6765)?.absoluteString,
+                       "https://api.weather.gov/points/45.52,-122.68")
+        XCTAssertNil(NWSForecastPoint.endpoint(latitude: .nan, longitude: 0))
+        XCTAssertNil(NWSForecastPoint.endpoint(latitude: 40, longitude: 181))
         XCTAssertEqual(point.url(for: .daily).absoluteString, dailyURL)
         XCTAssertEqual(point.url(for: .hourly).absoluteString, dailyURL + "/hourly")
         XCTAssertEqual(point.fetchedAt, checkedAt)
         let cached = try JSONDecoder().decode(NWSForecastPoint.self, from: JSONEncoder().encode(point))
         XCTAssertEqual(cached, point)
+    }
+
+    @MainActor
+    func testHomeForecastOptInLoadsOnlyTheSelectedLocationOffline() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let suite = "NWSForecastTest." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            defaults.removePersistentDomain(forName: suite)
+        }
+        let home = HouseholdPlace(name: "Home", latitude: 45.5231, longitude: -122.6765)
+        let endpoint = try XCTUnwrap(NWSForecastPoint.endpoint(latitude: home.latitude, longitude: home.longitude))
+        let directory = root.appendingPathComponent("HomeForecasts").appendingPathComponent(endpoint.lastPathComponent)
+        let snapshot = try NWSForecastSnapshot.decode(
+            forecastDocument([period(id: 1)]), kind: .daily, checkedAt: checkedAt,
+            expiresAt: nil, etag: nil, lastModified: nil
+        )
+        try NWSForecastCache(directory: directory).write(.init(endpoint: try XCTUnwrap(URL(string: dailyURL)),
+                                                                 snapshot: snapshot))
+        let store = NWSAlertStore(defaults: defaults, cache: NWSAlertCache(directory: root))
+        store.setForecastHome(home)
+        XCTAssertNil(store.forecastLocation)
+        XCTAssertTrue(store.forecasts.isEmpty)
+        store.setHomeForecastsEnabled(true)
+        XCTAssertEqual(store.forecastLocation, endpoint)
+        XCTAssertEqual(store.forecasts[.daily], snapshot)
+
+        let reopened = NWSAlertStore(defaults: defaults, cache: NWSAlertCache(directory: root))
+        reopened.setForecastHome(HouseholdPlace(name: "Elsewhere", latitude: 38.89, longitude: -77.03))
+        XCTAssertTrue(reopened.forecasts.isEmpty)
+        reopened.setForecastHome(home)
+        XCTAssertEqual(reopened.forecasts[.daily], snapshot)
+        reopened.setHomeForecastsEnabled(false)
+        XCTAssertNil(reopened.forecastLocation)
+        XCTAssertTrue(reopened.forecasts.isEmpty)
     }
 
     func testRejectsUntrustedOrMismatchedGridURLs() throws {
