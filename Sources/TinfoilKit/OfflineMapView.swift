@@ -168,7 +168,7 @@ struct OfflineMapView: View {
                 exploration.setVisible(true)
             }
             .task(id: loading ? nil : pendingMapRequest?.id) {
-                if !loading, let request = pendingMapRequest {
+                if !loading, !Task.isCancelled, let request = pendingMapRequest {
                     pendingMapRequest = nil
                     if location.following { location.toggleFollowing() }
                     routeRequest = nil

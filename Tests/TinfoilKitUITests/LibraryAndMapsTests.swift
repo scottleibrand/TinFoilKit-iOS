@@ -69,6 +69,40 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["Open in Google Maps"].firstMatch.exists)
     }
 
+    func testAskCoordinatesOfferBothModesAndOpenDrivingSteps() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-askUsesOnDeviceModel", "NO", "-mapDownloadPolicy", "off"]
+        app.launch()
+        app.tabBars.buttons["Ask"].tap()
+        let question = app.descendants(matching: .any)["ask-question"].firstMatch
+        XCTAssertTrue(question.waitForExistence(timeout: 10))
+        question.tap()
+        question.typeText("Directions to 47.50003, -122.0035")
+        app.buttons["ask-dismiss-keyboard"].tap()
+        app.buttons["ask-submit"].tap()
+
+        let driving = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Driving to 47.500030")).firstMatch
+        guard driving.waitForExistence(timeout: 5) else {
+            if app.buttons["Open Map"].exists {
+                throw XCTSkip("Set Home to the east endpoint of the synthetic routing graph first.")
+            }
+            XCTFail("Expected a driving choice for the entered coordinates.")
+            return
+        }
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Walking to 47.500030"))
+            .firstMatch.exists)
+        driving.tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let denyLocation = springboard.alerts.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH 'Don' AND label ENDSWITH 'Allow'")
+        ).firstMatch
+        if denyLocation.waitForExistence(timeout: 3) { denyLocation.tap() }
+        let steps = app.buttons["Route steps"]
+        XCTAssertTrue(steps.waitForExistence(timeout: 15), "Install the synthetic routing graph before this check.")
+        steps.tap()
+        XCTAssertTrue(app.navigationBars["Route steps"].waitForExistence(timeout: 5))
+    }
+
     func testHouseholdNotesSurviveSwitchingTabsAndRelaunch() {
         let app = XCUIApplication()
         let tab = app.tabBars.buttons["Household"]

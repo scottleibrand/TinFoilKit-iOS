@@ -28,7 +28,7 @@ struct AskLibraryView: View {
     @State private var fallbackQuestion: String?
     @State private var nearbyResult: NearbyAnswer?
     @State private var needsMapSetup = false
-    @State private var homeRoutes: [MapOpenRequest] = []
+    @State private var homeRoutes: [HomeDestination] = []
 
     private var currentQuestion: String { question.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var modelEnabled: Bool { useModel && LibraryAnswer.isAvailable }
@@ -79,7 +79,10 @@ struct AskLibraryView: View {
                 results
             }
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: question) { homeRoutes = [] }
+            .onChange(of: question) {
+                homeRoutes = []
+                nearbyResult = nil
+            }
             .navigationTitle("Ask")
             .toolbar {
                 if questionFocused || serviceAreaFocused {
@@ -149,17 +152,16 @@ struct AskLibraryView: View {
         }
         if !homeRoutes.isEmpty {
             Section("Directions from Home") {
-                ForEach(homeRoutes) { request in
-                    if let route = request.route {
+                ForEach(homeRoutes) { destination in
+                    ForEach(destination.modes) { mode in
                         Button {
-                            openMap(request)
+                            openMap(MapOpenRequest(place: destination.place,
+                                                   route: .init(origin: destination.origin, mode: mode)))
                         } label: {
                             VStack(alignment: .leading) {
-                                Label("\(route.mode.title) to \(request.place.name)",
-                                      systemImage: route.mode == .walking ? "figure.walk" : "car")
-                                if request.place.kind != "Saved pin" {
-                                    Text(request.place.kind).font(.caption).foregroundStyle(.secondary)
-                                }
+                                Label("\(mode.title) to \(destination.place.name)",
+                                      systemImage: mode == .walking ? "figure.walk" : "car")
+                                Text(destination.place.kind).font(.caption).foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -245,12 +247,10 @@ struct AskLibraryView: View {
                 Text("\(distance) straight-line distance from Home")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
-            if let origin = result.routeOrigin {
-                Button("Walk from Home", systemImage: "figure.walk") {
-                    openMap(MapOpenRequest(place: destinationPlace, route: .init(origin: origin, mode: .walking)))
-                }
-                Button("Drive from Home", systemImage: "car") {
-                    openMap(MapOpenRequest(place: destinationPlace, route: .init(origin: origin, mode: .driving)))
+            ForEach(result.routeModes) { mode in
+                Button(mode == .walking ? "Walk from Home" : "Drive from Home",
+                       systemImage: mode == .walking ? "figure.walk" : "car") {
+                    openMap(MapOpenRequest(place: destinationPlace, route: .init(origin: result.routeOrigin, mode: mode)))
                 }
             }
             Button("Show on map", systemImage: "map") {
@@ -292,39 +292,48 @@ struct AskLibraryView: View {
         needsMapSetup = false
         homeRoutes = []
         let homeRoute = mode == .ask ? HomeRouteQuestion.parse(question) : nil
-        if let homeRoute, prepareSavedPinRoute(homeRoute) { return }
-        let addressRoute = homeRoute.flatMap { $0.isStreetAddress ? $0 : nil }
-        let directions = mode == .ask ? NearbyServiceQuestion.parseDirections(question) : nil
+        let directions = mode == .ask ? (NearbyServiceQuestion.parseDirections(question) ??
+            homeRoute.flatMap { NearbyServiceQuestion.parse($0.rawDestination) }) : nil
+        if directions == nil, let homeRoute, prepareKnownRoute(homeRoute) { return }
+        let destinationRoute = directions == nil ? homeRoute : nil
         let service = mode == .ask ? (directions ?? NearbyServiceQuestion.parse(question)) : nil
         let nearbyCategory = service.flatMap { RegionalPlaceIndex.Category(rawValue: $0.rawValue) }
         switch (mode, nearbyCategory) {
         case (.answerFromPassages, _): progress = "Reading the matching passages"
         case (_, .some): progress = "Searching installed place data"
-        case _ where addressRoute != nil: progress = "Searching installed addresses"
+        case _ where destinationRoute != nil: progress = "Searching installed place data"
         default: progress = "Searching the library"
         }
         request = Request(question: question, mode: mode, useModel: modelEnabled, waterContext: waterContext,
-                          nearbyCategory: nearbyCategory, wantsDirections: directions != nil, addressRoute: addressRoute)
+                          nearbyCategory: nearbyCategory,
+                          routeModes: directions.map { _ in homeRoute?.mode.travelModes ?? MapTravelMode.allCases } ?? [],
+                          destinationRoute: destinationRoute)
     }
 
-    private func prepareSavedPinRoute(_ question: HomeRouteQuestion) -> Bool {
+    private func prepareKnownRoute(_ question: HomeRouteQuestion) -> Bool {
         let snapshot = household.snapshot
         let matches = question.matchingPins(in: snapshot.pins.map(\.name))
-        guard let index = matches.first else { return false }
-        guard matches.count == 1 else {
+        guard matches.count <= 1 else {
             message = "More than one saved pin has that name. Rename one in Household to choose a unique destination."
             return true
         }
+        let destination: MapPlace
+        if let index = matches.first {
+            let pin = snapshot.pins[index]
+            destination = MapPlace(id: pin.id.uuidString, name: pin.name, kind: "Saved pin",
+                                   latitude: pin.latitude, longitude: pin.longitude)
+        } else if let point = MapCoordinateText.parse(question.rawDestination) {
+            let coordinates = MapCoordinateText.decimal(point)
+            destination = MapPlace(id: coordinates, name: coordinates, kind: "Coordinates",
+                                   latitude: point.latitude, longitude: point.longitude)
+        } else {
+            return false
+        }
         guard let home = snapshot.home else {
-            message = "Press and hold your home location in Map and choose Set as home."
-            needsMapSetup = true
+            showMissingHome()
             return true
         }
-        let pin = snapshot.pins[index]
-        let destination = MapPlace(id: pin.id.uuidString, name: pin.name, kind: "Saved pin",
-                                   latitude: pin.latitude, longitude: pin.longitude)
-        let mode: MapTravelMode = question.mode == .walking ? .walking : .driving
-        homeRoutes = [MapOpenRequest(place: destination, route: .init(origin: home, mode: mode))]
+        homeRoutes = [HomeDestination(place: destination, origin: home, modes: question.mode.travelModes)]
         return true
     }
 
@@ -343,9 +352,10 @@ struct AskLibraryView: View {
                 progress = nil
             }
         }
-        if let addressRoute = request.addressRoute {
-            await answerAddressRoute(addressRoute, request: request)
-            return
+        if let destinationRoute = request.destinationRoute {
+            if await answerDestinationRoute(destinationRoute, request: request) { return }
+            guard self.request?.id == request.id, !Task.isCancelled else { return }
+            progress = "Searching the library"
         }
         if let category = request.nearbyCategory {
             await answerNearby(category, request: request)
@@ -427,49 +437,66 @@ struct AskLibraryView: View {
         }
     }
 
-    private func answerAddressRoute(_ question: HomeRouteQuestion, request: Request) async {
-        guard self.request?.id == request.id, !Task.isCancelled else { return }
+    /// Returns false for ambiguous wording that did not resolve to a local destination.
+    private func answerDestinationRoute(_ question: HomeRouteQuestion, request: Request) async -> Bool {
+        guard self.request?.id == request.id, !Task.isCancelled else { return true }
         guard let home = household.snapshot.home else {
-            message = "Press and hold your home location in Map and choose Set as home."
-            needsMapSetup = true
-            return
+            if question.allowsLibraryFallback { return false }
+            showMissingHome()
+            return true
         }
         do {
-            let matches = try await RegionalPlaceSearch.addressesInstalled(
+            let matches = try await RegionalPlaceSearch.destinationsInstalled(
                 matching: question, from: home, storage: RegionalPlaceStorage()
             )
-            guard self.request?.id == request.id, !Task.isCancelled else { return }
+            guard self.request?.id == request.id, !Task.isCancelled else { return true }
             guard let matches else {
-                message = "Import regional place data from Map to look up addresses offline."
+                if question.allowsLibraryFallback { return false }
+                message = "Import regional place data from Map to look up this destination offline."
                 needsMapSetup = true
-                return
+                return true
             }
             guard !matches.isEmpty else {
-                message = "No exact match in installed place data. Check the street and city name or search in Map."
+                if question.allowsLibraryFallback { return false }
+                message = "No exact match in installed place data. Check the name or address, or search in Map."
                 needsMapSetup = true
-                return
+                return true
             }
-            let mode: MapTravelMode = question.mode == .walking ? .walking : .driving
             homeRoutes = matches.map { match in
                 let place = match.place
                 let region = match.region.metadata.region
-                let detail = place.name == place.address ? region : "\(place.name) · \(region)"
-                let destination = MapPlace(id: match.id, name: place.address, kind: detail,
+                let name = question.isStreetAddress ? place.address : place.name
+                let context = question.isStreetAddress ? place.name : place.address
+                let detail: String
+                if !context.isEmpty, name != context {
+                    detail = "\(context) · \(region)"
+                } else if matches.count > 1 {
+                    detail = "\(MapCoordinateText.decimal(place.coordinate)) · \(region)"
+                } else {
+                    detail = region
+                }
+                let destination = MapPlace(id: match.id, name: name, kind: detail,
                                            latitude: place.coordinate.latitude, longitude: place.coordinate.longitude)
-                return MapOpenRequest(place: destination, route: .init(origin: home, mode: mode))
+                return HomeDestination(place: destination, origin: home, modes: question.mode.travelModes)
             }
         } catch {
-            guard self.request?.id == request.id, !Task.isCancelled else { return }
-            message = "The installed address data could not be searched."
+            guard self.request?.id == request.id, !Task.isCancelled else { return true }
+            if question.allowsLibraryFallback { return false }
+            message = "The installed place data could not be searched."
             needsMapSetup = true
         }
+        return true
+    }
+
+    private func showMissingHome() {
+        message = "Press and hold your home location in Map and choose Set as home."
+        needsMapSetup = true
     }
 
     private func answerNearby(_ category: RegionalPlaceIndex.Category, request: Request) async {
         guard self.request?.id == request.id, !Task.isCancelled else { return }
         guard let home = household.snapshot.home else {
-            message = "Press and hold your home location in Map and choose Set as home."
-            needsMapSetup = true
+            showMissingHome()
             return
         }
         do {
@@ -483,7 +510,7 @@ struct AskLibraryView: View {
                 message = "No matching service near Home was found in the installed place data."
                 fallbackQuestion = request.question
             case .match(let nearby):
-                nearbyResult = NearbyAnswer(nearby: nearby, routeOrigin: request.wantsDirections ? home : nil)
+                nearbyResult = NearbyAnswer(nearby: nearby, routeOrigin: home, routeModes: request.routeModes)
             }
         } catch {
             guard self.request?.id == request.id, !Task.isCancelled else { return }
@@ -554,18 +581,37 @@ struct AskLibraryView: View {
         let useModel: Bool
         let waterContext: WaterOutageContext?
         let nearbyCategory: RegionalPlaceIndex.Category?
-        let wantsDirections: Bool
-        let addressRoute: HomeRouteQuestion?
+        let routeModes: [MapTravelMode]
+        let destinationRoute: HomeRouteQuestion?
     }
 
     private struct NearbyAnswer {
         let nearby: RegionalPlaceSearch.Nearby
-        let routeOrigin: HouseholdPlace?
+        let routeOrigin: HouseholdPlace
+        let routeModes: [MapTravelMode]
+    }
+
+    private struct HomeDestination: Identifiable {
+        let place: MapPlace
+        let origin: HouseholdPlace
+        let modes: [MapTravelMode]
+
+        var id: String { place.id }
     }
 
     private struct OnlineSheet: Identifiable {
         let id = UUID()
         let question: String?
+    }
+}
+
+private extension HomeRouteQuestion.Mode {
+    var travelModes: [MapTravelMode] {
+        switch self {
+        case .walking: [.walking]
+        case .driving: [.driving]
+        case .choose: MapTravelMode.allCases
+        }
     }
 }
 
