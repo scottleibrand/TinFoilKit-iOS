@@ -87,6 +87,7 @@ struct AskLibraryView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Ask")
+            .onChange(of: currentQuestion) { includeHouseholdNotes = false }
             .toolbar {
                 if questionFocused || serviceAreaFocused {
                     ToolbarItem(placement: .primaryAction) {

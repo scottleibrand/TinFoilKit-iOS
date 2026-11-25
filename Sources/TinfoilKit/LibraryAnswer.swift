@@ -9,7 +9,7 @@ enum LibraryAnswer {
 
     static func suggestedQueries(for question: String) async throws -> [String] {
         guard #available(iOS 26, *), isAvailable else { return [] }
-        let session = LanguageModelSession(instructions: """
+        let session = LanguageModelSession(model: SystemLanguageModel.default, instructions: """
             Provide up to three short keyword queries for an offline reference library.
             Choose specific names and technical terms that an encyclopedia or guide would use.
             Use the language of the question for the keywords.
@@ -56,12 +56,14 @@ enum LibraryAnswer {
             Each passage has a sourceNumber, title, and excerpt.
             After each factual claim, cite the supporting passage number in square brackets, such as [1].
             For multiple supporting sources, use separate brackets, such as [1] [2].
+            Use square brackets only for citation numbers.
             Give plain text paragraphs with no headings. End each paragraph with its supporting citations.
             If the passages do not support an answer, reply only with INSUFFICIENT_EVIDENCE.
             """
         let contextInstruction = householdNotes == nil ? "" :
             "\nUse householdNotes only to tailor a supported answer. Cite only the numbered passages."
-        let session = LanguageModelSession(instructions: instructions + contextInstruction)
+        let session = LanguageModelSession(model: SystemLanguageModel.default,
+                                           instructions: instructions + contextInstruction)
         let prompt = try LibraryAnswerPrompt(question: question, passages: passages,
                                              householdNotes: householdNotes).encode()
         var answer = ""

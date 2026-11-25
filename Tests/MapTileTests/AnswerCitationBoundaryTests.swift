@@ -7,6 +7,8 @@ final class AnswerCitationBoundaryTests: XCTestCase {
                                                       sourceCount: 2), "The note names the west cabinet [1].")
         XCTAssertEqual(AnswerCitations.completedPrefix(in: "The note names the west cabinet [1].\nStill writing",
                                                       sourceCount: 2), "The note names the west cabinet [1].")
+        XCTAssertEqual(AnswerCitations.completedPrefix(in: "The note names the west cabinet [1]. Next claim [",
+                                                      sourceCount: 2), "The note names the west cabinet [1].")
         XCTAssertNil(AnswerCitations.completedPrefix(in: "Uncited opening.\nThe note names the west cabinet [1].",
                                                     sourceCount: 2))
     }
@@ -27,5 +29,18 @@ final class AnswerCitationBoundaryTests: XCTestCase {
             XCTAssertNil(AnswerCitations.completedPrefix(in: answer, sourceCount: 2), answer)
         }
         XCTAssertEqual(AnswerCitations.indices(in: "A claim [2] [1] [2].", sourceCount: 2), [0, 1])
+    }
+
+    func testRejectsMixedCitationSyntaxAndNoncanonicalSourceLinks() throws {
+        for answer in ["A claim [1] [2,3].", "A claim [[1]].", "A claim [1] [note].", "A claim [01]."] {
+            XCTAssertFalse(AnswerCitations.isComplete(answer, sourceCount: 3), answer)
+            XCTAssertNil(AnswerCitations.completedPrefix(in: answer, sourceCount: 3), answer)
+        }
+        for address in ["tinfoil-source://article/1", "tinfoil-source://article/01", "tinfoil-source://article/x/1",
+                        "tinfoil-source://article/1?x=2", "tinfoil-source://article/1#details"] {
+            let url = try XCTUnwrap(URL(string: address))
+            XCTAssertEqual(AnswerCitations.sourceIndex(from: url, sourceCount: 3),
+                           address == "tinfoil-source://article/1" ? 0 : nil)
+        }
     }
 }

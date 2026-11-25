@@ -3,18 +3,21 @@ import Foundation
 enum AnswerCitations {
     static func indices(in answer: String, sourceCount: Int) -> [Int] {
         var indices: Set<Int> = []
+        var cursor = answer.startIndex
         for match in answer.matches(of: citation) {
+            guard !answer[cursor..<match.range.lowerBound].contains(where: brackets.contains) else { return [] }
             guard let number = number(in: match.output), number > 0, number <= sourceCount else { return [] }
             indices.insert(number - 1)
+            cursor = match.range.upperBound
         }
+        guard !answer[cursor...].contains(where: brackets.contains) else { return [] }
         return indices.sorted()
     }
 
     // A citation completes the text before it. Hold back any text the stream has
     // started after the last citation until the model supplies a source for it.
     static func completedPrefix(in answer: String, sourceCount: Int) -> String? {
-        guard let last = answer.matches(of: citation).last,
-              !indices(in: answer, sourceCount: sourceCount).isEmpty else { return nil }
+        guard let last = answer.matches(of: citation).last else { return nil }
         let tail = answer[last.range.upperBound...].prefix { terminalPunctuation.contains($0) }
         let prefix = String(answer[..<tail.endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
         return isComplete(prefix, sourceCount: sourceCount) ? prefix : nil
@@ -48,16 +51,19 @@ enum AnswerCitations {
     }
 
     static func sourceIndex(from url: URL, sourceCount: Int) -> Int? {
-        guard url.scheme == "tinfoil-source", url.host == "article",
-              let number = Int(url.lastPathComponent), number > 0, number <= sourceCount else { return nil }
+        guard let number = Int(url.lastPathComponent), number > 0, number <= sourceCount,
+              url.absoluteString == "tinfoil-source://article/\(number)" else { return nil }
         return number - 1
     }
 
     private static func number(in citation: Substring) -> Int? {
-        Int(citation.dropFirst().dropLast())
+        let digits = citation.dropFirst().dropLast()
+        guard let index = Int(digits), digits == String(index)[...] else { return nil }
+        return index
     }
 
     private static let terminalPunctuation: Set<Character> = [".", "!", "?", ")", "”", "’", "\""]
 
-    private static let citation = #/\[[0-9]+\]/#
+    private static let brackets: Set<Character> = ["[", "]"]
+    private static let citation = #/\[[^\[\]\r\n]*\]/#
 }

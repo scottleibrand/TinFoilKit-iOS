@@ -37,7 +37,7 @@ enum AskEvidence: Identifiable {
         let keywords = OnlineAskCache.words(question)
         var seen: Set<URL> = []
         var cached: [Self] = savedWebSources.compactMap { source in
-            guard let text = source.text, let fragment = bestFragment(text, keywords: keywords),
+            guard let text = source.text, let fragment = bestFragment(text, keywords: keywords), fragment.score > 0,
                   seen.insert(source.id).inserted else { return nil }
             return .web(source, fragment.text)
         }

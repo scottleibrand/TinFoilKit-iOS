@@ -22,6 +22,12 @@ final class AskEvidenceTests: XCTestCase {
         XCTAssertEqual(Set(evidence.map(\.id)).count, 2)
     }
 
+    func testUnrelatedSavedWebTextDoesNotSuppressLibrarySearch() {
+        let weather = source("forecast", text: "Tomorrow will be overcast and cool.")
+        XCTAssertTrue(AskEvidence.combine([], savedAnswers: [], savedWebSources: [weather],
+                                         question: "Where are the batteries?").isEmpty)
+    }
+
     private func source(_ path: String, text: String?) -> OnlineAskSavedSource {
         OnlineAskSavedSource(citation: .init(
             url: URL(string: "https://example.invalid/\(path)")!,
