@@ -442,11 +442,36 @@ final class LibraryAndMapsTests: XCTestCase {
         guard ProcessInfo.processInfo.environment["TINFOILKIT_TEST_PUBLISHED_REGION"] == "1" else {
             throw XCTSkip("Enable the public regional download smoke test on a dedicated simulator.")
         }
+        verifyPublishedRegionalBundle(
+            catalogEntry: NSPredicate(format: "identifier == %@", "regional-catalog-seattle-2026-11-21"),
+            origin: (query: "325 9th Avenue", title: "325 9th Avenue"),
+            destination: (query: "Swedish First Hill", title: "Swedish First Hill Medical Center")
+        )
+    }
+
+    func testPublishedPortlandBundleInstallsAndRoutesAfterRelaunch() throws {
+        guard ProcessInfo.processInfo.environment["TINFOILKIT_TEST_PUBLISHED_PORTLAND_REGION"] == "1" else {
+            throw XCTSkip("Enable the Portland public regional download smoke test on a dedicated simulator.")
+        }
+        verifyPublishedRegionalBundle(
+            catalogEntry: NSPredicate(format: "identifier BEGINSWITH %@", "regional-catalog-portland-"),
+            origin: (query: "1220 Southwest 5th Avenue", title: "Portland City Hall"),
+            destination: (query: "Legacy Good Samaritan", title: "Legacy Good Samaritan Medical Center"),
+            mapTitlePrefix: "Portland"
+        )
+    }
+
+    private func verifyPublishedRegionalBundle(
+        catalogEntry: NSPredicate,
+        origin: (query: String, title: String),
+        destination: (query: String, title: String),
+        mapTitlePrefix: String? = nil
+    ) {
         let app = XCUIApplication()
         app.launchArguments = ["-mapDownloadPolicy", "off", "-hasSeenOfflineStarterGuide", "YES"]
         app.launch()
         openRegionalDownload(in: app)
-        let region = app.buttons["regional-catalog-seattle-2026-11-21"]
+        let region = app.buttons.matching(catalogEntry).firstMatch
         XCTAssertTrue(region.waitForExistence(timeout: 10))
         region.tap()
         app.buttons["Review download"].tap()
@@ -462,11 +487,16 @@ final class LibraryAndMapsTests: XCTestCase {
         app.launch()
         app.tabBars.buttons["Map"].tap()
         XCTAssertTrue(credit.waitForExistence(timeout: 15))
+        if let mapTitlePrefix {
+            let mapTitle = app.staticTexts.matching(
+                NSPredicate(format: "label BEGINSWITH %@", mapTitlePrefix)
+            ).firstMatch
+            XCTAssertTrue(mapTitle.waitForExistence(timeout: 5))
+        }
         for mode in ["Walking", "Driving"] {
             app.buttons["Directions"].tap()
-            selectPublishedPlace(in: app, endpoint: "origin", query: "325 9th Avenue", title: "325 9th Avenue")
-            selectPublishedPlace(in: app, endpoint: "destination", query: "Swedish First Hill",
-                                 title: "Swedish First Hill Medical Center")
+            selectPublishedPlace(in: app, endpoint: "origin", query: origin.query, title: origin.title)
+            selectPublishedPlace(in: app, endpoint: "destination", query: destination.query, title: destination.title)
             let travelMode = app.segmentedControls.buttons[mode]
             XCTAssertTrue(travelMode.waitForExistence(timeout: 5))
             travelMode.tap()

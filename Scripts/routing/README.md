@@ -76,7 +76,7 @@ python Scripts/build-regional-bundle.py stage-release .build/region-bundle regio
 
 This command verifies the bundle before and after staging, checks the archived PBF against the manifest, and creates a data notice. Host the installable assets, `NOTICE.md` and `source.osm.pbf` alongside `manifest.json` in the edition directory. The source extract and notice are for database access and attribution. The app downloads only the files listed under `assets`. After uploading, fetch the manifest to compare its SHA-256 with the printed pin and confirm that each asset serves HTTP 206 with the requested range and the manifest's exact total size. Pin the final URL and hash through the app's trusted catalog after those checks.
 
-The [Seattle candidate](SEATTLE-CANDIDATE.md) records verified source editions, checksums and the procedure for building a real three-artifact bundle.
+The [Seattle](SEATTLE-CANDIDATE.md) and [Portland](PORTLAND.md) editions record source editions, checksums and production download checks.
 
 Run the end-to-end producer fixture with the same Python and Docker setup.
 

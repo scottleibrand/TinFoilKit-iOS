@@ -25,14 +25,22 @@ enum RegionalBundleCatalog {
         #if DEBUG
         if let fixture = fixtureEntry(arguments: ProcessInfo.processInfo.arguments) { return [fixture] }
         #endif
-        guard let source = try? RegionalBundleDownloadSource(
-            url: "https://github.com/scottleibrand/TinFoilKit-iOS/releases/download/region-seattle-2026-11-21/manifest.json",
-            sha256: "3480364f81f25611121baf9a22b9f0ad1a5a9952169e10594caa9ebfac80a352"
-        ) else { return [] }
         return [
-            Entry(id: "seattle-2026-11-21", region: "Seattle area", edition: "2026-11-21T00:00:00Z",
-                  byteCount: 318_339_726, source: source)
-        ]
+            published(
+                id: "seattle-2026-11-21", region: "Seattle area", edition: "2026-11-21T00:00:00Z",
+                byteCount: 318_339_726, sha256: "3480364f81f25611121baf9a22b9f0ad1a5a9952169e10594caa9ebfac80a352"
+            ),
+            published(
+                id: "portland-2026-11-21", region: "Portland area", edition: "2026-11-21T00:00:00Z",
+                byteCount: 293_367_270, sha256: "c914c7a343e71e313bd8b9e26605622149b65fde713ce82a969b70f120418665"
+            )
+        ].compactMap { $0 }
+    }
+
+    private static func published(id: String, region: String, edition: String, byteCount: Int64, sha256: String) -> Entry? {
+        let url = "https://github.com/scottleibrand/TinFoilKit-iOS/releases/download/region-\(id)/manifest.json"
+        guard let source = try? RegionalBundleDownloadSource(url: url, sha256: sha256) else { return nil }
+        return Entry(id: id, region: region, edition: edition, byteCount: byteCount, source: source)
     }
 
     #if DEBUG
