@@ -1,0 +1,55 @@
+name: Apple simulator verification
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  simulator:
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Prepare build tools
+        run: |
+          [[ "$(uname -m)" == arm64 ]]
+          if ! command -v xcodegen >/dev/null; then
+            brew install xcodegen
+          fi
+          rustup target add aarch64-apple-ios-sim
+
+      - name: Select an iPhone simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json
+          import re
+          import sys
+
+          devices = json.load(sys.stdin)["devices"]
+          ios_runtime = re.compile(r"^com\.apple\.CoreSimulator\.SimRuntime\.iOS-(\d+(?:-\d+)*)(?:-|$)")
+          runtimes = []
+          for runtime in devices:
+              match = ios_runtime.match(runtime)
+              if match:
+                  version = tuple(map(int, match[1].split("-")))
+                  runtimes.append((version, match.end() == len(runtime), runtime))
+          for _, _, runtime in sorted(runtimes, reverse=True):
+              for device in devices[runtime]:
+                  if device["isAvailable"] and device["name"].startswith("iPhone"):
+                      print(device["udid"])
+                      sys.exit()
+          sys.exit("No available iPhone simulator")
+          ')
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+
+      - name: Run unit tests and offline UI checks
+        run: |
+          bash Scripts/verify-apple-candidate.sh "$SIMULATOR_UDID" "$RUNNER_TEMP/apple-preview" \
+            --ui-test TinfoilKitUITests/LibraryAndMapsTests/testHouseholdNotesSurviveSwitchingTabsAndRelaunch \
+            --ui-test TinfoilKitUITests/OfflineReadinessTests
