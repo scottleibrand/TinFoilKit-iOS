@@ -41,12 +41,11 @@ struct TinfoilKitApp: App {
                 HouseholdView(household: household)
                     .tabItem { Label("Household", systemImage: "house") }
                     .tag(Tab.household)
-                NWSUpdatesView(store: nwsAlerts)
+                NWSUpdatesView(store: nwsAlerts, roads: wsdotClosures)
                     .tabItem { Label("Updates", systemImage: "exclamationmark.triangle") }
                     .tag(Tab.updates)
             }
             .task { await packs.restore() }
-            .onChange(of: scenePhase, initial: true) { wsdotClosures.setForeground(scenePhase == .active) }
             .task(id: packs.installedRevision) { await indexing.refresh() }
             .task {
                 if Bundle.main.object(forInfoDictionaryKey: "TFKLightweightProfile") as? Bool == true,
@@ -75,6 +74,7 @@ struct TinfoilKitApp: App {
             .onChange(of: scenePhase, initial: true) {
                 nearby.updatePhase(scenePhase)
                 nwsAlerts.setForeground(scenePhase == .active)
+                wsdotClosures.setForeground(scenePhase == .active)
             }
             .environmentObject(nearby)
             .environmentObject(nearby.discovery)

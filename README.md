@@ -46,6 +46,8 @@ In **Household → Import and export**, save a household backup to Files or rest
 
 In **Household → Share on local network**, select the household details to share and start a browser session on a trusted Wi-Fi or Ethernet network with IPv4. The link uses unencrypted HTTP. Anyone on that network who has the link or can watch its traffic can read the selection. The session ends after ten minutes, when you leave the screen, or when you stop it.
 
+In **Updates**, choose a state or territory to see saved National Weather Service alerts, source times, and freshness. Washington also shows Seattle city-center forecasts and, when enabled, WSDOT road closure advisories for the Puget Sound pilot. Saved reports use each source’s dates and label explicit NWS updates and cancellations when provided. **Check for updates** requests alerts first, then enabled road closures and forecasts for Washington. Each source retains its own metered-network preference and last successful check.
+
 Use Print the Essentials in Household for a printable copy of your household information and selected pages from installed references. Install a regional place index to include the nearest services to your saved home.
 
 To build a regional address and service index, install `osmium==4.2.0` and run `python Scripts/build-regional-place-index.py region.osm.pbf region.sqlite --region "Region name" --source https://provider.example/region.osm.pbf`, using the actual source URL. Import the resulting SQLite file from Map. Address search and nearby services use all installed regional indexes, regardless of the active basemap. Open **Map → + → Installed place data** to review or remove an index and see its source and attribution.

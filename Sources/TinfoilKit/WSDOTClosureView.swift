@@ -99,7 +99,7 @@ struct WSDOTClosureView: View {
                     if closures.isEmpty {
                         Text("No saved WSDOT closures matched this route.").foregroundStyle(.secondary)
                     } else {
-                        ForEach(closures) { closure in closureRow(closure) }
+                        ForEach(closures) { WSDOTClosureSummary(closure: $0) }
                     }
                 }
             } header: {
@@ -112,13 +112,17 @@ struct WSDOTClosureView: View {
                 if snapshot.closures.isEmpty {
                     Text("No closures were reported at the last successful check.").foregroundStyle(.secondary)
                 } else {
-                    ForEach(snapshot.closures) { closure in closureRow(closure) }
+                    ForEach(snapshot.closures) { WSDOTClosureSummary(closure: $0) }
                 }
             }
         }
     }
+}
 
-    private func closureRow(_ closure: WSDOTClosure) -> some View {
+struct WSDOTClosureSummary: View {
+    let closure: WSDOTClosure
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(closure.road).font(.headline)
             if let direction = closure.direction, !direction.isEmpty {
@@ -126,7 +130,7 @@ struct WSDOTClosureView: View {
             }
             Text(closure.headline)
             if let updated = closure.updatedAt {
-                Text("Reported \(updated.formatted(date: .abbreviated, time: .shortened))")
+                Text("Updated \(updated.formatted(date: .abbreviated, time: .shortened))")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
