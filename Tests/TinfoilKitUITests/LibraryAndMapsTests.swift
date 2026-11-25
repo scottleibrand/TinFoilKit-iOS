@@ -322,7 +322,9 @@ final class LibraryAndMapsTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
 
-        let fixture = app.staticTexts["Climate change by Wikipedia"]
+        let fixture = app.staticTexts.matching(
+            NSPredicate(format: "label == %@ OR label == %@", "Climate change by Wikipedia", "Climate Test")
+        ).firstMatch
         if !fixture.exists {
             if app.buttons["Import from Files"].exists {
                 app.buttons["Import from Files"].tap()
