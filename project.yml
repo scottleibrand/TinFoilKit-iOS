@@ -107,6 +107,8 @@ targets:
         excludes: [Fixtures]
       - path: Tests/MapTileTests/Fixtures/Synthetic.tfkroute
         buildPhase: resources
+      - path: Tests/ZIMArchiveTests/Fixtures/pdf-collection.zim
+        buildPhase: resources
     dependencies:
       - target: TinfoilKit
     settings:
