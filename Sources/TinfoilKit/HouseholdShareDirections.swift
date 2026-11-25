@@ -4,10 +4,9 @@ extension HouseholdShareDirections {
     private static let maximumPins = 3
     private static let maximumSteps = 120
 
-    static func prepare(for snapshot: HouseholdSnapshot) async -> [Self] {
+    static func prepare(for snapshot: HouseholdSnapshot, router: RegionalRouteStore = RegionalRouteStore()) async -> [Self] {
         guard let home = snapshot.home, home.isValid else { return [] }
         let origin = MapRoute.Point(latitude: home.latitude, longitude: home.longitude)
-        let router = RegionalRouteStore()
         var results: [Self] = []
         for pin in snapshot.pins.prefix(maximumPins) where pin.isValid {
             let destination = MapRoute.Point(latitude: pin.latitude, longitude: pin.longitude)
