@@ -51,7 +51,8 @@ actor ExploredMapTiles {
         .appendingPathComponent("ExploredMapTiles-v1", isDirectory: true)
     static let shared = ExploredMapTiles(
         directory: directory,
-        source: URL(string: "https://data.source.coop/protomaps/openstreetmap/v4.pmtiles")!
+        source: URL(string: "https://data.source.coop/protomaps/openstreetmap/v4.pmtiles?versionId=440HxKhBAVMB.cR3WUFToSUubTpDm6b7")!,
+        expectedETag: #""9e09dd251e816c0ea9208e1e34c28eba-2572""#
     )
 
     let directory: URL
@@ -60,10 +61,10 @@ actor ExploredMapTiles {
     private var prepared = false
     private var generation = 0
 
-    init(directory: URL, source: URL) {
+    init(directory: URL, source: URL, expectedETag: String? = nil) {
         self.directory = directory
-        self.source = PMTileArchive(url: source)
-        nonCellularSource = PMTileArchive(url: source, allowsCellular: false)
+        self.source = PMTileArchive(url: source, expectedETag: expectedETag)
+        nonCellularSource = PMTileArchive(url: source, allowsCellular: false, expectedETag: expectedETag)
     }
 
     enum Outcome: Equatable, Sendable {

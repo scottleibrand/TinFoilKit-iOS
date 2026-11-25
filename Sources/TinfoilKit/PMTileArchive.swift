@@ -38,6 +38,7 @@ actor PMTileArchive {
     private let url: URL
     private var snapshot: Task<Snapshot, Error>?
     private var leaves: [UInt64: Task<[Entry], Error>] = [:]
+    private let expectedETag: String?
     private var etag: String?
     private let session: URLSession
     private static let cellularSession = makeSession(allowsCellular: true)
@@ -53,7 +54,8 @@ actor PMTileArchive {
         return URLSession(configuration: config)
     }
 
-    init(url: URL, allowsCellular: Bool = true) {
+    init(url: URL, allowsCellular: Bool = true, expectedETag: String? = nil) {
+        self.expectedETag = expectedETag
         self.url = url
         session = allowsCellular ? Self.cellularSession : Self.nonCellularSession
     }
@@ -163,7 +165,7 @@ actor PMTileArchive {
         var request = URLRequest(url: url)
         request.setValue("bytes=\(offset)-\(end)", forHTTPHeaderField: "Range")
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
-        if let etag { request.setValue(etag, forHTTPHeaderField: "If-Match") }
+        if let etag = expectedETag ?? etag { request.setValue(etag, forHTTPHeaderField: "If-Match") }
         let (body, reply) = try await session.bytes(for: request)
         guard let response = reply as? HTTPURLResponse else { throw ArchiveError.invalid }
         if response.statusCode == 412 { throw ArchiveError.changed }
@@ -171,7 +173,9 @@ actor PMTileArchive {
               response.value(forHTTPHeaderField: "Content-Range")?.hasPrefix("bytes \(offset)-\(end)/") == true else {
             throw ArchiveError.invalid
         }
-        if let current = response.value(forHTTPHeaderField: "ETag") {
+        let currentETag = response.value(forHTTPHeaderField: "ETag")
+        if let expectedETag, currentETag != expectedETag { throw ArchiveError.changed }
+        if let current = currentETag {
             if let etag, etag != current { throw ArchiveError.changed }
             etag = current
         }

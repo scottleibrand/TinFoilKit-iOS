@@ -78,17 +78,9 @@ if [[ ! -x "$tools/pmtiles" ]]; then
     unzip -o "$tools/pmtiles.zip" -d "$tools"
 fi
 
-# Source Cooperative keeps one long-lived v4 basemap at a stable URL, the same archive the app's
-# tile cache reads. Daily builds on build.protomaps.com expire, so they can't be used here.
-basemap=https://data.source.coop/protomaps/openstreetmap/v4.pmtiles
-basemap_etag='"9e09dd251e816c0ea9208e1e34c28eba-2572"'
+# Use the same immutable Source Cooperative object as the app's explored tile cache.
+basemap='https://data.source.coop/protomaps/openstreetmap/v4.pmtiles?versionId=440HxKhBAVMB.cR3WUFToSUubTpDm6b7'
 if [[ ! -f "$assets/seattle.pmtiles" ]]; then
-    current_etag=$(curl --fail --silent --show-error --location --head "$basemap" \
-        | tr -d '\r' | awk 'tolower($1) == "etag:" { print $2 }' | tail -1)
-    if [[ "$current_etag" != "$basemap_etag" ]]; then
-        echo "warning: $basemap changed since this script was pinned (ETag $current_etag)." >&2
-        echo "warning: Extracting the current archive. Check the app's map style, then update basemap_etag." >&2
-    fi
     "$tools/pmtiles" extract "$basemap" "$tools/seattle.pmtiles" \
         --bbox=-122.53,47.43,-122.18,47.78 --minzoom=6 --maxzoom=15
     "$tools/pmtiles" verify "$tools/seattle.pmtiles"
