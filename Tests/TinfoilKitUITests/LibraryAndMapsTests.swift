@@ -513,7 +513,10 @@ final class LibraryAndMapsTests: XCTestCase {
                 }
                 if folder.waitForExistence(timeout: 4) { folder.tap() }
             }
-            XCTAssertTrue(file.waitForExistence(timeout: 10), "The simulator Documents folder needs Climate Test.zim")
+            XCTAssertTrue(
+                file.waitForExistence(timeout: 10),
+                "Files did not list Climate Test.zim. App hierarchy:\n\(app.debugDescription)\nFiles hierarchy:\n\(remotePicker.debugDescription)"
+            )
             let tile = picker.cells.containing(NSPredicate(format: "label BEGINSWITH 'Climate Test'")).firstMatch
             if tile.exists {
                 tile.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap()

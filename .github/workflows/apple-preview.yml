@@ -53,6 +53,12 @@ jobs:
         run: |
           bash Scripts/verify-apple-candidate.sh "$SIMULATOR_UDID" "$RUNNER_TEMP/apple-preview"
 
+      - name: Build the UI test bundle
+        run: |
+          xcodebuild build-for-testing -project TinfoilKit.xcodeproj -scheme TinfoilKit \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -derivedDataPath "$RUNNER_TEMP/apple-preview/app-simulator" CODE_SIGNING_ALLOWED=NO
+
       - name: Stage the library import fixture
         run: |
           app="$RUNNER_TEMP/apple-preview/app-simulator/Build/Products/Debug-iphonesimulator/TinfoilKit.app"
@@ -60,10 +66,11 @@ jobs:
           data=$(xcrun simctl get_app_container "$SIMULATOR_UDID" org.tinfoilkit.ios data)
           mkdir -p "$data/Documents"
           cp .build/fixtures/climate.zim "$data/Documents/Climate Test.zim"
+          cmp .build/fixtures/climate.zim "$data/Documents/Climate Test.zim"
 
       - name: Run library, household, and readiness UI tests
         run: |
-          xcodebuild test -project TinfoilKit.xcodeproj -scheme TinfoilKit \
+          xcodebuild test-without-building -project TinfoilKit.xcodeproj -scheme TinfoilKit \
             -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -parallel-testing-enabled NO \
             -derivedDataPath "$RUNNER_TEMP/apple-preview/app-simulator" CODE_SIGNING_ALLOWED=NO \
             -only-testing:TinfoilKitUITests/LibraryAndMapsTests/testHouseholdNotesSurviveSwitchingTabsAndRelaunch \
