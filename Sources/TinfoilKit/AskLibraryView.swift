@@ -11,6 +11,7 @@ struct AskLibraryView: View {
     @FocusState private var serviceAreaFocused: Bool
     @State private var question = ""
     @State private var waterServiceArea = ""
+    @State private var waterServiceAreaSheet: WaterServiceAreaSheet?
     @State private var request: Request?
     @State private var searchedQuestion: String?
     @State private var sources: [SummarySource] = []
@@ -49,6 +50,10 @@ struct AskLibraryView: View {
                             .textInputAutocapitalization(.words)
                             .focused($serviceAreaFocused)
                             .disabled(request != nil)
+                        Button("Find mapped provider at Home", systemImage: "mappin.circle") {
+                            showWaterServiceAreas(.lookup)
+                        }
+                        .disabled(request != nil)
                     }
                     HStack {
                         Button("Ask", systemImage: "sparkles") { start(.ask) }
@@ -98,6 +103,7 @@ struct AskLibraryView: View {
                         }
                         Button("Online providers", systemImage: "key") { onlineSheet = OnlineSheet(question: nil) }
                         Button("Saved web sources", systemImage: "doc.text") { showingSavedSources = true }
+                        Button("Water service areas", systemImage: "drop") { showWaterServiceAreas(.manage) }
                         if LibraryAnswer.isAvailable {
                             Toggle("Use on-device model in Ask", isOn: $useModel)
                         }
@@ -123,6 +129,21 @@ struct AskLibraryView: View {
                 }
             }
             .sheet(isPresented: $showingOfflineChat) { OfflineChatView() }
+            .sheet(item: $waterServiceAreaSheet) { sheet in
+                let home = household.snapshot.home
+                switch sheet {
+                case .manage:
+                    WaterServiceAreaView(home: home)
+                case .lookup:
+                    WaterServiceAreaView(home: home) { provider in
+                        guard household.snapshot.home == home, request == nil,
+                              let context = WaterOutageContext(question: currentQuestion),
+                              context.serviceArea == nil else { return }
+                        waterServiceArea = provider.name
+                        start(.ask)
+                    }
+                }
+            }
             .sheet(item: $cited) { reference in
                 NavigationStack {
                     evidenceDestination(reference)
@@ -240,6 +261,12 @@ struct AskLibraryView: View {
         } footer: {
             Text("Check current hours and access before traveling.")
         }
+    }
+
+    private func showWaterServiceAreas(_ sheet: WaterServiceAreaSheet) {
+        questionFocused = false
+        serviceAreaFocused = false
+        waterServiceAreaSheet = sheet
     }
 
     private func start(_ mode: Mode) {
@@ -455,6 +482,12 @@ struct AskLibraryView: View {
         let useModel: Bool
         let waterContext: WaterOutageContext?
         let nearbyCategory: RegionalPlaceIndex.Category?
+    }
+
+    private enum WaterServiceAreaSheet: Hashable, Identifiable {
+        case lookup, manage
+
+        var id: Self { self }
     }
 
     private struct OnlineSheet: Identifiable {

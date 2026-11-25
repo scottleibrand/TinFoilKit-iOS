@@ -58,6 +58,7 @@ Valhalla Mobile packages Valhalla and its dependencies. [Scripts/routing/README.
   - iFixit: CC BY-NC-SA 3.0, which prohibits commercial use.
   - The water and field medicine libraries: collections of documents under their authors' individual terms.
 - **Printable references:** Household prints page ranges from installed packs. They include *Where There Is No Doctor* (Hesperian Health Guides) and Washington State Department of Health guidance, under their publishers' terms.
+- **Water service areas pilot:** Washington State Department of Health, Office of Drinking Water, provides the source polygons. The app accepts the matched Seattle extract from Files for local use. The publisher metadata lists no use constraints and the portal item supplies no license identifier. Resolve redistribution before publishing a pack. [Owner metadata](https://www.arcgis.com/sharing/rest/content/items/b09475f47a5a46ca90fe6a168fb22e6d/info/metadata/metadata.xml?format=default&output=html) · [State licensing guidance](https://data.wa.gov/stories/s/Updates-for-Data-wa-gov-Publishers/bbwv-q5hm/)
 
 ## Build and test tools
 

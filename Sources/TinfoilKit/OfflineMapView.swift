@@ -39,6 +39,7 @@ struct OfflineMapView: View {
     @State private var editingPin: HouseholdPlace?
     @State private var showingBasemaps = false
     @State private var showingPlaceRegions = false
+    @State private var showingWaterServiceAreas = false
     @State private var showingRoutingPacks = false
     @State private var showingRegionalBundles = false
     @State private var downloadingRegionalBundle = false
@@ -126,6 +127,9 @@ struct OfflineMapView: View {
             }
             .sheet(isPresented: $showingPlaceRegions) {
                 InstalledPlaceDataView(storage: regionStorage, regions: $placeRegions)
+            }
+            .sheet(isPresented: $showingWaterServiceAreas) {
+                WaterServiceAreaView(home: household.snapshot.home)
             }
             .sheet(isPresented: $showingRoutingPacks) {
                 InstalledRoutingPacksView(storage: routeStorage, packs: $routingRegions)
@@ -325,6 +329,7 @@ struct OfflineMapView: View {
                     Button("Map downloads", systemImage: "arrow.down.circle") { showingMapDownloads = true }
                     Button("Installed basemaps", systemImage: "map") { showingBasemaps = true }
                     Button("Installed place data", systemImage: "list.bullet") { showingPlaceRegions = true }
+                    Button("Water service areas", systemImage: "drop") { showingWaterServiceAreas = true }
                     Button("Installed regional bundles", systemImage: "square.stack") { showingRegionalBundles = true }
                     Button("Import map tiles", systemImage: "map") { chooseImport(.tiles) }
                     Button("Import regional bundle", systemImage: "folder") { chooseImport(.bundle) }
