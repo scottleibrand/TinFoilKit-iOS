@@ -45,6 +45,11 @@ struct PacksView: View {
             } label: {
                 Label("Find publisher books", systemImage: "magnifyingglass")
             }
+            NavigationLink {
+                PortableLibraryView(downloads: downloads)
+            } label: {
+                Label("Install catalog packs from Files", systemImage: "folder")
+            }
             if !downloads.publisherDownloads.isEmpty {
                 Section("Publisher downloads") {
                     ForEach(downloads.publisherDownloads, id: \.editionKey) { pack in

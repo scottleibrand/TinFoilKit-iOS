@@ -144,10 +144,14 @@ final class PackDownloads: ObservableObject {
     }
 
     func status(for pack: PublishedPack) -> Status? {
-        if let status = statuses[pack.editionKey] { return status }
+        let status = statuses[pack.editionKey]
+        switch status {
+        case .downloading, .retrying, .pausing, .verifying, .installed: return status
+        default: break
+        }
         guard KiwixDownloadApproval.isValid(pack), installedPublisherArchives.values.contains(where: {
             $0.pack?.sha256 == pack.sha256 && $0.byteCount == pack.sizeEstimate
-        }) else { return nil }
+        }) else { return status }
         return .installed
     }
 
@@ -216,6 +220,36 @@ final class PackDownloads: ObservableObject {
         } catch {
             statuses[key] = .failed(error.localizedDescription)
         }
+    }
+
+    func canInstallLocalCopy(_ pack: PublishedPack) -> Bool {
+        let key = pack.editionKey
+        return !restoring && canStart(pack) && updateTarget(key) == nil && repairTarget(key) == nil
+    }
+
+    func installLocalCopy(_ match: PortableLibraryFolder.Match, progress: @escaping @Sendable (Double) -> Void) async throws {
+        let pack = match.pack
+        let key = pack.editionKey
+        guard Self.catalog.contains(pack), canInstallLocalCopy(pack) else {
+            throw LocalCopyUnavailable()
+        }
+        let previous = statuses[key]
+        statuses[key] = .verifying
+        do {
+            let archive = try await library.installPack(pack, from: match.file, progress: progress)
+            installedPublisherArchives[archive.id] = archive
+            transfer.clearResume(key)
+            try? FileManager.default.removeItem(at: transfer.downloadURL(key))
+            statuses[key] = .installed
+            installedRevision += 1
+        } catch {
+            statuses[key] = previous
+            throw error
+        }
+    }
+
+    private struct LocalCopyUnavailable: LocalizedError {
+        var errorDescription: String? { "This edition is already installed or has an archive operation in progress." }
     }
 
     func allowsCellular(for pack: PublishedPack) -> Bool {

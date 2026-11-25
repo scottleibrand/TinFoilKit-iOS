@@ -114,7 +114,8 @@ public actor InstalledLibrary {
 
     @discardableResult
     public func installPack(
-        _ pack: PublishedPack, from source: URL, replacing previousID: UUID? = nil, movingSource: Bool = false
+        _ pack: PublishedPack, from source: URL, replacing previousID: UUID? = nil, movingSource: Bool = false,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> InstalledArchive {
         guard activeEditions.insert(pack.editionKey).inserted else { throw ImportError.busy }
         defer { activeEditions.remove(pack.editionKey) }
@@ -151,7 +152,7 @@ public actor InstalledLibrary {
             return replacement
         }
         return try await installArchive(
-            from: source, pack: pack, replacesArchiveID: previousID, moving: movingSource, progress: { _ in }
+            from: source, pack: pack, replacesArchiveID: previousID, moving: movingSource, progress: progress
         )
     }
 
