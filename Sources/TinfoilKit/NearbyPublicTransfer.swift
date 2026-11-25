@@ -23,6 +23,7 @@ final class NearbyPublicTransfer {
 
     private static let request = Data(("TFK-PUBLIC-1 " + NearbyPublicReference.id).utf8)
     private let references: [NearbyPublicReference]
+    private let acceptArchive: ((NWConnection) -> Void)?
     private let didReceive: (NearbyPublicReference.Entry, Data) -> Void
     private var inbound: [UUID: ActiveConnection] = [:]
     private var outbound: OutboundConnection?
@@ -41,8 +42,10 @@ final class NearbyPublicTransfer {
         activeReceiveID != nil || inbound.values.contains(where: \.isTransferring)
     }
 
-    init(references: [NearbyPublicReference], didReceive: @escaping (NearbyPublicReference.Entry, Data) -> Void) {
+    init(references: [NearbyPublicReference], acceptArchive: ((NWConnection) -> Void)? = nil,
+         didReceive: @escaping (NearbyPublicReference.Entry, Data) -> Void) {
         self.references = references
+        self.acceptArchive = acceptArchive
         self.didReceive = didReceive
     }
 
@@ -171,6 +174,13 @@ final class NearbyPublicTransfer {
 
     private func readRequest(_ id: UUID, version: NearbyPublicTLS.Version) {
         guard lifecycle == .running, let active = inbound[id], active.phase == .preparing else { return }
+        if version == .archive {
+            guard let acceptArchive else { finishInbound(id); return }
+            inbound.removeValue(forKey: id)?.timeout.cancel()
+            active.connection.stateUpdateHandler = nil
+            acceptArchive(active.connection)
+            return
+        }
         inbound[id]?.phase = .readingRequest
         let connection = active.connection
         let pin = NearbyPublicReference.resumePin
@@ -178,6 +188,7 @@ final class NearbyPublicTransfer {
         case .original: Self.request.count
         case .resumable: NearbyPublicResume.requestLength(pin: pin)
         case .catalog: NearbyPublicCatalogRequest.byteCount
+        case .archive: 0
         }
         connection.receive(minimumIncompleteLength: length, maximumLength: length) {
             [weak self] request, _, _, error in
@@ -230,6 +241,8 @@ final class NearbyPublicTransfer {
             guard let match = NearbyPublicCatalogRequest.match(request, in: references.map(\.entry.manifest)) else { return nil }
             id = match.id
             offset = match.offset
+        case .archive:
+            return nil
         }
         guard let reference = references.first(where: { $0.entry.id == id }),
               let bytes = reference.loadVerified() else { return nil }
@@ -239,6 +252,7 @@ final class NearbyPublicTransfer {
     private func sendRequest(_ id: UUID, version: NearbyPublicTLS.Version) {
         guard lifecycle == .running, let pending = outbound,
               pending.id == id, !pending.active.isTransferring else { return }
+        guard version != .archive else { finishOutbound(id); return }
         let reference = pending.reference
         if version != .catalog {
             legacyPeers.insert(pending.peer)
@@ -257,6 +271,7 @@ final class NearbyPublicTransfer {
         case .original: Self.request
         case .resumable: NearbyPublicResume.request(pin: NearbyPublicReference.resumePin, offset: prefix.count)
         case .catalog: NearbyPublicCatalogRequest.request(for: reference.entry.manifest, offset: prefix.count)
+        case .archive: Data()
         }
         connection.send(content: request, completion: .contentProcessed { [weak self] error in
             DispatchQueue.main.async {

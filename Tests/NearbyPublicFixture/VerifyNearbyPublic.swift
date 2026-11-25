@@ -36,9 +36,9 @@ struct VerifyNearbyPublic {
         if draining || mode == "receive-catalog" {
             discovery.activityDidChange = { [weak discovery] active in
                 guard active, let discovery else { return }
-                if let receivingID = discovery.activePublicReceiveID { receivingIDs.insert(receivingID) }
+                receivingIDs.formUnion(discovery.activePublicReceiveIDs)
                 if draining {
-                    precondition(discovery.activePublicReceiveID == (mode == "receive-draining" ? reference.entry.id : nil))
+                    precondition(discovery.activePublicReceiveIDs == (mode == "receive-draining" ? [reference.entry.id] : []))
                     discovery.finishTransfersWithoutDiscovery()
                     stoppedDiscoveryForTransfer = !discovery.isRunning
                 }
@@ -58,7 +58,7 @@ struct VerifyNearbyPublic {
                     guard mode != "disabled", references.allSatisfy({ $0.loadVerified() != nil }),
                           !draining || stoppedDiscoveryForTransfer,
                           mode != "receive-catalog" || receivingIDs == Set(references.map(\.entry.id)),
-                          discovery.activePublicReceiveID == nil,
+                          discovery.activePublicReceiveIDs.isEmpty,
                           mode != "receive-checkpoint" || reference.checkpoint().isEmpty else {
                         throw FixtureError.unexpectedTransfer
                     }
