@@ -101,6 +101,10 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertTrue(result.waitForExistence(timeout: 20))
         result.tap()
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+        let documents = app.buttons["PDF documents"]
+        XCTAssertTrue(documents.waitForExistence(timeout: 5))
+        documents.tap()
+        XCTAssertTrue(app.staticTexts["No PDF documents"].waitForExistence(timeout: 5))
     }
 
     func testPublisherSearchOpensFromContentPacks() {

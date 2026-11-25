@@ -50,7 +50,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 - Library search refreshes as each archive commits more of its index. Embedded article titles are searchable during indexing. Full-text results become available as batches commit.
 - The WebKit reader streams uncompressed archive resources in bounded chunks, including byte ranges for media. The PDFKit viewer opens large uncompressed PDFs from a temporary local file written in bounded chunks. Compressed resources still use the 32 MiB buffered reader. Verify real audio and video playback and extend support for compressed large PDFs. Build the [large PDF fixture](Tests/LargePDFFixture/build.sh), place it in the dedicated simulator’s Documents as `large-offline-pdf.zim`, and run `ArchiveReadRangeTests` to verify PDFKit can read its text and release the temporary file.
 - JavaScript is off for every archive, which breaks interactive content such as collapsible sections. Decide per pack, and keep the network block in place.
-- The PDF document list only appears for catalog packs marked as PDF collections. An imported PDF collection opens its main page instead. Listing the documents also scans every entry in the archive.
+- PDF catalog collections and imports without a readable landing page open the document list. Other archives offer a PDF documents button. Document listing scans entry metadata only when opened and cancels when left.
 - Library can verify the embedded ZIM checksum of imported files and the publisher SHA-256 checksum of catalog packs. Verify both on a device.
 - The reader has back and forward controls and find within articles and PDFs. Reading history and bookmarks persist, including PDF page and article section links.
 
