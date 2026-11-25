@@ -217,7 +217,9 @@ private struct LibraryView: View {
         }
         .fileImporter(
             isPresented: $choosingArchive,
-            allowedContentTypes: [UTType(filenameExtension: "zim") ?? .data]
+            // File providers can advertise ZIM archives as generic data.
+            // The library validates the extension and archive format on import.
+            allowedContentTypes: [.data]
         ) { result in
             beginImport(result)
         }
