@@ -9,6 +9,7 @@ xcrun swiftc -module-cache-path "$output/module-cache" -o "$output/verify" \
     Sources/TinfoilKit/HouseholdPinProposal.swift \
     Sources/TinfoilKit/HouseholdSharing.swift \
     Sources/TinfoilKit/Household.swift \
+    Sources/TinfoilKit/HouseholdResource.swift \
     Sources/TinfoilKit/MapCoordinateText.swift \
     Sources/TinfoilKit/Nearby{PublicManifest,PublicReference,PublicResume}.swift
 "$output/verify" "$output"
