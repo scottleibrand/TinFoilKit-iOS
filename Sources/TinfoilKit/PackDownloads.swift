@@ -260,6 +260,15 @@ final class PackDownloads: ObservableObject {
         }
     }
 
+    func installBundledCopy(_ pack: PublishedPack) async throws {
+        guard let file = PackCatalog.bundledCopy(for: pack), canInstallLocalCopy(pack) else {
+            throw LocalCopyUnavailable()
+        }
+        try await installLocalEdition(key: pack.editionKey) {
+            try await library.importPublishedPack(pack, from: file)
+        }
+    }
+
     func canInstallLocalCopy(_ pack: PublishedPack) -> Bool {
         let key = pack.editionKey
         return !restoring && canStart(pack) && updateTarget(key) == nil && repairTarget(key) == nil
@@ -271,10 +280,23 @@ final class PackDownloads: ObservableObject {
         guard Self.catalog.contains(pack), canInstallLocalCopy(pack) else {
             throw LocalCopyUnavailable()
         }
+        try await installLocalEdition(key: key) {
+            try await library.installPack(pack, from: match.file, progress: progress)
+        }
+    }
+
+    func installNearbyArchive(_ pack: PublishedPack, from file: URL) async throws {
+        guard Self.allowsArchiveSharing(pack), canInstallLocalCopy(pack) else { throw LocalCopyUnavailable() }
+        try await installLocalEdition(key: pack.editionKey) {
+            try await library.installDownloadedPublishedPack(pack, from: file)
+        }
+    }
+
+    private func installLocalEdition(key: String, install: () async throws -> InstalledArchive) async throws {
         let previous = statuses[key]
         statuses[key] = .verifying
         do {
-            let archive = try await library.installPack(pack, from: match.file, progress: progress)
+            let archive = try await install()
             installedPublisherArchives[archive.id] = archive
             transfer.clearResume(key)
             try? FileManager.default.removeItem(at: transfer.downloadURL(key))

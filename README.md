@@ -60,7 +60,7 @@ To make a graph available for installation from the app bundle, place its `.tfkr
 
 Open **Offline readiness** from the Library toolbar to check storage, installed content, indexing, model availability, and installed coverage at saved Home. Use **Run offline checks** to open a sample reference or PDF, retrieve and open a citation for a library topic, try an on-device sample answer, search installed place data, or calculate walking and driving routes. To test a disconnect on your phone, turn on Airplane Mode and turn Wi-Fi off before starting.
 
-Open **Library → Find nearby** to see nearby devices. Enable **Sync public references** on both devices to automatically receive and relay the verified blank household check-in worksheet and neighborhood status log. The standard build supplies both templates, and the lightweight build can receive them for offline reading. Older versions of the app can exchange the worksheet. Switching apps pauses discovery and lets an active transfer finish if iOS grants it time. [Nearby sharing plan](DISASTER-SHARING.md) · [Apple background execution](https://developer.apple.com/documentation/uikit/extending-your-app-s-background-execution-time)
+Open **Library → Find nearby** to see nearby devices. Enable **Sync public references** on both devices to automatically receive and relay the verified blank household check-in worksheet, neighborhood status log and Tinfoil Kit Offline Starter. The standard build supplies all three. The lightweight build can receive them for offline reading. The starter pack appears in Library after receipt and becomes searchable as it indexes. Older versions of the app can exchange the worksheet. Switching apps pauses discovery and lets an active transfer finish if iOS grants it time. [Nearby sharing plan](DISASTER-SHARING.md) · [Apple background execution](https://developer.apple.com/documentation/uikit/extending-your-app-s-background-execution-time)
 
 Turn on **Notify me about interrupted downloads** in Nearby to get a rate-limited alert when a receive already underway stops in the background. Tap the alert to reopen Tinfoil Kit and let Nearby sync try again.
 
@@ -85,7 +85,7 @@ To enable Seattle walking previews, download the Seattle PBF from BBBike, instal
 
 ### Lightweight release profile
 
-The lightweight profile bundles the map engine, glyphs and notices. Install regional data separately. The offline disaster starter guide opens on first launch and remains available in Library. The default development project can still bundle the Seattle map and test routing packs.
+The lightweight profile bundles the map engine, glyphs and notices. Install regional data separately. The offline disaster starter guide opens on first launch and remains available in Library. For a searchable edition with worksheets, open **Content packs** and choose **Install bundled copy** in the standard build. In the lightweight build, receive the pack through Nearby or download it from Content packs. The default development project can still bundle the Seattle map and test routing packs.
 
 After preparing the device Rust reader and Apple routing engine, build and measure the lightweight profile locally.
 

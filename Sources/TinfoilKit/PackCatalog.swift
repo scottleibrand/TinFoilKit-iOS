@@ -37,12 +37,18 @@ enum PackCatalog {
         let fallbackMirror: URL?
         let usesPDFDirectory: Bool
         let allowsArchiveSharing: Bool
+        let bundledStandardCopy: Bool?
 
         var id: String { pack.editionKey }
         var isBulkEligible: Bool { isDefault && individualDownloadOnly != true }
     }
 
     static let entries = (try? bundled.get()) ?? []
+
+    static func bundledCopy(for pack: PublishedPack, in bundle: Bundle = .main) -> URL? {
+        guard entries.contains(where: { $0.pack == pack && $0.bundledStandardCopy == true }) else { return nil }
+        return bundle.url(forResource: pack.source.deletingPathExtension().lastPathComponent, withExtension: "zim")
+    }
 
     static func fallbackMirror(for pack: PublishedPack) -> URL? {
         entries.first { $0.pack == pack }?.fallbackMirror
@@ -80,6 +86,7 @@ enum PackCatalog {
         return safeFilePart(pack.id) && safeFilePart(pack.version)
             && !pack.title.isEmpty && !pack.attribution.isEmpty && pack.sizeEstimate > 0
             && pack.source.scheme == "https" && pack.source.host != nil
+            && (entry.bundledStandardCopy != true || (entry.allowsArchiveSharing && pack.source.pathExtension == "zim"))
             && (entry.fallbackMirror.map { validMirror($0, for: pack.source) } ?? true)
             && pack.sha256.utf8.count == 64 && pack.sha256.utf8.allSatisfy {
                 (48...57).contains($0) || (97...102).contains($0)
