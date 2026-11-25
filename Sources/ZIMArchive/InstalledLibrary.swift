@@ -119,6 +119,7 @@ public actor InstalledLibrary {
     @discardableResult
     public func installPack(
         _ pack: PublishedPack, from source: URL, replacing previousID: UUID? = nil, movingSource: Bool = false,
+        expectedByteCount: Int64? = nil,
         progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> InstalledArchive {
         guard activeEditions.insert(pack.editionKey).inserted else { throw ImportError.busy }
@@ -146,7 +147,7 @@ public actor InstalledLibrary {
             // Reuse a verified edition installed separately if the user now wants it to replace the old one.
             guard busyArchives.insert(existing.id).inserted else { throw ImportError.busy }
             defer { busyArchives.remove(existing.id) }
-            try await verifyArchive(existing)
+            try await verifyArchive(existing, expectedByteCount: expectedByteCount)
             try Task.checkCancellation()
             let replacement = InstalledArchive(
                 id: existing.id, title: existing.title, byteCount: existing.byteCount,
@@ -156,7 +157,8 @@ public actor InstalledLibrary {
             return replacement
         }
         return try await installArchive(
-            from: source, pack: pack, replacesArchiveID: previousID, moving: movingSource, progress: progress
+            from: source, pack: pack, replacesArchiveID: previousID, moving: movingSource,
+            expectedByteCount: expectedByteCount, progress: progress
         )
     }
 
@@ -204,7 +206,7 @@ public actor InstalledLibrary {
         return try await withStagedArchive(id: id, source: source, pack: pack, moving: moving,
                                            expectedByteCount: expectedByteCount, progress: progress) {
             stagedFile, archiveTitle in
-            if let pack, let expectedByteCount {
+            if replacesArchiveID == nil, let pack, let expectedByteCount {
                 if let existing = try await verifiedEdition(matching: pack, byteCount: expectedByteCount) {
                     return existing
                 }

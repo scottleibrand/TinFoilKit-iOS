@@ -103,10 +103,10 @@ struct PacksView: View {
                 Link("Content license", destination: termsURL).font(.footnote)
             }
             PackDownloadControls(downloads: downloads, pack: pack)
-            if entry.isDefault, let series = KiwixCatalog.EditionSeries(archiveURL: pack.source) {
+            if entry.isDefault, KiwixCatalog.EditionSeries(archiveURL: pack.source) != nil {
                 NavigationLink {
                     KiwixDiscoveryView(downloads: downloads, library: library, onImport: onPublisherImport,
-                                       editionSeries: series)
+                                       seriesPack: pack)
                 } label: {
                     Label("Find newer publisher editions", systemImage: "magnifyingglass")
                 }
@@ -118,6 +118,7 @@ struct PacksView: View {
 struct PackDownloadControls: View {
     @ObservedObject var downloads: PackDownloads
     let pack: PublishedPack
+    var replacementTarget: InstalledArchive? = nil
     @State private var confirmingCellular = false
     @State private var bundledInstallError: String?
 
@@ -132,7 +133,9 @@ struct PackDownloadControls: View {
                 Text(bundledInstallError ?? "")
             }
             .alert("Allow cellular data for this pack?", isPresented: $confirmingCellular) {
-                Button("Allow cellular data") { downloads.start(pack, network: .cellularAllowed) }
+                Button("Allow cellular data") {
+                    downloads.start(pack, network: .cellularAllowed, replacing: replacementTarget)
+                }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("\(pack.title) · \(pack.sizeEstimate.formatted(.byteCount(style: .file))). Switching download modes may restart the transfer.")
@@ -141,34 +144,42 @@ struct PackDownloadControls: View {
 
     @ViewBuilder
     private var controls: some View {
-        switch downloads.status(for: pack) {
-        case let .downloading(fraction):
-            let label = downloads.allowsCellular(for: pack) ? "Downloading · cellular allowed" : "Downloading"
-            if let fraction {
-                ProgressView(value: fraction) { Text(label) }
-            } else {
-                ProgressView(label)
+        if let version = downloads.newerInstalledVersion(for: pack) {
+            Label("Newer edition installed (\(version))", systemImage: "checkmark.circle")
+        } else {
+            switch downloads.status(for: pack) {
+            case let .downloading(fraction):
+                let label = downloads.allowsCellular(for: pack) ? "Downloading · cellular allowed" : "Downloading"
+                if let fraction {
+                    ProgressView(value: fraction) { Text(label) }
+                } else {
+                    ProgressView(label)
+                }
+                Button("Pause") { downloads.pause(pack) }
+            case .retrying:
+                ProgressView("Waiting to retry download")
+                Button("Pause") { downloads.pause(pack) }
+            case .pausing:
+                ProgressView("Pausing")
+            case .paused:
+                downloadControls("Resume download", pack: pack)
+            case .verifying:
+                ProgressView("Verifying archive")
+            case .installed:
+                Label("Installed", systemImage: "checkmark.circle")
+            case let .failed(message):
+                Text(message).font(.footnote).foregroundStyle(.secondary)
+                downloadControls("Retry download", pack: pack)
+            case nil:
+                downloadControls(replacementTarget == nil ? "Download" : "Download update", pack: pack)
             }
-            Button("Pause") { downloads.pause(pack) }
-        case .retrying:
-            ProgressView("Waiting to retry download")
-            Button("Pause") { downloads.pause(pack) }
-        case .pausing:
-            ProgressView("Pausing")
-        case .paused:
-            downloadControls("Resume download", pack: pack)
-        case .verifying:
-            ProgressView("Verifying archive")
-        case .installed:
-            Label("Installed", systemImage: "checkmark.circle")
-        case let .failed(message):
-            Text(message).font(.footnote).foregroundStyle(.secondary)
-            downloadControls("Retry download", pack: pack)
-        case nil:
-            downloadControls("Download", pack: pack)
-        }
-        if let host = downloads.activeMirrorHost(for: pack) {
-            Text("Publisher mirror \(host)").font(.caption).foregroundStyle(.secondary)
+            if downloads.canDiscardPublisherUpdate(pack) {
+                Button("Discard update progress", role: .destructive) { downloads.discardPublisherUpdate(pack) }
+                    .buttonStyle(.borderless)
+            }
+            if let host = downloads.activeMirrorHost(for: pack) {
+                Text("Publisher mirror \(host)").font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -191,10 +202,14 @@ struct PackDownloadControls: View {
     private func networkControls(_ title: String, pack: PublishedPack) -> some View {
         let resumesOnCellular = downloads.resumesOnCellular(for: pack)
         return HStack {
-            Button(resumesOnCellular ? "\(title) · cellular allowed" : title) { downloads.start(pack) }
+            Button(resumesOnCellular ? "\(title) · cellular allowed" : title) {
+                downloads.start(pack, replacing: replacementTarget)
+            }
             Menu {
                 if resumesOnCellular {
-                    Button("Start over on Wi-Fi", systemImage: "wifi") { downloads.start(pack, network: .wifiOnly) }
+                    Button("Start over on Wi-Fi", systemImage: "wifi") {
+                        downloads.start(pack, network: .wifiOnly, replacing: replacementTarget)
+                    }
                 } else {
                     Button("Allow cellular data…", systemImage: "antenna.radiowaves.left.and.right") {
                         confirmingCellular = true

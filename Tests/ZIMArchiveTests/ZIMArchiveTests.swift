@@ -152,7 +152,15 @@ final class ZIMArchiveTests: XCTestCase {
         let afterFailure = try await library.archives()
         XCTAssertEqual(afterFailure, [old])
 
-        let replacement = try await library.installPack(newPack, from: fixture, replacing: old.id)
+        do {
+            try await library.installPack(newPack, from: fixture, replacing: old.id, expectedByteCount: Int64(payload.count) + 1)
+            XCTFail("Expected mismatched publisher byte count to fail verification")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("exact byte count"))
+        }
+        let replacement = try await library.installPack(
+            newPack, from: fixture, replacing: old.id, expectedByteCount: Int64(payload.count)
+        )
         let reopened = InstalledLibrary(directory: libraryDirectory)
         let reopenedArchives = try await reopened.archives()
         XCTAssertEqual(Set(reopenedArchives.map(\.id)), [old.id, replacement.id])

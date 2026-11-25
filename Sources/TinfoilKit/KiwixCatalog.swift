@@ -39,13 +39,16 @@ enum KiwixCatalog {
 
         func newerBooks(in books: [Book]) -> [Book] {
             books.compactMap { book -> (Book, String)? in
-                let url = book.archiveURL
-                let stem = url.deletingPathExtension().lastPathComponent
-                guard KiwixCatalog.isTrustedArchiveURL(url), stem.hasPrefix(filenamePrefix) else { return nil }
-                let edition = String(stem.dropFirst(filenamePrefix.count))
-                guard Self.isDatedEdition(edition), edition > baseline else { return nil }
+                guard let edition = newerEdition(at: book.archiveURL) else { return nil }
                 return (book, edition)
             }.sorted { $0.1 > $1.1 }.map(\.0)
+        }
+
+        func newerEdition(at url: URL) -> String? {
+            let stem = url.deletingPathExtension().lastPathComponent
+            guard KiwixCatalog.isTrustedArchiveURL(url), stem.hasPrefix(filenamePrefix) else { return nil }
+            let edition = String(stem.dropFirst(filenamePrefix.count))
+            return Self.isDatedEdition(edition) && edition > baseline ? edition : nil
         }
 
         private static func isDatedEdition(_ text: String) -> Bool {

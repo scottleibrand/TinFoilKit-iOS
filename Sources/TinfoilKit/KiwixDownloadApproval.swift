@@ -4,6 +4,16 @@ import ZIMArchive
 struct KiwixDownloadApproval: Codable, Equatable, Sendable {
     let pack: PublishedPack
     let allowsCellular: Bool
+    var replacesArchiveID: UUID? = nil
+
+    static func replacement(for candidate: PublishedPack, in seriesPack: PublishedPack) -> PublishedPack? {
+        guard isValid(candidate),
+              let series = KiwixCatalog.EditionSeries(archiveURL: seriesPack.source),
+              series.newerEdition(at: candidate.source) == candidate.version else { return nil }
+        return PublishedPack(id: seriesPack.id, title: seriesPack.title, version: candidate.version,
+                             source: candidate.source, sha256: candidate.sha256, sizeEstimate: candidate.sizeEstimate,
+                             attribution: candidate.attribution)
+    }
 
     static func pack(for book: KiwixCatalog.Book, metadata: KiwixMetalink) -> PublishedPack? {
         let source = book.archiveURL
@@ -17,14 +27,26 @@ struct KiwixDownloadApproval: Codable, Equatable, Sendable {
     }
 
     static func isValid(_ pack: PublishedPack) -> Bool {
+        pack.id == "kiwix-\(pack.sha256)" && hasValidMetadata(pack)
+    }
+
+    private static func hasValidMetadata(_ pack: PublishedPack) -> Bool {
         KiwixCatalog.isTrustedArchiveURL(pack.source)
-            && pack.id == "kiwix-\(pack.sha256)" && pack.version == version(for: pack.source)
+            && pack.version == version(for: pack.source)
             && pack.sha256.utf8.count == 64 && pack.sha256.utf8.allSatisfy {
                 (48...57).contains($0) || (97...102).contains($0)
             }
             && pack.sizeEstimate > 0 && pack.sizeEstimate <= Int64.max / 2
             && !pack.title.isEmpty && pack.title.count <= 256
             && !pack.attribution.isEmpty && pack.attribution.count <= 300
+    }
+
+    private var isValid: Bool {
+        if replacesArchiveID == nil { return Self.isValid(pack) }
+        return Self.hasValidMetadata(pack) && PackCatalog.entries.contains { entry in
+            entry.pack.id == pack.id
+                && KiwixCatalog.EditionSeries(archiveURL: entry.pack.source)?.newerEdition(at: pack.source) == pack.version
+        }
     }
 
     private static func version(for source: URL) -> String {
@@ -41,7 +63,7 @@ struct KiwixDownloadApproval: Codable, Equatable, Sendable {
     }
 
     func save(in directory: URL) throws {
-        guard Self.isValid(pack) else { throw KiwixMetalink.ParseError.invalidMetadata }
+        guard isValid else { throw KiwixMetalink.ParseError.invalidMetadata }
         let data = try JSONEncoder().encode(self)
         guard data.count <= Self.maximumApprovalBytes else { throw KiwixMetalink.ParseError.invalidMetadata }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -58,7 +80,7 @@ struct KiwixDownloadApproval: Codable, Equatable, Sendable {
         for file in files where file.pathExtension == fileExtension {
             guard let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= maximumApprovalBytes,
                   let data = try? Data(contentsOf: file),
-                  let approval = try? JSONDecoder().decode(Self.self, from: data), isValid(approval.pack),
+                  let approval = try? JSONDecoder().decode(Self.self, from: data), approval.isValid,
                   file.deletingPathExtension().lastPathComponent == approval.pack.editionKey else { continue }
             approvals[approval.pack.editionKey] = approval
         }
