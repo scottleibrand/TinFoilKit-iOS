@@ -56,6 +56,26 @@ final class LibraryPassagesTests: XCTestCase {
         XCTAssertTrue(ordinary.contains("anthropogenic climate change"))
     }
 
+    func testSpanishQuestionKeepsUsefulNeighboringSearchTerms() {
+        let question = "¿Qué medidas se pueden tomar para prevenir la erosión costera durante una tormenta?"
+        let queries = LibraryPassages.queries(for: question, suggested: ["erosion costera", "erosión costera"])
+        XCTAssertTrue(queries.contains("prevenir erosión"))
+        XCTAssertTrue(queries.contains("costera tormenta"))
+        XCTAssertEqual(queries.filter { $0 == "erosión costera" || $0 == "erosion costera" }.count, 1)
+        XCTAssertFalse(queries.contains("pueden"))
+        let informal = LibraryPassages.queries(for: "como funciona la energia solar durante el invierno", suggested: [])
+        XCTAssertTrue(informal.contains("energia solar"))
+    }
+
+    func testSpanishRelevanceFoldsDiacriticsAndIgnoresQuestionWords() throws {
+        let intent = LibraryPassages.SearchIntent("¿Qué causa la erosión costera?")
+        let relevant = match("Erosion costera", "Las olas desgastan la costa.")
+        let general = match("Qué es la costa", "La costa separa la tierra y el mar.")
+        let relevantScore = try XCTUnwrap(intent.score(relevant, rank: 4, queryOrder: 0))
+        let generalScore = try XCTUnwrap(intent.score(general, rank: 0, queryOrder: 0))
+        XCTAssertGreaterThan(relevantScore, generalScore)
+    }
+
     private func match(_ title: String, _ excerpt: String) -> ArticleIndex.Match {
         ArticleIndex.Match(path: title, title: title, excerpt: excerpt, rank: -1)
     }

@@ -53,7 +53,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 ### Ask
 
 - Apple's on-device model has safety guardrails that may refuse medical and emergency questions, and a refusal currently shows as a generic failure. Measure refusals on a question set drawn from the Essentials packs, and show the passages with a clear explanation when the model declines.
-- Retrieval uses 64-word search snippets rather than article sections, and the stop-word list and prompts are English only.
+- Retrieval uses 64-word search snippets. English and Spanish questions have offline keyword fallbacks. Verify that Apple Intelligence answers in the question’s language and cites the retrieved passages on an eligible iPhone.
 
 ### Household
 
