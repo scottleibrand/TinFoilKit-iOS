@@ -109,6 +109,24 @@ struct LibraryPassages: Sendable {
         }
     }
 
+    /// Highlights complete retrieved excerpts so their surrounding conditions stay visible.
+    static func quoteIndices(for question: String, excerpts: [String]) -> [Int] {
+        let words = Self.words(in: question).map(folded)
+        let filler = isSpanishQuestion(question, terms: words) ? spanishFiller : englishFiller
+        let terms = Set(words).subtracting(filler)
+        guard terms.count >= 2 else { return [] }
+
+        var indices: [Int] = []
+        var seen: Set<String> = []
+        for (index, excerpt) in excerpts.enumerated() where excerpt.count <= 500 {
+            let matches = Set(Self.words(in: excerpt).map(folded))
+            guard terms.isSubset(of: matches), seen.insert(excerpt).inserted else { continue }
+            indices.append(index)
+            if indices.count == 2 { break }
+        }
+        return indices
+    }
+
     private static func words(in text: String) -> [String] {
         text.prefix(500).split { !$0.isLetter && !$0.isNumber }.map(String.init)
     }

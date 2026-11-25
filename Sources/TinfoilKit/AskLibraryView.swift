@@ -16,6 +16,7 @@ struct AskLibraryView: View {
     @State private var searchedQuestion: String?
     @State private var sources: [SummarySource] = []
     @State private var answer = ""
+    @State private var quotedQuestion: String?
     @State private var progress: String?
     @State private var message: String?
     @State private var unreadableArchives = 0
@@ -38,6 +39,10 @@ struct AskLibraryView: View {
     }
     private var waterContext: WaterOutageContext? {
         WaterOutageContext(question: currentQuestion, serviceArea: waterServiceArea)
+    }
+    private var quoteIndices: [Int] {
+        guard quotedQuestion == currentQuestion else { return [] }
+        return LibraryPassages.quoteIndices(for: currentQuestion, excerpts: evidence.map(\.excerpt))
     }
 
     var body: some View {
@@ -82,7 +87,7 @@ struct AskLibraryView: View {
                             Text("Preparing library search.")
                         }
                     } else if !modelEnabled {
-                        Text("Ask searches the saved library when the model is off.")
+                        Text("Ask can highlight quotes from saved sources without the on-device model.")
                     }
                 }
                 results
@@ -92,6 +97,7 @@ struct AskLibraryView: View {
                 homeRoutes = []
                 nearbyResult = nil
                 includeHouseholdNotes = false
+                quotedQuestion = nil
             }
             .navigationTitle("Ask")
             .toolbar {
@@ -189,6 +195,20 @@ struct AskLibraryView: View {
                         cited = evidence[index]
                         return .handled
                     })
+            }
+        }
+        let quotes = quoteIndices
+        if !quotes.isEmpty {
+            Section("Quotes from saved sources") {
+                ForEach(quotes, id: \.self) { index in
+                    let reference = evidence[index]
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(verbatim: reference.excerpt).textSelection(.enabled)
+                        Button("[\(index + 1)] \(reference.title)", systemImage: "book") { cited = reference }
+                            .accessibilityIdentifier("ask-quote-\(index + 1)")
+                        Text(reference.origin).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
         }
         if request == nil, let fallbackQuestion, fallbackQuestion == currentQuestion {
@@ -296,6 +316,7 @@ struct AskLibraryView: View {
             unreadableArchives = 0
         }
         answer = ""
+        quotedQuestion = nil
         fallbackQuestion = nil
         message = nil
         nearbyResult = nil
@@ -354,6 +375,7 @@ struct AskLibraryView: View {
         request = nil
         progress = nil
         answer = ""
+        quotedQuestion = nil
         fallbackQuestion = nil
         message = "Stopped."
     }
@@ -447,6 +469,7 @@ struct AskLibraryView: View {
                     fallbackQuestion = request.question
                 }
             } else if request.mode == .ask {
+                quotedQuestion = request.question
                 fallbackQuestion = request.question
             }
         } catch is CancellationError {

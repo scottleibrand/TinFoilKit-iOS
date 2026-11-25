@@ -420,10 +420,17 @@ final class LibraryAndMapsTests: XCTestCase {
         done.tap()
         XCTAssertTrue(app.tabBars.buttons["Library"].isHittable)
         app.buttons["ask-submit"].tap()
-        XCTAssertTrue(app.staticTexts["Matching passages"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["Quotes from saved sources"].waitForExistence(timeout: 30))
         XCTAssertFalse(app.staticTexts["Answer"].exists)
+        let citation = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "ask-quote-")).firstMatch
+        for _ in 0..<3 where !citation.isHittable { app.swipeUp() }
+        XCTAssertTrue(citation.isHittable)
+        citation.tap()
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Done"].tap()
         let online = app.buttons["Ask online"]
-        XCTAssertTrue(online.waitForExistence(timeout: 5))
+        for _ in 0..<3 where !online.isHittable { app.swipeUp() }
+        XCTAssertTrue(online.isHittable)
         online.tap()
         XCTAssertTrue(app.buttons["Search Google"].waitForExistence(timeout: 5))
         for provider in ["ChatGPT", "Claude", "Google Gemini"] {

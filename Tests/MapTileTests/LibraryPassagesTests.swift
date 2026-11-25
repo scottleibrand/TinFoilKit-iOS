@@ -3,6 +3,22 @@ import ZIMArchive
 @testable import TinfoilKit
 
 final class LibraryPassagesTests: XCTestCase {
+    func testQuotesRequireWholeTopicsAndRetainEvidenceOrder() {
+        let supported = "Radio batteries are in the west cabinet. Leave the sealed emergency pack in place."
+        let excerpts = ["The radio is by the entrance.", supported, supported,
+                        "The spare radio batteries are in the blue box.", "Radio batteries belong in the second box."]
+        XCTAssertEqual(LibraryPassages.quoteIndices(for: "Where are the radio batteries?", excerpts: excerpts), [1, 3])
+        XCTAssertEqual(LibraryPassages.quoteIndices(for: "Who has the west cabinet key?", excerpts: excerpts), [])
+        XCTAssertEqual(LibraryPassages.quoteIndices(for: "Radio", excerpts: excerpts), [])
+        XCTAssertEqual(LibraryPassages.quoteIndices(for: "Are spare radio batteries upstairs?", excerpts: excerpts), [])
+    }
+
+    func testQuotesMatchSpanishAccentsAndSkipOversizedExcerpts() {
+        let matching = "Las baterías de la radio están junto a la puerta."
+        let excerpts = [String(repeating: matching, count: 12), "La radio está aquí.", matching]
+        XCTAssertEqual(LibraryPassages.quoteIndices(for: "¿Dónde están las baterias de la radio?", excerpts: excerpts), [2])
+    }
+
     private let outageQuestion = "How long does our water system keep working if there is a gridwide power outage?"
 
     func testUtilityOutageQueriesKeepBothConcepts() {

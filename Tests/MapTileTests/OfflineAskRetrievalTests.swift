@@ -24,6 +24,10 @@ final class OfflineAskRetrievalTests: XCTestCase {
         XCTAssertEqual(result.sources.count, 2)
         XCTAssertEqual(Set(result.sources.map(\.id)).count, 2)
         XCTAssertEqual(Set(result.sources.map(\.archive.id)), Set([first.id, second.id]))
+        let quoteIndices = LibraryPassages.quoteIndices(for: "ceramic filtration protozoa", excerpts: result.sources.map(\.match.excerpt))
+        let quote = try XCTUnwrap(quoteIndices.first)
+        XCTAssertEqual(quoteIndices.count, 1)
+        XCTAssertTrue(result.sources[quote].match.excerpt.localizedCaseInsensitiveContains("ceramic filtration"))
         for index in result.sources.indices {
             let source = result.sources[index]
             let page = try XCTUnwrap(ArchivePDFReference(articlePath: source.match.path))
