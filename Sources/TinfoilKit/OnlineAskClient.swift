@@ -67,7 +67,7 @@ enum OnlineAskClient {
             endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
             headers = ["x-api-key": key, "anthropic-version": "2023-06-01"]
             body = [
-                "model": "claude-sonnet-4-6", "system": instructions, "max_tokens": 4096,
+                "model": "claude-sonnet-5-5", "system": instructions, "max_tokens": 4096,
                 "messages": [["role": "user", "content": question]],
                 "tools": [["type": "web_search_20250305", "name": "web_search"]]
             ]
