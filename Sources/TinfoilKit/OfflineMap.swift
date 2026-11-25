@@ -142,17 +142,16 @@ struct OfflineMapStyle: Identifiable {
             style["glyphs"] = fonts.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
                 + "/{fontstack}/{range}.pbf"
             var layers = style["layers"] as? [[String: Any]] ?? []
-            layers.append([
-                "id": "places",
-                "type": "symbol",
-                "source-layer": "places",
-                "layout": [
-                    "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],
-                    "text-font": ["Noto Sans Regular"],
-                    "text-size": 12
-                ],
-                "paint": ["text-color": "#342d26", "text-halo-color": "#f2eee6", "text-halo-width": 1]
-            ])
+            let language = Locale.current.language.languageCode?.identifier ?? "en"
+            let name: [Any] = ["coalesce", ["get", "name:" + language], ["get", "name"], ["get", "name:en"]]
+            layers.append(label("places", sourceLayer: "places", text: name, size: 12))
+            layers.append(label("street-names", sourceLayer: "roads", text: name, size: 11,
+                                minimumZoom: 13, placement: "line"))
+            layers.append(label("service-names", sourceLayer: "pois", text: name, size: 11, minimumZoom: 15,
+                                filter: ["in", ["get", "kind"], ["literal", ["hospital", "pharmacy", "clinic",
+                                         "fire_station", "police", "fuel", "grocery", "supermarket"]]]))
+            layers.append(label("address-numbers", sourceLayer: "buildings", text: ["get", "addr_housenumber"],
+                                size: 10, minimumZoom: 17, filter: ["==", ["get", "kind"], "address"]))
             style["layers"] = layers
         }
         let layers = style["layers"] as? [[String: Any]] ?? []
@@ -168,6 +167,18 @@ struct OfflineMapStyle: Identifiable {
         }
 
         return String(decoding: try JSONSerialization.data(withJSONObject: style), as: UTF8.self)
+    }
+
+    private func label(_ id: String, sourceLayer: String, text: [Any], size: Int, minimumZoom: Int = 0,
+                       placement: String = "point", filter: [Any]? = nil) -> [String: Any] {
+        var layer: [String: Any] = [
+            "id": id, "type": "symbol", "source-layer": sourceLayer, "minzoom": minimumZoom,
+            "layout": ["text-field": text, "text-font": ["Noto Sans Regular"], "text-size": size,
+                       "symbol-placement": placement],
+            "paint": ["text-color": "#342d26", "text-halo-color": "#f2eee6", "text-halo-width": 1]
+        ]
+        if let filter { layer["filter"] = filter }
+        return layer
     }
 
     private func layer(_ name: String, type: String, sourceLayer: String? = nil, geometry: String? = nil,

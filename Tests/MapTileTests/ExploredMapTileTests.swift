@@ -145,7 +145,7 @@ final class ExploredMapTileTests: XCTestCase {
             window.isHidden = true
             previous?.makeKey()
         }
-        map.setCenter(CLLocationCoordinate2D(latitude: 47.608, longitude: -122.335), zoomLevel: 12, animated: false)
+        map.setCenter(CLLocationCoordinate2D(latitude: 47.608, longitude: -122.335), zoomLevel: 15, animated: false)
 
         let clock = ContinuousClock()
         let styleDeadline = clock.now + .seconds(10)
@@ -154,11 +154,14 @@ final class ExploredMapTileTests: XCTestCase {
         }
         XCTAssertNotNil(map.style?.source(withIdentifier: "downloaded-0"))
         let layers: Set<String> = ["downloaded-roads"]
+        let names: Set<String> = ["downloaded-street-names"]
+        XCTAssertNotNil(map.style?.layer(withIdentifier: "downloaded-service-names"))
+        XCTAssertNotNil(map.style?.layer(withIdentifier: "downloaded-address-numbers"))
         XCTAssertTrue(map.visibleFeatures(in: map.bounds, styleLayerIdentifiers: layers).isEmpty)
         let center = map.centerCoordinate
         let zoom = map.zoomLevel
         let store = ExploredMapTiles(directory: output, source: fixture)
-        let viewport = MapViewport(west: -122.42, south: 47.54, east: -122.25, north: 47.66, zoom: 12)
+        let viewport = MapViewport(west: -122.36, south: 47.59, east: -122.31, north: 47.625, zoom: 15)
         for tile in viewport.tiles {
             _ = await store.save(tile, seed: nil, download: true)
         }
@@ -166,7 +169,8 @@ final class ExploredMapTileTests: XCTestCase {
 
         let deadline = clock.now + .seconds(20)
         while clock.now < deadline {
-            if !map.visibleFeatures(in: map.bounds, styleLayerIdentifiers: layers).isEmpty {
+            if !map.visibleFeatures(in: map.bounds, styleLayerIdentifiers: layers).isEmpty,
+               !map.visibleFeatures(in: map.bounds, styleLayerIdentifiers: names).isEmpty {
                 XCTAssertEqual(map.centerCoordinate.latitude, center.latitude, accuracy: 0.000001)
                 XCTAssertEqual(map.centerCoordinate.longitude, center.longitude, accuracy: 0.000001)
                 XCTAssertEqual(map.zoomLevel, zoom, accuracy: 0.000001)
@@ -174,6 +178,6 @@ final class ExploredMapTileTests: XCTestCase {
             }
             try await Task.sleep(for: .milliseconds(200))
         }
-        XCTFail("MapLibre did not render road features from the saved tile files")
+        XCTFail("MapLibre did not render roads and street names from the saved tile files")
     }
 }
