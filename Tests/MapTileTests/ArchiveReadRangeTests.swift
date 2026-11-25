@@ -15,6 +15,11 @@ final class ArchiveReadRangeTests: XCTestCase {
     }
 
     @MainActor
+    func testLargeXZArchivePDFOpensFromTemporaryFileAndReleasesIt() async throws {
+        try await verifyLargePDF("large-offline-pdf-xz.zim", isDirect: false)
+    }
+
+    @MainActor
     private func verifyLargePDF(_ filename: String, isDirect: Bool) async throws {
         let fixture = URL.documentsDirectory.appendingPathComponent(filename)
         try XCTSkipUnless(FileManager.default.fileExists(atPath: fixture.path),

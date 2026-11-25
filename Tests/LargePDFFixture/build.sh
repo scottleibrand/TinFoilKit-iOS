@@ -39,7 +39,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let compression = match args.next().and_then(|arg| arg.into_string().ok()).as_deref() {
         Some("none") => zimru::Compression::None,
         Some("zstd") => zimru::Compression::Zstd,
-        _ => return Err("Choose none or zstd".into()),
+        Some("xz") => zimru::Compression::Xz,
+        _ => return Err("Choose none, zstd, or xz".into()),
     };
     archive.set_compression(compression);
     archive.try_add_item(zimru::writer::Item::new(
