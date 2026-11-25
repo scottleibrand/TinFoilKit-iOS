@@ -13,10 +13,10 @@ struct HouseholdShareView: View {
     @State private var includeNotes = false
     @State private var includeHome = false
     @State private var includePins = false
-    @State private var includeWorksheet = false
+    @State private var selectedReferenceIDs: Set<String> = []
     @State private var acceptGuestNotes = false
     @State private var noteError: String?
-    @State private var publicWorksheet: String?
+    @State private var publicReferences: [HouseholdSharePublicReference] = []
 
     var body: some View {
         Form {
@@ -24,11 +24,25 @@ struct HouseholdShareView: View {
                 if hasNotes { Toggle("Notes", isOn: $includeNotes).disabled(session.running) }
                 if snapshot.home != nil { Toggle("Home location", isOn: $includeHome).disabled(session.running) }
                 if !snapshot.pins.isEmpty { Toggle("Saved pins", isOn: $includePins).disabled(session.running) }
-                if publicWorksheet != nil {
-                    Toggle("Public check-in worksheet", isOn: $includeWorksheet).disabled(session.running)
-                }
-                if !hasNotes && snapshot.home == nil && snapshot.pins.isEmpty && publicWorksheet == nil {
+                if !hasNotes && snapshot.home == nil && snapshot.pins.isEmpty && publicReferences.isEmpty {
                     Text("Add household information before sharing.").foregroundStyle(.secondary)
+                }
+            }
+            if !publicReferences.isEmpty {
+                Section("Public reference templates") {
+                    ForEach(publicReferences) { reference in
+                        Toggle(reference.title, isOn: Binding(
+                            get: { selectedReferenceIDs.contains(reference.id) },
+                            set: { selected in
+                                if selected {
+                                    selectedReferenceIDs.insert(reference.id)
+                                } else {
+                                    selectedReferenceIDs.remove(reference.id)
+                                }
+                            }
+                        ))
+                        .disabled(session.running)
+                    }
                 }
             }
             Section {
@@ -86,9 +100,7 @@ struct HouseholdShareView: View {
         }
         .navigationTitle("Share on local network")
         .task {
-            if let bytes = NearbyPublicReference().loadVerified() {
-                publicWorksheet = String(data: bytes, encoding: .utf8)
-            }
+            publicReferences = HouseholdSharePublicReference.verified(from: NearbyPublicReference.catalogReferences)
         }
         .onDisappear { session.stop() }
         .onChange(of: scenePhase) {
@@ -117,17 +129,21 @@ struct HouseholdShareView: View {
 
     private var hasNotes: Bool { !snapshot.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
+    private var selectedReferences: [HouseholdSharePublicReference] {
+        publicReferences.filter { selectedReferenceIDs.contains($0.id) }
+    }
+
     private var startSharing: some View {
         Button("Start sharing", systemImage: "person.2") {
             session.start(HouseholdSnapshot(
                 notes: includeNotes ? snapshot.notes : "",
                 home: includeHome ? snapshot.home : nil,
                 pins: includePins ? snapshot.pins : []
-            ), publicWorksheet: includeWorksheet ? publicWorksheet : nil,
+            ), publicReferences: selectedReferences,
                acceptsNotes: acceptGuestNotes && canAcceptGuestNotes)
         }
         .disabled(!((includeNotes && hasNotes) || (includeHome && snapshot.home != nil) ||
-                    (includePins && !snapshot.pins.isEmpty) || (includeWorksheet && publicWorksheet != nil) ||
+                    (includePins && !snapshot.pins.isEmpty) || !selectedReferences.isEmpty ||
                     (acceptGuestNotes && canAcceptGuestNotes)))
     }
 }
@@ -153,10 +169,10 @@ private final class HouseholdShareSession: ObservableObject {
         }
     }
 
-    func start(_ snapshot: HouseholdSnapshot, publicWorksheet: String?, acceptsNotes: Bool) {
+    func start(_ snapshot: HouseholdSnapshot, publicReferences: [HouseholdSharePublicReference], acceptsNotes: Bool) {
         guard attempt == nil else { return }
         let id = UUID()
-        let page = HouseholdSharePage(snapshot: snapshot, publicWorksheet: publicWorksheet, acceptsNotes: acceptsNotes)
+        let page = HouseholdSharePage(snapshot: snapshot, publicReferences: publicReferences, acceptsNotes: acceptsNotes)
         attempt = id
         state = .starting
         // Bound the wait even if path discovery does not report an interface.
