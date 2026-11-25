@@ -50,12 +50,15 @@ struct NearbyView: View {
                         }
                     }
                 }
-                if let text = discovery.publicReferenceText {
-                    NavigationLink(NearbyPublicReference.title) {
+                ForEach(discovery.publicReferences) { reference in
+                    NavigationLink(reference.title) {
                         ScrollView {
-                            Text(text).frame(maxWidth: .infinity, alignment: .leading).padding()
+                            Text(reference.text)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding()
                         }
-                        .navigationTitle(NearbyPublicReference.title)
+                        .navigationTitle(reference.title)
                         .navigationBarTitleDisplayMode(.inline)
                     }
                 }

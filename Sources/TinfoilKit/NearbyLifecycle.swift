@@ -14,7 +14,7 @@ final class NearbyLifecycle: ObservableObject {
     private var nearbyScreens: Set<UUID> = []
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     private var assertionID: UUID?
-    private var backgroundReceivePending = false
+    private var backgroundReceiveID: String?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -28,7 +28,7 @@ final class NearbyLifecycle: ObservableObject {
         guard phase != self.phase else { return }
         self.phase = phase
         if phase == .background {
-            backgroundReceivePending = publicSyncEnabled && discovery.hasActivePublicReceive
+            backgroundReceiveID = publicSyncEnabled ? discovery.activePublicReceiveID : nil
             if backgroundTask != .invalid, publicSyncEnabled, discovery.hasActivePublicTransfer {
                 discovery.finishTransfersWithoutDiscovery()
             } else {
@@ -37,7 +37,7 @@ final class NearbyLifecycle: ObservableObject {
                 endBackgroundTask()
             }
         } else {
-            backgroundReceivePending = false
+            backgroundReceiveID = nil
             if phase == .active { notifications.clear() }
             updateDiscovery()
         }
@@ -54,7 +54,7 @@ final class NearbyLifecycle: ObservableObject {
         publicSyncEnabled = enabled
         defaults.set(enabled, forKey: Self.preferenceKey)
         if !enabled {
-            backgroundReceivePending = false
+            backgroundReceiveID = nil
             notifications.clear()
             discovery.stop()
             endBackgroundTask()
@@ -97,9 +97,9 @@ final class NearbyLifecycle: ObservableObject {
     }
 
     private func notifyIfReceiveInterrupted() {
-        guard backgroundReceivePending else { return }
-        backgroundReceivePending = false
-        if publicSyncEnabled, discovery.publicReferenceText == nil {
+        guard let referenceID = backgroundReceiveID else { return }
+        backgroundReceiveID = nil
+        if publicSyncEnabled, !discovery.publicReferences.contains(where: { $0.id == referenceID }) {
             notifications.notifyInterruptedReceive()
         }
     }

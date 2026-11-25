@@ -22,6 +22,8 @@ targets:
         buildPhase: resources
       - path: Resources/NearbyPublic/household-check-in-v1.txt
         buildPhase: resources
+      - path: Resources/NearbyPublic/neighborhood-status-log-v1.txt
+        buildPhase: resources
       - path: .build/map-assets
         type: folder
         buildPhase: resources
