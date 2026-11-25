@@ -27,3 +27,22 @@ enum NearbyPublicResume {
         return data
     }
 }
+
+/// Version 3 uses a fixed SHA-256 pin and the same bounded resume offset.
+enum NearbyPublicCatalogRequest {
+    static let byteCount = 64 + 4
+
+    static func request(for manifest: NearbyPublicManifest, offset: Int) -> Data {
+        NearbyPublicResume.request(pin: manifest.sha256, offset: offset)
+    }
+
+    static func match(_ request: Data, in catalog: [NearbyPublicManifest]) -> (id: String, offset: Int)? {
+        guard request.count == byteCount else { return nil }
+        for manifest in catalog {
+            if let offset = NearbyPublicResume.offset(from: request, pin: manifest.sha256, byteCount: manifest.byteCount) {
+                return (manifest.id, offset)
+            }
+        }
+        return nil
+    }
+}

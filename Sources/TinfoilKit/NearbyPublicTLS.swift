@@ -8,6 +8,7 @@ enum NearbyPublicTLS {
     enum Version: String, Sendable {
         case original = "tfk-public/1"
         case resumable = "tfk-public/2"
+        case catalog = "tfk-public/3"
     }
     private static let trustQueue = DispatchQueue(label: "org.tinfoilkit.nearby-public-tls")
 
@@ -54,6 +55,7 @@ enum NearbyPublicTLS {
         let security = options.securityProtocolOptions
         sec_protocol_options_set_min_tls_protocol_version(security, .TLSv13)
         sec_protocol_options_set_max_tls_protocol_version(security, .TLSv13)
+        sec_protocol_options_add_tls_application_protocol(security, Version.catalog.rawValue)
         sec_protocol_options_add_tls_application_protocol(security, Version.resumable.rawValue)
         sec_protocol_options_add_tls_application_protocol(security, Version.original.rawValue)
         return options
