@@ -114,11 +114,6 @@ final class PackDownloads: ObservableObject {
     typealias CatalogEntry = PackCatalog.Entry
 
     static let catalog = PackCatalog.entries.map(\.pack)
-    private static let defaultPacks = PackCatalog.entries.filter(\.isBulkEligible).map(\.pack)
-    private static let essentials = PackCatalog.entries.filter {
-        $0.section == .essentials && $0.isBulkEligible
-    }.map(\.pack)
-
     static func allowsArchiveSharing(_ pack: PublishedPack) -> Bool {
         PackCatalog.entries.first { $0.pack == pack }?.allowsArchiveSharing == true
     }
@@ -141,12 +136,6 @@ final class PackDownloads: ObservableObject {
     private var knownPacks: [PublishedPack] {
         Self.catalog.filter { publisherApprovals[$0.editionKey] == nil } + publisherDownloads
     }
-
-    var downloadAllSizeEstimate: Int64 {
-        sizeEstimate(for: Self.defaultPacks)
-    }
-
-    var essentialsSizeEstimate: Int64 { sizeEstimate(for: Self.essentials) }
 
     private let library = InstalledLibrary.standard
     private let staging: URL
@@ -413,16 +402,12 @@ final class PackDownloads: ObservableObject {
         return PackCatalog.fallbackMirror(for: pack)?.host
     }
 
-    func startAll() {
-        startBatch(Self.defaultPacks)
+    func start(_ preset: PackCatalog.Preset, language: PackCatalog.Language?) {
+        startBatch(PackCatalog.packs(for: preset, language: language))
     }
 
-    func startEssentials() {
-        startBatch(Self.essentials)
-    }
-
-    private func sizeEstimate(for packs: [PublishedPack]) -> Int64 {
-        packs.filter(canStartOnWiFi).reduce(0) { $0 + $1.sizeEstimate }
+    func sizeEstimate(for preset: PackCatalog.Preset, language: PackCatalog.Language?) -> Int64 {
+        PackCatalog.packs(for: preset, language: language).filter(canStartOnWiFi).reduce(0) { $0 + $1.sizeEstimate }
     }
 
     private func startBatch(_ packs: [PublishedPack]) {

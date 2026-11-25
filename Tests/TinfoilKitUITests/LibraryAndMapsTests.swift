@@ -258,11 +258,13 @@ final class LibraryAndMapsTests: XCTestCase {
 
     func testLibraryCatalogAndRegionalMap() {
         let app = XCUIApplication()
+        app.launchArguments = ["-lastOfflineMapPosition", "default"]
         app.launch()
 
         XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
         app.buttons["Content packs"].tap()
         XCTAssertTrue(app.buttons["Download all"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Download Recommended"].exists)
         XCTAssertTrue(app.staticTexts["Essentials"].waitForExistence(timeout: 5))
         let packTitles = [
             "Water Treatment Library", "Appropedia", "Field Medicine Library",
