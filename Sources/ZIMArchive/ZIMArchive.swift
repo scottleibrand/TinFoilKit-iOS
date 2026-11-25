@@ -3,6 +3,14 @@ import Foundation
 
 /// Read-only access to a local ZIM file.
 public final class ZIMArchive {
+    /// Inspect at most the given number of archive entries for PDF documents.
+    public func pdfEntries(inspectingFirst maximumEntries: UInt32) throws -> [PDFEntry] {
+        try (0..<min(entryCount, maximumEntries)).compactMap { index in
+            try Task.checkCancellation()
+            return try pdfEntry(at: index)
+        }
+    }
+
     public struct Resource: Sendable {
         public let path: String
         public let title: String
@@ -74,15 +82,59 @@ public final class ZIMArchive {
         return try Self.read(resource)
     }
 
+    /// Follows redirects without loading resource bytes. Returns nil if the requested path is absent.
+    public func resolvedPath(at path: String) throws -> String? {
+        guard !path.utf8.contains(0) else {
+            throw ReadError(errorDescription: "An archive path cannot contain a null byte.")
+        }
+        var error: UnsafeMutablePointer<CChar>?
+        guard let resolved = tfk_archive_resolved_path(archive, path, &error) else {
+            if let error { throw Self.readError(error, fallback: "The archive entry could not be resolved.") }
+            return nil
+        }
+        defer { tfk_string_free(resolved) }
+        return String(cString: resolved)
+    }
+
     public func article(at index: UInt32) throws -> Resource? {
         try article(at: index, maximumBytes: nil)
     }
 
-    public func pdfEntries() throws -> [PDFEntry] {
-        try (0..<entryCount).compactMap { index in
+    /// Search article titles using the publisher's embedded listing, without reading article bodies.
+    public func articleTitles(matching query: String) throws -> [ArticleTitle] {
+        let prefix = query.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard !prefix.isEmpty, prefix.utf8.count <= 512, !prefix.utf8.contains(0) else { return [] }
+        let lowercase = prefix.lowercased()
+        let sentenceCase = lowercase.prefix(1).uppercased() + lowercase.dropFirst()
+        var prefixes: Set<String> = []
+        var paths: Set<String> = []
+        var titles: [ArticleTitle] = []
+        for spelling in [prefix, sentenceCase, lowercase] where prefixes.insert(spelling).inserted {
             try Task.checkCancellation()
-            return try pdfEntry(at: index)
+            var error: UnsafeMutablePointer<CChar>?
+            guard let matches = tfk_archive_title_prefix(archive, spelling, &error) else {
+                throw Self.readError(error, fallback: "The archive titles could not be read.")
+            }
+            defer { tfk_title_matches_close(matches) }
+            for index in 0..<30 {
+                guard let entry = tfk_title_matches_entry(matches, index) else { break }
+                let path = String(cString: tfk_entry_metadata_path(entry))
+                guard paths.insert(path).inserted else { continue }
+                let title = String(cString: tfk_entry_metadata_title(entry))
+                titles.append(ArticleTitle(path: path, title: title.isEmpty ? path : title))
+                if titles.count == 30 { return titles }
+            }
         }
+        return titles
+    }
+
+    public struct ArticleTitle: Sendable {
+        public let path: String
+        public let title: String
+    }
+
+    public func pdfEntries() throws -> [PDFEntry] {
+        try pdfEntries(inspectingFirst: entryCount)
     }
 
     func pdfEntry(at index: UInt32) throws -> PDFEntry? {
@@ -93,24 +145,29 @@ public final class ZIMArchive {
             }
             return nil
         }
-        defer { tfk_pdf_entry_close(entry) }
-        let path = String(cString: tfk_pdf_entry_path(entry))
-        let title = String(cString: tfk_pdf_entry_title(entry))
+        defer { tfk_entry_metadata_close(entry) }
+        let path = String(cString: tfk_entry_metadata_path(entry))
+        let title = String(cString: tfk_entry_metadata_title(entry))
         return PDFEntry(path: path, title: title.isEmpty ? path : title)
     }
 
     func article(at index: UInt32, maximumBytes: Int?) throws -> Resource? {
         var error: UnsafeMutablePointer<CChar>?
-        guard let resource = tfk_archive_article(archive, index, &error) else {
+        let resource = if let maximumBytes {
+            tfk_archive_article_prefix(archive, index, max(0, maximumBytes), &error)
+        } else {
+            tfk_archive_article(archive, index, &error)
+        }
+        guard let resource else {
             if let error {
                 throw Self.readError(error, fallback: "The archive article could not be read.")
             }
             return nil
         }
-        return try Self.read(resource, maximumBytes: maximumBytes)
+        return try Self.read(resource)
     }
 
-    private static func read(_ resource: OpaquePointer, maximumBytes: Int? = nil) throws -> Resource {
+    private static func read(_ resource: OpaquePointer) throws -> Resource {
         defer { tfk_resource_close(resource) }
         var count = 0
         guard let bytes = tfk_resource_bytes(resource, &count) else {
@@ -120,7 +177,7 @@ public final class ZIMArchive {
             path: String(cString: tfk_resource_path(resource)),
             title: String(cString: tfk_resource_title(resource)),
             mimeType: String(cString: tfk_resource_mime(resource)),
-            data: Data(bytes: bytes, count: min(count, maximumBytes ?? count))
+            data: Data(bytes: bytes, count: count)
         )
     }
 

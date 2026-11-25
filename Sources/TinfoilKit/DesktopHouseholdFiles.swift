@@ -6,6 +6,7 @@ enum DesktopHouseholdFiles {
     private static let utf8BOM: [UInt8] = [0xef, 0xbb, 0xbf]
     private static let maxNotes = 100_000
     private static let maxPins = 1_000
+    private static let defaultHomeZoom = 12.0
     static let maxNotesBytes = maxNotes * 4 + utf8BOM.count
     // A desktop file can hold 1,000 pins, each with 5,000 scalars and up to 12 JSON bytes per scalar.
     static let maxPlacesBytes = 64 * 1_024 * 1_024
@@ -35,9 +36,13 @@ enum DesktopHouseholdFiles {
                         throw FileError.invalidPlaces
                     }
                     let name = label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Home" : label
+                    let sameLocation = snapshot.home?.latitude == home.lat && snapshot.home?.longitude == home.lon
+                    let zoom = home.zoom ?? (sameLocation ? snapshot.home?.desktopHomeZoom : nil)
                     let place = HouseholdPlace(
-                        id: snapshot.home?.id ?? stableID("home"),
-                        name: name, latitude: home.lat, longitude: home.lon
+                        id: snapshot.home?.id ?? stableID("home"), name: name,
+                        note: sameLocation ? snapshot.home?.note ?? "" : "",
+                        latitude: home.lat, longitude: home.lon,
+                        desktopHomeZoom: zoom == defaultHomeZoom ? nil : zoom
                     )
                     guard place.isValid else { throw FileError.invalidPlaces }
                     return place
@@ -48,9 +53,10 @@ enum DesktopHouseholdFiles {
                 var encountered: Set<UUID> = []
                 result.pins = try pins.map { pin in
                     guard validDesktopID(pin.id) else { throw FileError.invalidPlaces }
-                    let id = UUID(uuidString: pin.id) ?? stableID("pin:" + pin.id)
+                    let id = pinUUID(pin.id)
                     let place = HouseholdPlace(
-                        id: id, name: pin.name, note: pin.note ?? "", latitude: pin.lat, longitude: pin.lon
+                        id: id, name: pin.name, note: pin.note ?? "", latitude: pin.lat, longitude: pin.lon,
+                        desktopPinID: pin.id == id.uuidString.lowercased() ? nil : pin.id
                     )
                     guard validPin(place), encountered.insert(id).inserted else { throw FileError.invalidPlaces }
                     return place
@@ -71,10 +77,12 @@ enum DesktopHouseholdFiles {
               snapshot.home.map({ $0.isValid && $0.name.unicodeScalars.count <= 200 }) != false else {
             throw FileError.invalidPlaces
         }
-        let home = snapshot.home.map { Home(lat: $0.latitude, lon: $0.longitude, label: $0.name, zoom: 12) }
+        let home = snapshot.home.map { place in
+            let zoom = place.desktopHomeZoom.flatMap { (0...22).contains($0) ? $0 : nil } ?? defaultHomeZoom
+            return Home(lat: place.latitude, lon: place.longitude, label: place.name, zoom: zoom)
+        }
         let pins = snapshot.pins.map {
-            Pin(id: $0.id.uuidString.lowercased(), name: $0.name, note: $0.note,
-                lat: $0.latitude, lon: $0.longitude)
+            Pin(id: desktopID(for: $0), name: $0.name, note: $0.note, lat: $0.latitude, lon: $0.longitude)
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -94,6 +102,17 @@ enum DesktopHouseholdFiles {
         return (1...64).contains(bytes.count) && bytes.allSatisfy {
             (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || $0 == 45 || $0 == 95
         }
+    }
+
+    private static func pinUUID(_ id: String) -> UUID {
+        UUID(uuidString: id) ?? stableID("pin:" + id)
+    }
+
+    private static func desktopID(for pin: HouseholdPlace) -> String {
+        guard let id = pin.desktopPinID, validDesktopID(id), pinUUID(id) == pin.id else {
+            return pin.id.uuidString.lowercased()
+        }
+        return id
     }
 
     private static func stableID(_ key: String) -> UUID {

@@ -3,10 +3,27 @@ import MapLibre
 import SwiftUI
 import UniformTypeIdentifiers
 
+struct MapOpenRequest: Identifiable {
+    struct Route {
+        let origin: HouseholdPlace
+        let mode: MapTravelMode
+    }
+
+    let id = UUID()
+    let place: MapPlace
+    let route: Route?
+
+    init(place: MapPlace, route: Route? = nil) {
+        self.place = place
+        self.route = route
+    }
+}
+
 struct OfflineMapView: View {
     @ObservedObject var household: HouseholdStore
-    @Binding var pendingPlace: MapPlace?
+    @Binding var pendingMapRequest: MapOpenRequest?
     @Environment(\.openURL) private var openURL
+    @EnvironmentObject private var wsdotClosures: WSDOTClosureStore
     @State private var storage = MapStorage()
     @State private var regionStorage = RegionalPlaceStorage()
     @State private var placeRegions: [RegionalPlaceStorage.Installed] = []
@@ -31,6 +48,7 @@ struct OfflineMapView: View {
     @State private var routeMode = MapTravelMode.walking
     @State private var route: DisplayedRoute?
     @State private var routeRequest: RouteRequest?
+    @State private var planningRoute = false
     @State private var showingSteps = false
     @State private var activeImport: MapImportKind?
     @State private var importTask: Task<Void, Never>?
@@ -43,6 +61,38 @@ struct OfflineMapView: View {
     @State private var showingRegionalBundles = false
     @State private var downloadingRegionalBundle = false
     @State private var showingMapDownloads = false
+    @State private var showingWSDOTClosures = false
+    @State private var wsdotRouteResult: WSDOTRouteResult?
+
+    private struct WSDOTRouteKey: Equatable {
+        let routeID: UUID
+        let checkedAt: Date
+    }
+
+    private struct WSDOTRouteResult {
+        let key: WSDOTRouteKey
+        let status: WSDOTClosureView.RouteStatus
+    }
+
+    private var wsdotRouteKey: WSDOTRouteKey? {
+        guard wsdotClosures.enabled, let route, let snapshot = wsdotClosures.snapshot else { return nil }
+        return WSDOTRouteKey(routeID: route.id, checkedAt: snapshot.checkedAt)
+    }
+
+    private var wsdotRouteStatus: WSDOTClosureView.RouteStatus? {
+        guard route != nil else { return nil }
+        guard let key = wsdotRouteKey, let wsdotRouteResult, wsdotRouteResult.key == key else { return .checking }
+        return wsdotRouteResult.status
+    }
+
+    private var wsdotRouteButtonTitle: String {
+        guard case let .matched(closures)? = wsdotRouteStatus, !closures.isEmpty else {
+            return "Route closure advisories"
+        }
+        return closures.count == 1
+            ? "1 saved WSDOT closure near this route"
+            : "\(closures.count) saved WSDOT closures near this route"
+    }
 
     private var savedPlaces: [HouseholdPlace] {
         (household.snapshot.home.map { [$0] } ?? []) + household.snapshot.pins
@@ -115,6 +165,7 @@ struct OfflineMapView: View {
             .sheet(isPresented: $searchingPlaces, onDismiss: { routeOrigin = nil }) {
                 placeSearch
             }
+            .sheet(isPresented: $planningRoute) { routePlanner }
             .sheet(isPresented: $showingSteps) {
                 if let route { steps(for: route) }
             }
@@ -142,6 +193,11 @@ struct OfflineMapView: View {
             .sheet(isPresented: $showingMapDownloads) {
                 MapDownloadsView(exploration: exploration)
             }
+            .sheet(isPresented: $showingWSDOTClosures) {
+                WSDOTClosureView(store: wsdotClosures, route: Binding(
+                    get: { wsdotRouteStatus }, set: { _ in }
+                ))
+            }
             .onChange(of: location.fix?.timestamp) {
                 if let fix = location.fix, selectedPlace == nil || location.following {
                     marker = MapMarker(coordinate: fix.coordinate, title: "Current position")
@@ -151,13 +207,16 @@ struct OfflineMapView: View {
                 location.setVisible(true, centerInitially: savedPosition.isEmpty)
                 exploration.setVisible(true)
             }
-            .task(id: pendingPlace?.id) {
-                if let place = pendingPlace {
-                    pendingPlace = nil
+            .task(id: loading ? nil : pendingMapRequest?.id) {
+                if !loading, !Task.isCancelled, let request = pendingMapRequest {
+                    pendingMapRequest = nil
                     if location.following { location.toggleFollowing() }
                     routeRequest = nil
                     route = nil
-                    show(place)
+                    show(request.place)
+                    if let route = request.route {
+                        startRoute(from: route.origin.coordinate, to: request.place.coordinate, mode: route.mode)
+                    }
                 }
             }
             .onDisappear {
@@ -171,7 +230,7 @@ struct OfflineMapView: View {
                 beginImport(result, kind: importKind)
             }
             .sheet(isPresented: $choosingBundle) {
-                RegionalBundleFolderPicker { folder in
+                DocumentFolderPicker { folder in
                     choosingBundle = false
                     if let folder { beginImport(.success(folder), kind: .bundle) }
                 }
@@ -195,6 +254,7 @@ struct OfflineMapView: View {
                 do { routingRegions = try await routeStorage.installedPacks() }
                 catch { errorMessage = error.localizedDescription }
             }
+            .task(id: wsdotRouteKey) { await matchWSDOTClosures() }
             .task(id: routeRequest?.id) {
                 if let routeRequest { await calculate(routeRequest) }
             }
@@ -213,6 +273,7 @@ struct OfflineMapView: View {
                     ),
                     marker: marker,
                     route: route,
+                    closureSnapshot: wsdotClosures.enabled ? wsdotClosures.snapshot : nil,
                     savedPlaces: savedPlaces,
                     tileRevision: exploration.revision,
                     onViewport: { viewport, position in
@@ -232,8 +293,12 @@ struct OfflineMapView: View {
                         if let message = location.message {
                             Text(message)
                         }
-                        Text(mapTitle)
-                            .font(.footnote.weight(.semibold))
+                        HStack {
+                            Text(mapTitle).font(.footnote.weight(.semibold))
+                            Spacer()
+                            Button("Directions", systemImage: "signpost.right") { planningRoute = true }
+                                .font(.footnote)
+                        }
                         if !placeRegions.isEmpty {
                             Button("Installed place data") { showingPlaceRegions = true }
                                 .font(.caption)
@@ -263,6 +328,9 @@ struct OfflineMapView: View {
                             if !route.route.steps.isEmpty {
                                 Button("Route steps") { showingSteps = true }
                             }
+                            Button(wsdotRouteButtonTitle, systemImage: "exclamationmark.triangle") {
+                                showingWSDOTClosures = true
+                            }
                             Button(route.mode == .walking ? "Clear walking route" : "Clear driving route") {
                                 self.route = nil
                             }
@@ -277,6 +345,12 @@ struct OfflineMapView: View {
                             if supportsOfflineRoute(from: selectedPlace.coordinate) {
                                 Button("Start drive here") { findDestination(from: selectedPlace, mode: .driving) }
                             }
+                        }
+                        if route == nil, wsdotClosures.enabled, wsdotClosures.snapshot?.closures.isEmpty == false {
+                            Button("Saved WSDOT closure overlay", systemImage: "line.diagonal") {
+                                showingWSDOTClosures = true
+                            }
+                            .font(.caption)
                         }
                         if let attribution = map?.attribution, let license = map?.licenseURL {
                             Link(attribution, destination: license)
@@ -323,6 +397,7 @@ struct OfflineMapView: View {
                 ) { handleLocationButton() }
                 Menu {
                     Button("Map downloads", systemImage: "arrow.down.circle") { showingMapDownloads = true }
+                    Button("WSDOT road closures", systemImage: "exclamationmark.triangle") { showingWSDOTClosures = true }
                     Button("Installed basemaps", systemImage: "map") { showingBasemaps = true }
                     Button("Installed place data", systemImage: "list.bullet") { showingPlaceRegions = true }
                     Button("Installed regional bundles", systemImage: "square.stack") { showingRegionalBundles = true }
@@ -384,6 +459,21 @@ struct OfflineMapView: View {
                 routeOrigin = nil
                 startRoute(from: origin.coordinate, to: place.coordinate, mode: routeMode)
             }
+        }
+    }
+
+    private var routePlanner: some View {
+        let current = location.fix.map { fix in
+            MapPlace(id: "current-position", name: "Current position", kind: MapCoordinateText.decimal(fix.coordinate),
+                     latitude: fix.coordinate.latitude, longitude: fix.coordinate.longitude)
+        }
+        return MapRoutePlanner(index: placeIndex, regions: placeRegions, savedPlaces: savedPlaces,
+                               home: household.snapshot.home, currentLocation: current, destination: selectedPlace,
+                               coverage: routingRegions.map(\.pack.bounds), walkingPreview: walkingIndex == nil ? nil : map?.bounds) {
+            origin, destination, mode in
+            if location.following { location.toggleFollowing() }
+            show(destination)
+            startRoute(from: origin.coordinate, to: destination.coordinate, mode: mode)
         }
     }
 
@@ -572,6 +662,26 @@ struct OfflineMapView: View {
         }
     }
 
+    private func matchWSDOTClosures() async {
+        guard let key = wsdotRouteKey, let route, let snapshot = wsdotClosures.snapshot else {
+            wsdotRouteResult = nil
+            return
+        }
+        let points = route.route.points
+        let task = Task.detached(priority: .utility) { () -> WSDOTClosureView.RouteStatus in
+            let coordinates = points.map { WSDOTCoordinate(latitude: $0.latitude, longitude: $0.longitude) }
+            guard WSDOTClosureSnapshot.canMatch(route: coordinates) else { return .unavailable }
+            return .matched(snapshot.advisories(near: coordinates))
+        }
+        let status = await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+        guard !Task.isCancelled, key == wsdotRouteKey else { return }
+        wsdotRouteResult = WSDOTRouteResult(key: key, status: status)
+    }
+
     private func steps(for displayed: DisplayedRoute) -> some View {
         NavigationStack {
             List(displayed.route.steps) { step in
@@ -628,38 +738,6 @@ struct OfflineMapView: View {
     }
 }
 
-private struct RegionalBundleFolderPicker: UIViewControllerRepresentable {
-    let completion: (URL?) -> Void
-
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(completion: completion)
-    }
-
-    final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let completion: (URL?) -> Void
-
-        init(completion: @escaping (URL?) -> Void) {
-            self.completion = completion
-        }
-
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            completion(urls.first)
-        }
-
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-            completion(nil)
-        }
-    }
-}
-
 private struct MapPosition {
     let coordinate: CLLocationCoordinate2D
     let zoom: Double
@@ -708,6 +786,7 @@ private struct MapSurface: UIViewRepresentable {
     let initialPosition: MapPosition
     let marker: MapMarker?
     let route: DisplayedRoute?
+    let closureSnapshot: WSDOTClosureSnapshot?
     let savedPlaces: [HouseholdPlace]
     let tileRevision: Int
     let onViewport: (MapViewport, MapPosition) -> Void
@@ -715,7 +794,8 @@ private struct MapSurface: UIViewRepresentable {
     let onError: (Error) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(tileRevision: tileRevision, onViewport: onViewport, onHold: onHold, onError: onError)
+        Coordinator(tileRevision: tileRevision, closureSnapshot: closureSnapshot,
+                    onViewport: onViewport, onHold: onHold, onError: onError)
     }
 
     func makeUIView(context: Context) -> MLNMapView {
@@ -745,9 +825,13 @@ private struct MapSurface: UIViewRepresentable {
         coordinator.onHold = onHold
         if coordinator.tileRevision != tileRevision {
             coordinator.tileRevision = tileRevision
-            do { viewer.styleJSON = try style.json(tileRevision: tileRevision) }
-            catch { DispatchQueue.main.async { onError(error) } }
+            do {
+                let json = try style.json(tileRevision: tileRevision)
+                coordinator.beginStyleReload()
+                viewer.styleJSON = json
+            } catch { DispatchQueue.main.async { onError(error) } }
         }
+        coordinator.updateClosureSnapshot(closureSnapshot, in: viewer.style)
         if coordinator.savedPlaces != savedPlaces {
             viewer.removeAnnotations(coordinator.savedAnnotations)
             coordinator.savedPlaces = savedPlaces
@@ -792,6 +876,10 @@ private struct MapSurface: UIViewRepresentable {
         var onHold: (CLLocationCoordinate2D) -> Void
         var tileRevision: Int
         private var publishedViewport = false
+        private var closureSnapshot: WSDOTClosureSnapshot?
+        private var styleIsLoaded = false
+        private static let closureSourceID = "tfk-wsdot-closures-source"
+        private static let closureLayerID = "tfk-wsdot-closures-lines"
         var lastMarker: UUID?
         var annotation: MLNPointAnnotation?
         var lastRoute: UUID?
@@ -799,10 +887,12 @@ private struct MapSurface: UIViewRepresentable {
         var savedPlaces: [HouseholdPlace] = []
         var savedAnnotations: [MLNPointAnnotation] = []
 
-        init(tileRevision: Int, onViewport: @escaping (MapViewport, MapPosition) -> Void,
+        init(tileRevision: Int, closureSnapshot: WSDOTClosureSnapshot?,
+             onViewport: @escaping (MapViewport, MapPosition) -> Void,
              onHold: @escaping (CLLocationCoordinate2D) -> Void,
              onError: @escaping (Error) -> Void) {
             self.tileRevision = tileRevision
+            self.closureSnapshot = closureSnapshot
             self.onViewport = onViewport
             self.onHold = onHold
             self.onError = onError
@@ -823,7 +913,46 @@ private struct MapSurface: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
+            styleIsLoaded = true
+            applyClosureOverlay(to: style)
             publishViewport(mapView)
+        }
+
+        func beginStyleReload() {
+            styleIsLoaded = false
+        }
+
+        func updateClosureSnapshot(_ snapshot: WSDOTClosureSnapshot?, in style: MLNStyle?) {
+            guard closureSnapshot?.checkedAt != snapshot?.checkedAt else { return }
+            let priorClosures = closureSnapshot?.closures
+            closureSnapshot = snapshot
+            if styleIsLoaded, priorClosures != snapshot?.closures, let style { applyClosureOverlay(to: style) }
+        }
+
+        private func applyClosureOverlay(to style: MLNStyle) {
+            if let layer = style.layer(withIdentifier: Self.closureLayerID) { style.removeLayer(layer) }
+            if let source = style.source(withIdentifier: Self.closureSourceID) { style.removeSource(source) }
+            guard let closureSnapshot else { return }
+            let lines: [MLNShape] = closureSnapshot.closures.flatMap(\.lines).compactMap { line in
+                guard line.count > 1 else { return nil }
+                let coordinates = line.map {
+                    CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+                }
+                return MLNPolyline(coordinates: coordinates, count: UInt(coordinates.count))
+            }
+            guard !lines.isEmpty else { return }
+
+            let source = MLNShapeSource(identifier: Self.closureSourceID, shapes: lines, options: nil)
+            let layer = MLNLineStyleLayer(identifier: Self.closureLayerID, source: source)
+            layer.lineColor = NSExpression(forConstantValue: UIColor.systemOrange)
+            layer.lineWidth = NSExpression(forConstantValue: 4)
+            layer.lineDashPattern = NSExpression(forConstantValue: [2, 2])
+            style.addSource(source)
+            if let labelLayer = style.layers.first(where: { $0 is MLNSymbolStyleLayer }) {
+                style.insertLayer(layer, below: labelLayer)
+            } else {
+                style.addLayer(layer)
+            }
         }
 
         func mapViewDidFinishRenderingMap(_ mapView: MLNMapView, fullyRendered: Bool) {

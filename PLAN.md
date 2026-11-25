@@ -2,6 +2,28 @@
 
 Build a standalone iPhone app that opens its installed library and maps after a cold launch with no network or desktop host. Use a SwiftUI shell and keep downloadable assets separate from household data. Exclude downloaded archives, indexes, map data and the tile cache from device backup. Include household notes, home and pins in backup.
 
+## Intermittent connectivity
+
+Preload maps, routing graphs, a compact emergency library, and regional directories. Use short connections for official alerts and local conditions. Fetch specialized documents on demand, including public medication labels selected on the device. Leave additional large general-reference packs available as optional downloads.
+
+| Priority | Work | Initial acceptance |
+| --- | --- | --- |
+| P0 | NWS active alerts first, then qualifying official all-hazards alerts | Conditional fetch after a connection returns. Keep publisher, coverage, issued and expiration times, and last successful check visible offline. A complete authoritative snapshot can remove corrected or cancelled alerts. FEMA IPAWS live access needs an agreement. The delayed archive is historical. |
+| P1 | Washington closures and pass, bridge, and ferry restrictions. Add locally verified shelter, utility, and drinking-water updates as feeds become available. | Show dated restrictions alongside offline routes. Reroute only for current, directionally matched closures. Distinguish potential shelter facilities from confirmed open shelters. |
+| P2 | NWS forecasts and observations, NOAA river forecasts, and USGS earthquake feeds | Cache small geographically selected records. Refresh forecasts about every three hours and river forecasts hourly when connected. Show last successful check and source timestamps offline. |
+| P3 | NIFC fire locations and perimeters, plus regional hazard layers | Clip and simplify foreground geometry, preserve publisher time and attribution, and measure transfer sizes. Cache Washington DNR hazards in regional packs and refresh active fire data hourly when connected. |
+| P4 | Washington DOH and CMS healthcare, utilities, AFDC charging and fueling, NOAA Weather Radio, FoodKeeper, and selected emergency references | Verify edition, coverage and redistribution rights. Preprocess static records for regional offline search. Keep household choices local when fetching an individual public document. |
+
+Schedule independent transfers, with alerts taking priority over routine refreshes and requested material ahead of lower-priority feeds. Use conditional HTTP validators, payload limits, and retries that respect network policy. Ordinary IP access over Starlink can use the same client. Treat phone-native satellite access and background wakeups as separate device checks.
+
+Start with direct publisher feeds. Before introducing a scheduled regional snapshot, measure transfer sizes and freshness on a short connection and verify redistribution terms and any credential requirements. A snapshot should retain per-source timestamps, coverage, stable identities, provenance, and corrections. Only relay public updates whose authenticity and redistribution rights can be verified. Never broadcast household medication choices, notes, or precise locations.
+
+- A Washington NWS active-alert sample returned 31 alerts in 12,744 compressed bytes. Its 163,319-byte decoded payload contained area descriptions and zone references, with no geometries. Keep these alerts browsable by area. The Updates tab checks a user-selected state or territory in the foreground and retains the last good list. Verify reconnection, offline relaunch and metered policy on iPhone. [NWS API](https://www.weather.gov/documentation/services-web-api) · [NWS alerts guidance](https://www.weather.gov/documentation/services-web-alerts)
+- Updates can show forecasts for saved Home after explicit opt-in. The app rounds the coordinates to two decimal places before resolving the nearest NWS forecast grid. Day/night and hourly records refresh independently, with a three-hour target and conditional revalidation using the saved grid endpoint. Verify offline reopening, automatic and manual refresh, and expired-period display on iPhone. [NWS forecast API](https://www.weather.gov/documentation/services-web-api)
+- WSDOT has a public Road Closures GeoJSON layer for low-volume queries. Pilot dated closures as route advisories before matching affected road segments and travel directions. Confirm redistribution rights before adding these to a republished snapshot or peer transfer. [WSDOT closure layer](https://data.wsdot.wa.gov/arcgis/rest/services/TravelInformation/TravelInfoRoadAlerts/FeatureServer/2) · [Dataset terms](https://data.wsdot.wa.gov/arcgis/rest/services/TravelInformation/TravelInfoRoadAlerts/FeatureServer/info/iteminfo)
+- Updates shows the last successful check and coverage for each source. Its saved report list uses publisher timestamps and puts undated reports last. Explicit NWS updates and cancellations link to their source records. An alert that drops out of the active feed has no cancellation record. A check runs alerts first, then enabled Washington closures and Home forecasts. Verify the combined view with Wi-Fi disabled, then reconnect and check each source’s saved timestamp.
+- The NOAA river API returned seven gauges within the Seattle bundle bounds. Keep observed and forecast levels separate, preserve the contributing source for each gauge, and use NWS alerts for official flood warnings. [NOAA NWPS guide](https://www.weather.gov/media/owp/operations/nwps_user_guide.pdf)
+
 ## Status
 
 Status as of 2026-11-24. "Built" means the feature exists in the app. It is complete only after its acceptance checks pass on a simulator and on an iPhone.
@@ -10,11 +32,12 @@ Status as of 2026-11-24. "Built" means the feature exists in the app. It is comp
 | --- | --- | --- |
 | Offline library | Built | Run the milestone 1 acceptance checks on a device with a publisher archive. Measure PDF extraction time and search-index storage on the larger packs. |
 | Content packs | Partly built | The bundled catalog has English and Spanish choices and dated editions. Wi-Fi downloads, disk space checks, checksum verification, repair and replacement after indexing are implemented. Expand coverage, add catalog refresh and exercise real interrupted transfers. |
-| Maps | Partly built | Imported basemaps, place indexes and Valhalla routing packs work offline. Add in-app regional downloads and verify the full navigation workflow on an iPhone. |
-| Ask | Partly built | Search and cited answers use Apple's on-device model. Behavior on devices without Apple Intelligence and the decision on a downloadable model remain. |
+| Maps | Partly built | Imported basemaps, place indexes and Valhalla routing packs work offline. Resumable in-app downloads accept trusted manifests, and Map plans routes from separate endpoints. Publish a named regional edition and verify full navigation on an iPhone. |
+| Situational updates | Partly built | Cache NWS alerts for a selected state or territory, opt-in Home forecasts and Puget Sound closure reports. Verify foreground reconnection and offline relaunch on iPhone, then expand coverage. |
+| Ask | Partly built | Ask searches installed articles and PDF pages, opens cited quotes without a model, and can hand local destinations to walking or driving directions from Home. Verify generated citations and the household-notes opt-in on an eligible iPhone. A downloadable model remains open. |
 | Household tools | Built | Run the airplane-mode restart and printing checks on a device. |
-| Household sharing | Partly built | A Desktop kit screen and a phone-hosted read-only household session exist. Review the listener and test peer connectivity. Verified pack transfer and shared queries remain. |
-| Setup, help and readiness | Partly built | Offline readiness and help exist. Portable setup remains. |
+| Household sharing | Partly built | A phone can share a selected household snapshot, verified templates, and optional directions with a guest browser. Guests can search, export the shared locations, and submit notes or pins for host review. Guests can ask for cited quotes from the selected verified public templates. Questions stay in the guest browser. Verify the workflow on a second device and extend shared queries to eligible installed references. Nearby can exchange two public templates and the verified MIT-licensed Offline Starter library pack. Extend exchange to more cleared editions and eligible saved web sources. |
+| Setup, help and readiness | Partly built | Readiness reports installed bundle status and coverage at saved Home. Its functional checks can open installed articles and PDFs, find citable passages and places, calculate both route modes, and try an on-device answer with a sample passage. Content Packs can verify and install catalog editions from a local folder. Portable setup for other content remains. |
 
 ## Gaps found in code review
 
@@ -24,8 +47,8 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 
 - Verify that interrupted Files imports, map imports, pack installs and repairs recover correctly on an iPhone. Imports check storage, report progress and can be cancelled. Unreadable archive folders are reported separately from healthy archives.
 - Measure PDF page indexing and search on the actual Essentials packs. Library merges hits by each archive's rank and supports partial-word searches.
-- Library search refreshes as each archive commits more of its index. Titles outside the indexed portion remain unavailable until their batch finishes.
-- The reader loads each resource fully into memory and refuses anything over 32 MiB, so large PDFs and videos fail. The scheme handler doesn't support byte ranges, so audio and video won't play. Stream large resources and answer range requests.
+- Library search refreshes as each archive commits more of its index. Embedded article titles are searchable during indexing. Full-text results become available as batches commit.
+- The reader loads each resource fully into memory and refuses anything over 32 MiB, so large PDFs and videos fail. The scheme handler answers byte-range requests within that limit. Stream larger resources and verify audio and video playback with real archives.
 - JavaScript is off for every archive, which breaks interactive content such as collapsible sections. Decide per pack, and keep the network block in place.
 - The PDF document list only appears for catalog packs marked as PDF collections. An imported PDF collection opens its main page instead. Listing the documents also scans every entry in the archive.
 - Library can verify the embedded ZIM checksum of imported files and the publisher SHA-256 checksum of catalog packs. Verify both on a device.
@@ -37,8 +60,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 - **Beta.** The bundled catalog has pinned publisher editions and requires an app release to update. Add a way to refresh it and expand language, size, and preset choices against the upstream kit.
 - **Beta.** Add device acceptance checks for an interrupted edition update and for recovery after failed indexing. The old archive stays in the library until the new index is ready.
 - **Beta.** Bulk pack downloads use Wi-Fi. Individual transfers can allow cellular data after size confirmation. Temporary connection failures retry on the original network policy, using resume data when iOS supplies it. Verify pause and resume on a physical phone and evaluate discretionary transfers for Download All.
-- Each pack has one source URL. Fall back to another official mirror when it fails.
-- A checksum failure deletes the whole download. Retry once before discarding it, and report which mirror served it.
+- Editions with a verified fallback mirror retry on that mirror after eligible origin failures. Checksum failures get one clean retry. Verify publisher recovery and installed-edition preservation on a device.
 
 ### Maps
 
@@ -49,16 +71,36 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 - Region coverage is a bounding box. Show coverage as the region's actual outline where it isn't rectangular.
 - Regional place indexes are excluded from device backup.
 - Installed routing packs support walking and driving directions with individual steps. Verify each mode on a physical iPhone in airplane mode.
+- Map can cache WSDOT’s reported Puget Sound closures after opt-in and flag a closure near an offline route. Verify overlay restoration after a style reload, bounded reconnect updates, source freshness, and offline reopening on iPhone. A proximity match provides an advisory. Matching closures to graph edges and travel directions is a separate milestone. [WSDOT Road Closures](https://data.wsdot.wa.gov/arcgis/rest/services/TravelInformation/TravelInfoRoadAlerts/FeatureServer/2)
 
 ### Ask
 
-- Apple's on-device model has safety guardrails that may refuse medical and emergency questions, and a refusal currently shows as a generic failure. Measure refusals on a question set drawn from the Essentials packs, and show the passages with a clear explanation when the model declines.
-- Retrieval uses 64-word search snippets rather than article sections, and the stop-word list and prompts are English only.
+- Ask shows matching quotes if the model fails or the retrieved passages do not support a generated answer. Measure on-device responses to a question set drawn from the Essentials packs, including medical and emergency references.
+- Retrieval uses 64-word search snippets. English and Spanish questions have offline keyword fallbacks. Verify that Apple Intelligence answers in the question’s language and cites the retrieved passages on an eligible iPhone.
 
 ### Household
 
-- Household notes, home and pins can move through an iPhone backup file or the desktop kit's notes and places files. Verify Files import, export and damaged-data recovery on a device.
-- Printable references depend on exact edition filenames and page numbers. A catalog update silently drops them. The post-disaster source isn't in the catalog. Check page ranges whenever the catalog changes an edition.
+- Household notes, home and pins can move through an iPhone backup file or the desktop kit's notes and places files. Roundtrips preserve desktop pin IDs and saved Home zoom. Importing the same Home location also keeps its iPhone note. Verify Files import, export and damaged-data recovery on a device.
+- Printable references match verified catalog installations by the exact archive edition filename. Recheck paths and page ranges whenever a catalog edition changes. [Print reference definitions](Sources/TinfoilKit/HouseholdPrinting.swift)
+
+#### Print reference checks
+
+On November 24, 2026, bounded HTTP 206 reads located all nine configured PDF paths in the five publisher archives. The largest stored cluster was 6,269,263 bytes. The extracted PDFs were unencrypted and below the reader's resource size limit. `pdfinfo` and `pdftotext` confirmed the subjects and ranges below. The checks used the original PDFs' one-based page positions, which the app converts to zero-based PDFKit indexes. [Water 2024-08](https://download.kiwix.org/zim/other/zimgit-water_en_2024-08.zim.meta4) · [Field medicine 2024-08](https://download.kiwix.org/zim/other/zimgit-medicine_en_2024-08.zim.meta4) · [Post-disaster 2024-05](https://download.kiwix.org/zim/other/zimgit-post-disaster_en_2024-05.zim.meta4) · [Military medicine 2026-10](https://download.kiwix.org/zim/zimit/irp.fas.org_en_military-medicine_2026-10.zim.meta4) · [Ready.gov 2026-10](https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim.meta4)
+
+| Excerpt | PDF pages | Printed labels | Preview pages |
+| --- | --- | --- | ---: |
+| Safe drinking water | 1–2 | Unnumbered | 2 |
+| Emergency first aid | 124–129 | 77–82 | 6 |
+| Diarrhea and dehydration | 198–199 | 151–152 | 2 |
+| Power outages | 1–2 | Unnumbered | 2 |
+| Burns and broken bones | 143–147 | 96–100 | 5 |
+| Tourniquets for severe bleeding | 45–49 | 2-25 to 2-29 | 5 |
+
+The post-disaster copies of the water guide, *Where There Is No Doctor* and FM 4-25.11 matched their primary PDF digests byte for byte. The separate military-medicine copy of FM 4-25.11 has a different digest and matched the same excerpt topic and page labels. Both Ready.gov paths point to byte-identical two-page FEMA handouts.
+
+For the Apple check, use a dedicated simulator or test phone. Install Water Treatment and Field Medicine from Content Packs with publisher checksum verification. In a build that includes the desktop starter packs, check the fallbacks with an isolated library containing only Post-Disaster, then only Military Medicine. After an airplane-mode restart, open each expected preview and compare its first and last pages and page count to the table. Check the system print preview for the excerpt and household sheet.
+
+The optional Ready.gov download uses the pinned October 2026 edition. Verify the home page, Power Outages, Earthquakes, and Be Informed in WebKit in Airplane Mode. Follow a link with a pagination query, then test relative links after a cross-directory redirect. Confirm the two-page Power outages preview under Print the Essentials. The installed archive must carry the catalog edition metadata for this preview. [Ready.gov publisher manifest](https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim.meta4)
 
 ### Tests and build
 
@@ -124,5 +166,7 @@ Compare the iOS app to desktop revision `6417927`. Revisit the inventory as each
 | Regional navigation | Basemap only | Install a named region with explicit coverage. Find street addresses and nearby services, search with coordinates, and follow selectable walking and driving steps. Check edge snapping, one-way streets and turn restrictions with offline fixtures. |
 | Ask and local chat | Search only | Verify offline search and cited answers, and verify multi-turn Offline Chat on an Apple Intelligence device. Add an optional downloadable model and map questions with deterministic fallback. |
 | Household sharing | No | Start after pack installation is reliable. First transfer a single verified pack between two nearby phones, then add a phone-hosted session with shared queries. Declare local network and Bonjour usage. iOS suspends the host when the app leaves the foreground, so state that the host phone keeps the app open and test reconnecting after interruptions. Verify access rules and notes conflicts on two real devices. Serve only content whose redistribution terms permit it. Evaluate a desktop companion that talks to the existing LAN service separately. |
+
+The Ready.gov English 2026-10 archive remains a catalog candidate. Kiwix lists it as an open-access archive with matching SHA-256 sidecars. A one-byte HTTP 206 response confirmed 2,063,895,408 total bytes. The archived home page links to `power-outages`, `earthquakes` and `be-informed`. The ZIM contains their `www.ready.gov/`-prefixed paths as HTML entries and the Household Printing PDF at `www.ready.gov/sites/default/files/2024-08/ready.gov_power-outage_info-sheet.pdf`. The home page is stored as `www.ready.gov/`, with no slashless entry. Foundation's `URL.path` returns `/www.ready.gov` for `zim://archive/www.ready.gov/`, so the current reader loses the trailing slash at lookup. Before adding this edition, preserve the exact archived path and verify offline home, article navigation and printing on iOS. Individual files retain their source terms. [Kiwix edition metadata](https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim.meta4) · [Example publisher terms](https://www.ready.gov/sites/default/files/2020-03/ready_emergency-financial-first-aid-toolkit.pdf)
 
 Use local fixtures and isolated simulator build directories. Check representative production data and install each completed fix or feature on the connected iPhone when available.

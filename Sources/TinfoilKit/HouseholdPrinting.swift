@@ -1,15 +1,17 @@
 import CoreGraphics
 import CoreLocation
 import CoreText
+import CryptoKit
 import Foundation
 import PDFKit
 import ZIMArchive
 
 enum HouseholdPrinting {
     struct Reference: Identifiable, Sendable {
-        struct Source: Sendable {
+        struct Source: Hashable, Sendable {
             let archive: String
             let path: String
+            let sha256: String
         }
 
         let id: String
@@ -28,13 +30,13 @@ enum HouseholdPrinting {
     struct AvailableReference: Identifiable, Sendable {
         let reference: Reference
         let file: URL
-        let path: String
+        let source: Reference.Source
         let attribution: String
 
         var id: String { reference.id }
 
         func printablePDF() throws -> Data {
-            let original = try Self.openPDF(file: file, path: path, pages: reference.pages)
+            let original = try Self.openPDF(file: file, source: source, pages: reference.pages)
             let excerpt = PDFDocument()
             excerpt.documentAttributes = original.documentAttributes
             for pageNumber in reference.pages {
@@ -48,10 +50,11 @@ enum HouseholdPrinting {
             return data
         }
 
-        static func openPDF(file: URL, path: String, pages: ClosedRange<Int>) throws -> PDFDocument {
+        static func openPDF(file: URL, source: Reference.Source, pages: ClosedRange<Int>) throws -> PDFDocument {
             let archive = try ZIMArchive(fileURL: file)
-            let resource = try archive.resource(at: path)
+            let resource = try archive.resource(at: source.path)
             guard resource.mimeType == "application/pdf",
+                  SHA256.hash(data: resource.data).map({ String(format: "%02x", $0) }).joined() == source.sha256,
                   let pdf = PDFDocument(data: resource.data), !pdf.isLocked, pdf.allowsPrinting,
                   pages.lowerBound > 0, pdf.pageCount >= pages.upperBound else {
                 throw PrintError.unreadableReference
@@ -60,19 +63,22 @@ enum HouseholdPrinting {
         }
     }
 
-    // Page numbers match the editions checked in the desktop kit's printable reference list.
-    // Each ZIM filename identifies an edition. New editions need their page numbers checked.
+    // Recheck the exact PDF and its physical page numbers whenever a source edition changes.
+    private static let waterPDF = "480d04e43dc0e0e56ec408698bb7bf60195f9236ed7f9091a650cb9cec72d824"
+    private static let noDoctorPDF = "72d0a415c9bdb1a68a9fcb86316ab27b105d628baa36e8be810b4d1407053a1e"
+    private static let armyFirstAidPDF = "f4b7d1e5f3597d81bb185b727bfca3c21377b2e63fd652b1ae7642e635a812f6"
+    private static let powerOutagePDF = "d98a6ca01ba91c8b5a6d4772ce46dec7ecc8481eab5778373b5d1b54e49f4697"
     private static let noDoctor = [
-        Reference.Source(archive: "zimgit-medicine_en_2024-08.zim", path: "files/First Aid and Medicine (11).pdf"),
-        Reference.Source(archive: "zimgit-post-disaster_en_2024-05.zim", path: "files/First Aid and Medicine (11).pdf")
+        Reference.Source(archive: "zimgit-medicine_en_2024-08.zim", path: "files/First Aid and Medicine (11).pdf", sha256: noDoctorPDF),
+        Reference.Source(archive: "zimgit-post-disaster_en_2024-05.zim", path: "files/First Aid and Medicine (11).pdf", sha256: noDoctorPDF)
     ]
 
     private static let references = [
         Reference(id: "water", title: "Safe drinking water",
                   document: "Purifying Water During an Emergency · Washington State Department of Health", pages: 1...2,
                   sources: [
-                    .init(archive: "zimgit-water_en_2024-08.zim", path: "files/Water (2).pdf"),
-                    .init(archive: "zimgit-post-disaster_en_2024-05.zim", path: "files/Water (2).pdf")
+                    .init(archive: "zimgit-water_en_2024-08.zim", path: "files/Water (2).pdf", sha256: waterPDF),
+                    .init(archive: "zimgit-post-disaster_en_2024-05.zim", path: "files/Water (2).pdf", sha256: waterPDF)
                   ]),
         Reference(id: "first-aid", title: "Emergency first aid", document: "Where There Is No Doctor",
                   pages: 124...129, sources: noDoctor),
@@ -81,18 +87,21 @@ enum HouseholdPrinting {
         Reference(id: "power", title: "Power outages", document: "Be Prepared for a Power Outage · Ready.gov", pages: 1...2,
                   sources: [
                     .init(archive: "ready.gov_en_all_2026-10.zim",
-                          path: "www.ready.gov/sites/default/files/2024-08/ready.gov_power-outage_info-sheet.pdf"),
+                          path: "www.ready.gov/sites/default/files/2024-08/ready.gov_power-outage_info-sheet.pdf",
+                          sha256: powerOutagePDF),
                     .init(archive: "ready.gov_en_all_2026-10.zim",
-                          path: "www.ready.gov/sites/default/files/2024-03/ready.gov_power-outage_hazard-info-sheet.pdf")
+                          path: "www.ready.gov/sites/default/files/2024-03/ready.gov_power-outage_hazard-info-sheet.pdf",
+                          sha256: powerOutagePDF)
                   ]),
         Reference(id: "injuries", title: "Burns and broken bones", document: "Where There Is No Doctor",
                   pages: 143...147, sources: noDoctor),
         Reference(id: "bleeding", title: "Tourniquets for severe bleeding", document: "First Aid · U.S. Army FM 4-25.11",
                   pages: 45...49, sources: [
-                    .init(archive: "zimgit-medicine_en_2024-08.zim", path: "files/First Aid and Medicine (3).pdf"),
+                    .init(archive: "zimgit-medicine_en_2024-08.zim", path: "files/First Aid and Medicine (3).pdf", sha256: armyFirstAidPDF),
                     .init(archive: "irp.fas.org_en_military-medicine_2026-10.zim",
-                          path: "irp.fas.org/doddir/milmed/first.pdf"),
-                    .init(archive: "zimgit-post-disaster_en_2024-05.zim", path: "files/First Aid and Medicine (3).pdf")
+                          path: "irp.fas.org/doddir/milmed/first.pdf",
+                          sha256: "9abc4cc0712025715e15ef76a8c1a29b33608fe214e30d5488c2391f25b1ad42"),
+                    .init(archive: "zimgit-post-disaster_en_2024-05.zim", path: "files/First Aid and Medicine (3).pdf", sha256: armyFirstAidPDF)
                   ])
     ]
 
@@ -112,7 +121,7 @@ enum HouseholdPrinting {
     static func availableReferences(in installed: [InstalledSource]) throws -> [AvailableReference] {
         struct Candidate: Hashable {
             let file: URL
-            let path: String
+            let source: Reference.Source
         }
 
         // Multiple references can be excerpts of the same PDF.
@@ -121,15 +130,15 @@ enum HouseholdPrinting {
             try Task.checkCancellation()
             for source in reference.sources {
                 for edition in installed where edition.archive == source.archive {
-                    let candidate = Candidate(file: edition.file, path: source.path)
+                    let candidate = Candidate(file: edition.file, source: source)
                     if pageCounts[candidate] == nil {
                         pageCounts[candidate] = (try? AvailableReference.openPDF(
-                            file: edition.file, path: source.path, pages: 1...1
+                            file: edition.file, source: source, pages: 1...1
                         ).pageCount) ?? 0
                     }
                     if let count = pageCounts[candidate], count >= reference.pages.upperBound {
                         return AvailableReference(
-                            reference: reference, file: edition.file, path: source.path, attribution: edition.attribution
+                            reference: reference, file: edition.file, source: source, attribution: edition.attribution
                         )
                     }
                 }

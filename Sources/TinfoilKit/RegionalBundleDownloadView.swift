@@ -7,6 +7,7 @@ struct RegionalBundleDownloadView: View {
     private let downloader = RegionalBundleDownload.shared
     @State private var manifestURL = ""
     @State private var checksum = ""
+    @State private var selection: RegionalBundleCatalog.Entry?
     @State private var cellular = false
     @State private var pending: RegionalBundleDownload.Pending?
     @State private var task: Task<Void, Never>?
@@ -32,6 +33,7 @@ struct RegionalBundleDownloadView: View {
                         LabeledContent("Edition", value: manifest.dataVersion)
                         LabeledContent("Download size",
                                        value: manifest.assets.downloadByteCount.formatted(.byteCount(style: .file)))
+                        LabeledContent("Coverage", value: coverage(manifest.bounds))
                         Link("Data source", destination: manifest.source)
                         Link("\(manifest.attribution) · \(manifest.license)", destination: manifest.licenseURL)
                         LabeledContent("Network", value: pending.cellular ? "Wi-Fi and cellular" : "Wi-Fi only")
@@ -44,18 +46,7 @@ struct RegionalBundleDownloadView: View {
                         }
                     }
                 } else if !invalidPending, !waitingForTransfer {
-                    Section {
-                        TextField("HTTPS manifest URL", text: $manifestURL)
-                            .keyboardType(.URL)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        TextField("Manifest SHA-256", text: $checksum)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                    } footer: {
-                        Text("Use an HTTPS link and a SHA-256 you received from a trusted source.")
-                    }
-                    .disabled(task != nil)
+                    sourceSelection
                     Toggle("Allow cellular data", isOn: $cellular)
                         .disabled(task != nil)
                 }
@@ -81,7 +72,7 @@ struct RegionalBundleDownloadView: View {
                             Button("Discard download", role: .destructive) { confirmingDiscard = true }
                         } else if pending == nil {
                             Button("Review download", action: loadManifest)
-                                .disabled(manifestURL.isEmpty || checksum.isEmpty)
+                                .disabled(selection == nil && (manifestURL.isEmpty || checksum.isEmpty))
                         } else {
                             Button(attemptedInstall ? "Resume download" : "Download and install", action: install)
                             Button("Discard download", role: .destructive) { confirmingDiscard = true }
@@ -109,10 +100,74 @@ struct RegionalBundleDownloadView: View {
         .onDisappear { task?.cancel() }
     }
 
+    @ViewBuilder
+    private var sourceSelection: some View {
+        if let selection {
+            Section("Selected region") {
+                LabeledContent("Region", value: selection.region)
+                LabeledContent("Edition", value: selection.edition)
+                LabeledContent("Download size", value: selection.byteCount.formatted(.byteCount(style: .file)))
+                Button("Choose another source") {
+                    self.selection = nil
+                    error = nil
+                }
+            }
+            .disabled(task != nil)
+        } else {
+            let entries = RegionalBundleCatalog.entries
+            if !entries.isEmpty {
+                Section {
+                    ForEach(entries) { entry in
+                        Button {
+                            selection = entry
+                            error = nil
+                        } label: {
+                            VStack(alignment: .leading) {
+                                Text(entry.region)
+                                Text(entry.byteCount.formatted(.byteCount(style: .file)))
+                                    .foregroundStyle(.secondary)
+                                    .font(.subheadline)
+                            }
+                        }
+                        .accessibilityIdentifier("regional-catalog-\(entry.id)")
+                    }
+                } header: {
+                    Text("Named regions")
+                } footer: {
+                    Text("These bundles include a basemap, address and service search, and walking and driving data.")
+                }
+                .disabled(task != nil)
+            }
+            Section {
+                TextField("HTTPS manifest URL", text: $manifestURL)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("Manifest SHA-256", text: $checksum)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            } header: {
+                Text("Publisher manifest")
+            } footer: {
+                Text("Use an HTTPS link and a SHA-256 you received from a trusted source.")
+            }
+            .disabled(task != nil)
+        }
+    }
+
+    private func coverage(_ bounds: RoutingPack.Bounds) -> String {
+        let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(3))
+        return "Lat \(bounds.south.formatted(format))…\(bounds.north.formatted(format)), lon \(bounds.west.formatted(format))…\(bounds.east.formatted(format))"
+    }
+
     private func loadManifest() {
         begin("Checking manifest") { _ in
-            let source = try RegionalBundleDownloadSource(url: manifestURL, sha256: checksum)
-            pending = try await downloader.load(source, cellular: cellular)
+            if let selection {
+                pending = try await downloader.load(selection, cellular: cellular)
+            } else {
+                let source = try RegionalBundleDownloadSource(url: manifestURL, sha256: checksum)
+                pending = try await downloader.load(source, cellular: cellular)
+            }
         }
     }
 
