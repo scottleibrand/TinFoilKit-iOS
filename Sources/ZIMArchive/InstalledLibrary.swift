@@ -267,7 +267,7 @@ public actor InstalledLibrary {
             try Task.checkCancellation()
             let candidate: URL
             if moving {
-                try Self.checkRegularFile(source)
+                _ = try Self.regularFileSize(source)
                 candidate = source
             } else {
                 try Self.stageCopy(source, to: stagedFile, storage: storage,
@@ -359,19 +359,21 @@ public actor InstalledLibrary {
         if let error = copyError { throw error }
     }
 
-    private static func checkRegularFile(_ file: URL) throws {
-        let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
-        guard values.isRegularFile == true, values.isSymbolicLink != true else {
+    private static func regularFileSize(_ file: URL) throws -> Int64 {
+        // A download can replace or truncate the file while reusing the original URL.
+        let current = URL(fileURLWithPath: file.path)
+        let values = try current.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true, let size = values.fileSize else {
             throw ImportError.invalidFile
         }
+        return Int64(size)
     }
 
     private static func copy(
         _ file: URL, to destination: URL, storage: URL, expectedByteCount: Int64?,
         progress: @escaping @Sendable (Double) -> Void
     ) throws {
-        try checkRegularFile(file)
-        let size = Int64(try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+        let size = try regularFileSize(file)
         if let expectedByteCount, size != expectedByteCount { throw ImportError.sizeMismatch }
         let available = try storage.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             .volumeAvailableCapacityForImportantUsage
@@ -408,10 +410,8 @@ public actor InstalledLibrary {
     }
 
     private static func verify(_ file: URL, expectedHash: String, expectedByteCount: Int64?) throws {
-        if let expectedByteCount {
-            try checkRegularFile(file)
-            let size = Int64(try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
-            guard size == expectedByteCount else { throw ImportError.sizeMismatch }
+        if let expectedByteCount, try regularFileSize(file) != expectedByteCount {
+            throw ImportError.sizeMismatch
         }
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
