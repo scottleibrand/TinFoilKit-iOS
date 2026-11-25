@@ -1,7 +1,25 @@
+import PDFKit
 import XCTest
 @testable import TinfoilKit
 
 final class ArchiveReadRangeTests: XCTestCase {
+    @MainActor
+    func testLargeArchivePDFOpensFromTemporaryFileAndReleasesIt() async throws {
+        let fixture = URL.documentsDirectory.appendingPathComponent("large-offline-pdf.zim")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: fixture.path),
+                          "Build and stage the LargePDFFixture in the dedicated simulator’s Documents.")
+        let reader = ArchiveReader(file: fixture)
+        var staged = try await reader.prepareLargePDF(at: "large.pdf")
+        let url = try XCTUnwrap(staged?.url)
+        var document = staged.flatMap(FileBackedArchivePDF.init)
+        staged = nil
+        XCTAssertEqual(document?.pageCount, 1)
+        XCTAssertTrue(document?.page(at: 0)?.string?.contains("Large offline PDF fixture") == true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        document = nil
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
     func testSelectsClosedOpenAndSuffixRanges() {
         XCTAssertEqual(ArchiveReadRange.parse("bytes=1-3", count: 8), .partial(1..<4))
         XCTAssertEqual(ArchiveReadRange.parse("bytes=4-", count: 8), .partial(4..<8))

@@ -1,6 +1,23 @@
 import PDFKit
 import SwiftUI
 
+final class TemporaryArchivePDF: Sendable {
+    let url: URL
+
+    init(url: URL) { self.url = url }
+
+    deinit { try? FileManager.default.removeItem(at: url) }
+}
+
+final class FileBackedArchivePDF: PDFDocument {
+    private let temporary: TemporaryArchivePDF
+
+    init?(_ temporary: TemporaryArchivePDF) {
+        self.temporary = temporary
+        super.init(url: temporary.url)
+    }
+}
+
 struct ArchivePDFReader: View {
     let reader: ArchiveReader
     let archiveID: UUID
@@ -55,12 +72,23 @@ struct ArchivePDFReader: View {
         }
         .task {
             do {
+                if let temporary = try await reader.prepareLargePDF(at: path) {
+                    try Task.checkCancellation()
+                    guard let document = FileBackedArchivePDF(temporary) else {
+                        throw CocoaError(.fileReadCorruptFile)
+                    }
+                    resourceTitle = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+                    self.document = document
+                    return
+                }
                 let resource = try await reader.resource(at: path)
+                try Task.checkCancellation()
                 guard resource.mimeType == "application/pdf", let document = PDFDocument(data: resource.data) else {
                     throw CocoaError(.fileReadCorruptFile)
                 }
                 resourceTitle = resource.title.isEmpty ? nil : resource.title
                 self.document = document
+            } catch is CancellationError {
             } catch {
                 errorMessage = error.localizedDescription
             }
