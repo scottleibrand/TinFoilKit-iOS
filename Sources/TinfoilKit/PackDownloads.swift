@@ -997,6 +997,13 @@ final class PackTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Senda
 
 final class DownloadAppDelegate: NSObject, UIApplicationDelegate {
     func application(
+        _ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
+        LibraryIndexingLifecycle.shared.register()
+        return true
+    }
+
+    func application(
         _ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
         completionHandler: @escaping () -> Void
     ) {
