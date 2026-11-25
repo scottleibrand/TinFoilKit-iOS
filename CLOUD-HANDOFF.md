@@ -51,7 +51,9 @@ Regional Updates shipped with cached official NWS alerts, daily and hourly forec
 
 Deferred Online Ask shipped for approved GPT and Claude questions. Requests wait for the provider key, foreground app and allowed connection. The answer and citations are saved before source capture, which can restart independently. The signed build installed on the paired iPhone. The simulator passed 208 app unit tests and queued, restored, cancelled and removed a request without any provider credentials. A live provider flow still needs a device check. [PR #30](https://github.com/scottleibrand/TinFoilKit-iOS/pull/30)
 
-Offline photo preparation and regional publication staging still need their own acceptance checks. General queries over eligible installed references and guest-browser route generation remain open.
+Offline Chat photo input shipped for the vision-capable on-device model on iOS 27. The simulator passed 213 unit tests and the Offline Chat UI entry test. The signed build installed on the paired iPhone running iOS 27.0.1. A real photo response in airplane mode and an older-Xcode build remain to be verified. [PR #31](https://github.com/scottleibrand/TinFoilKit-iOS/pull/31)
+
+Regional publication staging still needs its own acceptance checks. General queries over eligible installed references and guest-browser route generation remain open.
 
 ## Cloud branches awaiting integration
 
