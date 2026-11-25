@@ -4,6 +4,19 @@ enum NearbyServiceQuestion: String, CaseIterable, Sendable {
     case hospital, urgentCare = "urgent_care", pharmacy, police, fireStation = "fire_station"
     case shelter, gas, grocery, hardware, drinkingWater = "drinking_water"
 
+    static func parseDirections(_ question: String) -> Self? {
+        guard question.utf8.count <= 512 else { return nil }
+        let text = question.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        for prefix in ["how do i get to ", "directions to ", "directions from home to "] where text.hasPrefix(prefix) {
+            let destination = text.dropFirst(prefix.count)
+            guard ["the nearest ", "the closest ", "nearest ", "closest "].contains(where: {
+                destination.hasPrefix($0)
+            }) else { return nil }
+            return parse(String(destination))
+        }
+        return nil
+    }
+
     static func parse(_ question: String) -> Self? {
         guard question.utf8.count <= 512 else { return nil }
         let text = question.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")

@@ -15,7 +15,7 @@ struct TinfoilKitApp: App {
     @AppStorage("hasSeenOfflineStarterGuide") private var hasSeenOfflineStarterGuide = false
     @State private var showingOfflineStarterGuide = false
     @State private var selectedTab: Tab = .library
-    @State private var pendingMapPlace: MapPlace?
+    @State private var pendingMapRequest: MapOpenRequest?
 
     private enum Tab: Hashable {
         case library, map, ask, household
@@ -27,11 +27,11 @@ struct TinfoilKitApp: App {
                 LibraryView(library: .standard, packs: packs, indexing: indexing)
                     .tabItem { Label("Library", systemImage: "books.vertical") }
                     .tag(Tab.library)
-                OfflineMapView(household: household, pendingPlace: $pendingMapPlace)
+                OfflineMapView(household: household, pendingMapRequest: $pendingMapRequest)
                     .tabItem { Label("Map", systemImage: "map") }
                     .tag(Tab.map)
-                AskLibraryView(library: .standard, indexing: indexing, household: household) { place in
-                    pendingMapPlace = place
+                AskLibraryView(library: .standard, indexing: indexing, household: household) { request in
+                    pendingMapRequest = request
                     selectedTab = .map
                 }
                     .tabItem { Label("Ask", systemImage: "questionmark.bubble") }

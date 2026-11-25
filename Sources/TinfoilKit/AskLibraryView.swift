@@ -5,8 +5,9 @@ struct AskLibraryView: View {
     let library: InstalledLibrary
     @ObservedObject var indexing: LibraryIndexing
     @ObservedObject var household: HouseholdStore
-    let openMap: (MapPlace?) -> Void
+    let openMap: (MapOpenRequest?) -> Void
     @AppStorage("askUsesOnDeviceModel") private var useModel = true
+    @State private var includeHouseholdNotes = false
     @FocusState private var questionFocused: Bool
     @FocusState private var serviceAreaFocused: Bool
     @State private var question = ""
@@ -15,6 +16,7 @@ struct AskLibraryView: View {
     @State private var searchedQuestion: String?
     @State private var sources: [SummarySource] = []
     @State private var answer = ""
+    @State private var quotedQuestion: String?
     @State private var progress: String?
     @State private var message: String?
     @State private var unreadableArchives = 0
@@ -26,13 +28,21 @@ struct AskLibraryView: View {
     @State private var cited: AskEvidence?
     @State private var onlineSheet: OnlineSheet?
     @State private var fallbackQuestion: String?
-    @State private var nearbyResult: RegionalPlaceSearch.Nearby?
+    @State private var nearbyResult: NearbyAnswer?
     @State private var needsMapSetup = false
+    @State private var homeRoutes: [HomeDestination] = []
 
     private var currentQuestion: String { question.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var modelEnabled: Bool { useModel && LibraryAnswer.isAvailable }
+    private var householdNotes: String {
+        household.snapshot.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
     private var waterContext: WaterOutageContext? {
         WaterOutageContext(question: currentQuestion, serviceArea: waterServiceArea)
+    }
+    private var quoteIndices: [Int] {
+        guard quotedQuestion == currentQuestion else { return [] }
+        return LibraryPassages.quoteIndices(for: currentQuestion, excerpts: evidence.map(\.excerpt))
     }
 
     var body: some View {
@@ -58,6 +68,11 @@ struct AskLibraryView: View {
                             .buttonStyle(.bordered)
                     }
                     .disabled(request != nil || currentQuestion.isEmpty)
+                    if modelEnabled, waterContext == nil, !householdNotes.isEmpty,
+                       OfflineAskIntent.parse(currentQuestion).canUseHouseholdNotes {
+                        Toggle("Include household notes in the on-device answer", isOn: $includeHouseholdNotes)
+                            .disabled(request != nil)
+                    }
                     if let progress {
                         ProgressView(progress)
                         Button("Stop", role: .cancel) { stop() }
@@ -72,12 +87,18 @@ struct AskLibraryView: View {
                             Text("Preparing library search.")
                         }
                     } else if !modelEnabled {
-                        Text("Ask searches the saved library when the model is off.")
+                        Text("Ask can highlight quotes from saved sources without the on-device model.")
                     }
                 }
                 results
             }
             .scrollDismissesKeyboard(.interactively)
+            .onChange(of: question) {
+                homeRoutes = []
+                nearbyResult = nil
+                includeHouseholdNotes = false
+                quotedQuestion = nil
+            }
             .navigationTitle("Ask")
             .toolbar {
                 if questionFocused || serviceAreaFocused {
@@ -145,6 +166,24 @@ struct AskLibraryView: View {
         if let nearbyResult {
             nearbyAnswer(nearbyResult)
         }
+        if !homeRoutes.isEmpty {
+            Section("Directions from Home") {
+                ForEach(homeRoutes) { destination in
+                    ForEach(destination.modes) { mode in
+                        Button {
+                            openMap(MapOpenRequest(place: destination.place,
+                                                   route: .init(origin: destination.origin, mode: mode)))
+                        } label: {
+                            VStack(alignment: .leading) {
+                                Label("\(mode.title) to \(destination.place.name)",
+                                      systemImage: mode == .walking ? "figure.walk" : "car")
+                                Text(destination.place.kind).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if !answer.isEmpty {
             Section("Answer") {
                 Text(AnswerCitations.linkedText(answer, sourceCount: min(6, evidence.count)))
@@ -156,6 +195,20 @@ struct AskLibraryView: View {
                         cited = evidence[index]
                         return .handled
                     })
+            }
+        }
+        let quotes = quoteIndices
+        if !quotes.isEmpty {
+            Section("Quotes from saved sources") {
+                ForEach(quotes, id: \.self) { index in
+                    let reference = evidence[index]
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(verbatim: reference.excerpt).textSelection(.enabled)
+                        Button("[\(index + 1)] \(reference.title)", systemImage: "book") { cited = reference }
+                            .accessibilityIdentifier("ask-quote-\(index + 1)")
+                        Text(reference.origin).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
         }
         if request == nil, let fallbackQuestion, fallbackQuestion == currentQuestion {
@@ -209,11 +262,13 @@ struct AskLibraryView: View {
         }
     }
 
-    private func nearbyAnswer(_ result: RegionalPlaceSearch.Nearby) -> some View {
-        let match = result.match
+    private func nearbyAnswer(_ result: NearbyAnswer) -> some View {
+        let match = result.nearby.match
         let place = match.place
         let metadata = match.region.metadata
-        let distance = Measurement(value: result.distanceMeters, unit: UnitLength.meters)
+        let destinationPlace = MapPlace(id: match.id, name: place.name, kind: place.categoryLabel,
+                                        latitude: place.coordinate.latitude, longitude: place.coordinate.longitude)
+        let distance = Measurement(value: result.nearby.distanceMeters, unit: UnitLength.meters)
             .formatted(.measurement(width: .abbreviated, usage: .road))
         return Section {
             VStack(alignment: .leading, spacing: 5) {
@@ -222,9 +277,14 @@ struct AskLibraryView: View {
                 Text("\(distance) straight-line distance from Home")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
+            ForEach(result.routeModes) { mode in
+                Button(mode == .walking ? "Walk from Home" : "Drive from Home",
+                       systemImage: mode == .walking ? "figure.walk" : "car") {
+                    openMap(MapOpenRequest(place: destinationPlace, route: .init(origin: result.routeOrigin, mode: mode)))
+                }
+            }
             Button("Show on map", systemImage: "map") {
-                openMap(MapPlace(id: match.id, name: place.name, kind: place.categoryLabel,
-                                 latitude: place.coordinate.latitude, longitude: place.coordinate.longitude))
+                openMap(MapOpenRequest(place: destinationPlace))
             }
             if let destination = MapCoordinateText.googleMapsURL(place.coordinate) {
                 Link(destination: destination) {
@@ -256,25 +316,66 @@ struct AskLibraryView: View {
             unreadableArchives = 0
         }
         answer = ""
+        quotedQuestion = nil
         fallbackQuestion = nil
         message = nil
         nearbyResult = nil
         needsMapSetup = false
-        let nearbyCategory = mode == .ask ? NearbyServiceQuestion.parse(question)
-            .flatMap { RegionalPlaceIndex.Category(rawValue: $0.rawValue) } : nil
-        switch (mode, nearbyCategory) {
+        homeRoutes = []
+        let onDevice = modelEnabled
+        let wantsNotes = includeHouseholdNotes
+        if mode != .search { includeHouseholdNotes = false }
+        let intent = mode == .ask ? OfflineAskIntent.parse(question) : .reference
+        if case let .destination(destination) = intent, prepareKnownRoute(destination) { return }
+
+        switch (mode, intent) {
         case (.answerFromPassages, _): progress = "Reading the matching passages"
-        case (_, .some): progress = "Searching installed place data"
-        default: progress = "Searching the library"
+        case (_, .reference): progress = "Searching the library"
+        default: progress = "Searching installed place data"
         }
-        request = Request(question: question, mode: mode, useModel: modelEnabled, waterContext: waterContext,
-                          nearbyCategory: nearbyCategory)
+        let context = waterContext
+        let notes: String? = if mode != .search, intent.canUseHouseholdNotes, context == nil,
+                               onDevice, wantsNotes, !householdNotes.isEmpty {
+            String(householdNotes.prefix(LibraryAnswerPrompt.maximumHouseholdNotesLength))
+        } else {
+            nil
+        }
+        request = Request(question: question, mode: mode, useModel: onDevice, waterContext: context,
+                          intent: intent, householdNotes: notes)
+    }
+
+    private func prepareKnownRoute(_ question: HomeRouteQuestion) -> Bool {
+        let snapshot = household.snapshot
+        let matches = question.matchingPins(in: snapshot.pins.map(\.name))
+        guard matches.count <= 1 else {
+            message = "More than one saved pin has that name. Rename one in Household to choose a unique destination."
+            return true
+        }
+        let destination: MapPlace
+        if let index = matches.first {
+            let pin = snapshot.pins[index]
+            destination = MapPlace(id: pin.id.uuidString, name: pin.name, kind: "Saved pin",
+                                   latitude: pin.latitude, longitude: pin.longitude)
+        } else if let point = MapCoordinateText.parse(question.rawDestination) {
+            let coordinates = MapCoordinateText.decimal(point)
+            destination = MapPlace(id: coordinates, name: coordinates, kind: "Coordinates",
+                                   latitude: point.latitude, longitude: point.longitude)
+        } else {
+            return false
+        }
+        guard let home = snapshot.home else {
+            showMissingHome()
+            return true
+        }
+        homeRoutes = [HomeDestination(place: destination, origin: home, modes: question.mode.travelModes)]
+        return true
     }
 
     private func stop() {
         request = nil
         progress = nil
         answer = ""
+        quotedQuestion = nil
         fallbackQuestion = nil
         message = "Stopped."
     }
@@ -286,18 +387,27 @@ struct AskLibraryView: View {
                 progress = nil
             }
         }
-        if let category = request.nearbyCategory {
-            await answerNearby(category, request: request)
+        if case let .destination(destinationRoute) = request.intent {
+            if await answerDestinationRoute(destinationRoute, request: request) { return }
+            guard self.request?.id == request.id, !Task.isCancelled else { return }
+            progress = "Searching the library"
+        }
+        if case let .service(service, mode) = request.intent,
+           let category = RegionalPlaceIndex.Category(rawValue: service.rawValue) {
+            await answerNearby(category, routeModes: mode?.travelModes ?? [], request: request)
             return
         }
         do {
             if request.mode != .answerFromPassages {
                 await refreshSavedContent(for: request.question, waterContext: request.waterContext)
+                let referenceQuery = request.waterContext?.searchQuestion(request.question) ?? request.question
+                let hasSavedReferenceText = !AskEvidence.combine([], savedAnswers: savedAnswers,
+                    savedWebSources: savedWebSources, question: referenceQuery).isEmpty
                 var found = try await LibraryPassages.search(
                     question: request.question, waterContext: request.waterContext, archives: indexing.archives, library: library
                 )
                 let retryUntil = ContinuousClock.now + .seconds(12)
-                while found.sources.isEmpty, savedAnswers.isEmpty, savedWebSources.isEmpty,
+                while found.sources.isEmpty, !hasSavedReferenceText,
                       indexing.hasPendingIndexes, ContinuousClock.now < retryUntil {
                     try Task.checkCancellation()
                     guard self.request?.id == request.id else { return }
@@ -307,7 +417,7 @@ struct AskLibraryView: View {
                         question: request.question, waterContext: request.waterContext, archives: indexing.archives, library: library
                     )
                 }
-                if found.sources.isEmpty, savedAnswers.isEmpty, savedWebSources.isEmpty, !indexing.hasPendingIndexes,
+                if found.sources.isEmpty, !hasSavedReferenceText, !indexing.hasPendingIndexes,
                    request.mode == .ask, request.useModel, request.waterContext == nil {
                     progress = "Checking related search terms"
                     let queries = (try? await LibraryAnswer.suggestedQueries(for: request.question)) ?? []
@@ -331,6 +441,11 @@ struct AskLibraryView: View {
                 return
             }
             guard !evidence.isEmpty else {
+                if !savedAnswers.isEmpty {
+                    message = "Found saved answers, but no matching reference passages."
+                    fallbackQuestion = request.question
+                    return
+                }
                 message = indexing.hasPendingIndexes
                     ? "No matches in searchable content yet. Indexing is still running."
                     : "No matching passages. Try other terms."
@@ -341,7 +456,8 @@ struct AskLibraryView: View {
                 progress = "Reading the matching passages"
                 let answer = try await LibraryAnswer.stream(
                     question: request.question,
-                    passages: evidence.prefix(6).map { ($0.title, $0.excerpt) }
+                    passages: evidence.prefix(6).map { ($0.title, $0.excerpt) },
+                    householdNotes: request.householdNotes
                 ) { partial in
                     if self.request?.id == request.id { self.answer = partial }
                 }
@@ -353,6 +469,7 @@ struct AskLibraryView: View {
                     fallbackQuestion = request.question
                 }
             } else if request.mode == .ask {
+                quotedQuestion = request.question
                 fallbackQuestion = request.question
             }
         } catch is CancellationError {
@@ -366,11 +483,66 @@ struct AskLibraryView: View {
         }
     }
 
-    private func answerNearby(_ category: RegionalPlaceIndex.Category, request: Request) async {
+    /// Returns false for ambiguous wording that did not resolve to a local destination.
+    private func answerDestinationRoute(_ question: HomeRouteQuestion, request: Request) async -> Bool {
+        guard self.request?.id == request.id, !Task.isCancelled else { return true }
+        guard let home = household.snapshot.home else {
+            if question.allowsLibraryFallback { return false }
+            showMissingHome()
+            return true
+        }
+        do {
+            let matches = try await RegionalPlaceSearch.destinationsInstalled(
+                matching: question, from: home, storage: RegionalPlaceStorage()
+            )
+            guard self.request?.id == request.id, !Task.isCancelled else { return true }
+            guard let matches else {
+                if question.allowsLibraryFallback { return false }
+                message = "Import regional place data from Map to look up this destination offline."
+                needsMapSetup = true
+                return true
+            }
+            guard !matches.isEmpty else {
+                if question.allowsLibraryFallback { return false }
+                message = "No exact match in installed place data. Check the name or address, or search in Map."
+                needsMapSetup = true
+                return true
+            }
+            homeRoutes = matches.map { match in
+                let place = match.place
+                let region = match.region.metadata.region
+                let name = question.isStreetAddress ? place.address : place.name
+                let context = question.isStreetAddress ? place.name : place.address
+                let detail: String
+                if !context.isEmpty, name != context {
+                    detail = "\(context) · \(region)"
+                } else if matches.count > 1 {
+                    detail = "\(MapCoordinateText.decimal(place.coordinate)) · \(region)"
+                } else {
+                    detail = region
+                }
+                let destination = MapPlace(id: match.id, name: name, kind: detail,
+                                           latitude: place.coordinate.latitude, longitude: place.coordinate.longitude)
+                return HomeDestination(place: destination, origin: home, modes: question.mode.travelModes)
+            }
+        } catch {
+            guard self.request?.id == request.id, !Task.isCancelled else { return true }
+            if question.allowsLibraryFallback { return false }
+            message = "The installed place data could not be searched."
+            needsMapSetup = true
+        }
+        return true
+    }
+
+    private func showMissingHome() {
+        message = "Press and hold your home location in Map and choose Set as home."
+        needsMapSetup = true
+    }
+
+    private func answerNearby(_ category: RegionalPlaceIndex.Category, routeModes: [MapTravelMode], request: Request) async {
         guard self.request?.id == request.id, !Task.isCancelled else { return }
         guard let home = household.snapshot.home else {
-            message = "Press and hold your home location in Map and choose Set as home."
-            needsMapSetup = true
+            showMissingHome()
             return
         }
         do {
@@ -384,7 +556,7 @@ struct AskLibraryView: View {
                 message = "No matching service near Home was found in the installed place data."
                 fallbackQuestion = request.question
             case .match(let nearby):
-                nearbyResult = nearby
+                nearbyResult = NearbyAnswer(nearby: nearby, routeOrigin: home, routeModes: routeModes)
             }
         } catch {
             guard self.request?.id == request.id, !Task.isCancelled else { return }
@@ -399,7 +571,7 @@ struct AskLibraryView: View {
             fallbackQuestion = question
             return
         }
-        for (index, reference) in evidence.prefix(6).enumerated() where reference.isReference {
+        for (index, reference) in evidence.prefix(6).enumerated() {
             if let quote = context.supportedQuote(in: reference.excerpt, title: reference.title) {
                 answer = "A saved reference for \(area) says “\(quote)” [\(index + 1)]"
                 message = "Check the source for the facilities and outage conditions it covers."
@@ -427,7 +599,7 @@ struct AskLibraryView: View {
         let matches = AskEvidence.combine(sources, savedAnswers: savedAnswers, savedWebSources: savedWebSources,
                                           question: waterContext?.searchQuestion(question) ?? question)
         guard let waterContext else { evidence = matches; return }
-        let scoped = matches.filter { $0.isReference && waterContext.relates($0.excerpt, title: $0.title) }
+        let scoped = matches.filter { waterContext.relates($0.excerpt, title: $0.title) }
         let ids = Set(scoped.map(\.id))
         evidence = scoped + matches.filter { !ids.contains($0.id) }
     }
@@ -437,8 +609,6 @@ struct AskLibraryView: View {
         switch evidence {
         case let .archive(source):
             ArchiveReaderView(library: library, archive: source.archive, articlePath: source.match.path)
-        case let .answer(entry, _):
-            OnlineAskSavedAnswerView(entry: entry)
         case let .web(source, _):
             OnlineAskSourceView(source: source)
         }
@@ -454,7 +624,22 @@ struct AskLibraryView: View {
         let mode: Mode
         let useModel: Bool
         let waterContext: WaterOutageContext?
-        let nearbyCategory: RegionalPlaceIndex.Category?
+        let intent: OfflineAskIntent
+        let householdNotes: String?
+    }
+
+    private struct NearbyAnswer {
+        let nearby: RegionalPlaceSearch.Nearby
+        let routeOrigin: HouseholdPlace
+        let routeModes: [MapTravelMode]
+    }
+
+    private struct HomeDestination: Identifiable {
+        let place: MapPlace
+        let origin: HouseholdPlace
+        let modes: [MapTravelMode]
+
+        var id: String { place.id }
     }
 
     private struct OnlineSheet: Identifiable {
@@ -463,98 +648,12 @@ struct AskLibraryView: View {
     }
 }
 
-private enum AskEvidence: Identifiable {
-    case archive(SummarySource)
-    case answer(OnlineAskSavedAnswer, String)
-    case web(OnlineAskSavedSource, String)
-
-    var isReference: Bool {
+private extension HomeRouteQuestion.Mode {
+    var travelModes: [MapTravelMode] {
         switch self {
-        case .archive: true
-        case .web(let source, _): source.text != nil
-        case .answer: false
+        case .walking: [.walking]
+        case .driving: [.driving]
+        case .choose: MapTravelMode.allCases
         }
-    }
-
-    var id: String {
-        switch self {
-        case let .archive(source): source.id
-        case let .answer(entry, _): "saved-answer-\(entry.id)"
-        case let .web(source, _): "saved-source-\(source.id.absoluteString)"
-        }
-    }
-
-    var title: String {
-        switch self {
-        case let .archive(source): source.match.title
-        case let .answer(entry, _): entry.question
-        case let .web(source, _): source.citation.title
-        }
-    }
-
-    var excerpt: String {
-        switch self {
-        case let .archive(source): source.match.excerpt
-        case let .answer(_, text), let .web(_, text): text
-        }
-    }
-
-    var origin: String {
-        switch self {
-        case let .archive(source): source.archive.title
-        case let .answer(entry, _):
-            "Saved \(entry.provider.title) answer · \(entry.savedAt.formatted(date: .abbreviated, time: .omitted))"
-        case let .web(source, _): source.resolvedURL?.host ?? source.citation.url.host ?? "Saved web source"
-        }
-    }
-
-    static func combine(_ local: [SummarySource], savedAnswers: [OnlineAskSavedAnswer],
-                        savedWebSources: [OnlineAskSavedSource], question: String) -> [Self] {
-        let keywords = OnlineAskCache.words(question)
-        var seen: Set<URL> = []
-        var cached: [Self] = savedWebSources.compactMap { source in
-            guard let text = source.text, let fragment = bestFragment(text, keywords: keywords),
-                  seen.insert(source.id).inserted else { return nil }
-            return .web(source, fragment.text)
-        }
-        for entry in savedAnswers {
-            let candidates = entry.sources.compactMap { source -> (OnlineAskSavedSource, Fragment)? in
-                guard let excerpt = source.text ?? source.citation.excerpt,
-                      let fragment = bestFragment(excerpt, keywords: keywords), fragment.score > 0 else { return nil }
-                return (source, fragment)
-            }.sorted { $0.1.score > $1.1.score }
-            if let answer = bestFragment(entry.answer, keywords: keywords) {
-                cached.append(.answer(entry, answer.text))
-            }
-            if let (source, fragment) = candidates.first(where: { !seen.contains($0.0.id) }) {
-                seen.insert(source.id)
-                cached.append(.web(source, fragment.text))
-            }
-        }
-        let locallyIndexed = local.map(Self.archive)
-        return Array(locallyIndexed.prefix(4)) + cached + Array(locallyIndexed.dropFirst(4))
-    }
-
-    private struct Fragment {
-        let text: String
-        let score: Int
-    }
-
-    private static func bestFragment(_ text: String, keywords: Set<String>) -> Fragment? {
-        let clean = text.replacingOccurrences(of: #"\[([^\]]*)\]\(https?://[^)]+\)"#,
-                                             with: "$1", options: .regularExpression)
-        let parts = clean.split(whereSeparator: \.isNewline)
-        var best: Fragment?
-        for part in parts {
-            let words = part.split(whereSeparator: \.isWhitespace)
-            for start in stride(from: 0, to: words.count, by: 65) {
-                let text = words[start..<min(start + 65, words.count)].joined(separator: " ")
-                let score = keywords.intersection(OnlineAskCache.words(text)).count
-                if best.map({ score > $0.score }) ?? true {
-                    best = Fragment(text: text, score: score)
-                }
-            }
-        }
-        return best
     }
 }
