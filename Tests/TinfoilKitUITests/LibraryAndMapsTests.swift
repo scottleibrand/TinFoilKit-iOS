@@ -21,6 +21,34 @@ final class LibraryAndMapsTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Ask"].exists)
     }
 
+    func testInstallsBundledStarterAndOpensAnIndexedChapter() throws {
+        let app = XCUIApplication()
+        app.launch()
+        let starter = app.staticTexts["Tinfoil Kit Offline Starter"]
+        if !starter.exists {
+            let contentPacks = app.buttons["Content packs"]
+            XCTAssertTrue(contentPacks.waitForExistence(timeout: 10))
+            contentPacks.tap()
+            let install = app.buttons["Install bundled copy"]
+            for _ in 0..<5 where !install.exists { app.swipeUp(velocity: .slow) }
+            guard install.exists else {
+                throw XCTSkip("Use the standard profile, which seeds the starter archive.")
+            }
+            install.tap()
+            XCTAssertTrue(app.staticTexts["Installed"].firstMatch.waitForExistence(timeout: 15))
+            app.navigationBars["Content packs"].buttons.firstMatch.tap()
+        }
+        XCTAssertTrue(starter.waitForExistence(timeout: 10))
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("aftershocks")
+        let result = app.staticTexts["Earthquake safety and local updates"].firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 20))
+        result.tap()
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+    }
+
     func testPublisherSearchOpensFromContentPacks() {
         let app = XCUIApplication()
         app.launch()

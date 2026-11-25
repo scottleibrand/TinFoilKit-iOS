@@ -48,7 +48,7 @@ In Map, press and hold a location to copy its coordinates, set it as home, or sa
 
 In **Household → Import and export**, save a household backup to Files or restore one on another iPhone. The same screen imports and exports the desktop kit’s `notes.txt` and `places.json` files individually. If the local household file is damaged, restoring a backup or starting a new household keeps a separate copy of the damaged file.
 
-In **Household → Share on local network**, select the household details to share and start a browser session on a trusted Wi-Fi or Ethernet network with IPv4. The link uses unencrypted HTTP. Anyone on that network who has the link or can watch its traffic can read the selection. The session ends after ten minutes, when you leave the screen, or when you stop it.
+In **Household → Share on local network**, select what guests can read. You can share the verified blank household check-in worksheet and neighborhood status log on their own, or select household details as well. Start the session on a trusted Wi-Fi or Ethernet network with IPv4. The link uses unencrypted HTTP. Anyone on that network who has the link or can watch its traffic can read the selection. Guests can search the shared page, ask for cited quotes from the selected public references, and download shared locations as a GPX file. Questions entered in the shared page stay in the guest’s browser. If you share Home and pins and enable directions, the phone can include walking and driving steps for up to three pins using installed routing data. Use **Allow guests to send notes** or **Allow guests to suggest pins** to receive one submission at a time. Review and accept or discard it on the host phone. Guests can scan the QR code on the same network. **Replace link** revokes the previous link and keeps the original session deadline. The session ends after ten minutes, when you leave the screen, or when you stop it.
 
 Use Print the Essentials in Household for a printable copy of your household information and selected pages from installed references. Install a regional place index to include the nearest services to your saved home.
 
@@ -58,9 +58,9 @@ Import compatible `.tfkroute` packs from Map, then tap **Directions** to choose 
 
 To make a graph available for installation from the app bundle, place its `.tfkroute` file in `.build/routing-packs/` before running XcodeGen. Routing preparation creates this folder even when no graphs are bundled.
 
-Open **Offline readiness** from the Library toolbar to check storage, installed content, indexing progress, model availability, and map coverage before a trip.
+Open **Offline readiness** from the Library toolbar to check storage, installed content, indexing, model availability, and installed coverage at saved Home. Use **Run offline checks** to open a sample reference or PDF, retrieve and open a citation for a library topic, try an on-device sample answer, search installed place data, or calculate walking and driving routes. To test a disconnect on your phone, turn on Airplane Mode and turn Wi-Fi off before starting.
 
-Open **Library → Find nearby** to see nearby devices. Enable **Sync public references** on both devices to automatically receive and relay the verified household check-in worksheet while using any part of the app. The standard build supplies the worksheet, and the lightweight build can receive it for offline reading. Switching apps pauses discovery and lets an active transfer finish if iOS grants it time. [Nearby sharing plan](DISASTER-SHARING.md) · [Apple background execution](https://developer.apple.com/documentation/uikit/extending-your-app-s-background-execution-time)
+Open **Library → Find nearby** to see nearby devices. Enable **Sync public references** on both devices to automatically receive and relay the verified blank household check-in worksheet, neighborhood status log and Tinfoil Kit Offline Starter. The standard build supplies all three. The lightweight build can receive them for offline reading. The starter pack appears in Library after receipt and becomes searchable as it indexes. Older versions of the app can exchange the worksheet. Switching apps pauses discovery and lets an active transfer finish if iOS grants it time. [Nearby sharing plan](DISASTER-SHARING.md) · [Apple background execution](https://developer.apple.com/documentation/uikit/extending-your-app-s-background-execution-time)
 
 Turn on **Notify me about interrupted downloads** in Nearby to get a rate-limited alert when a receive already underway stops in the background. Tap the alert to reopen Tinfoil Kit and let Nearby sync try again.
 
@@ -85,7 +85,7 @@ To enable Seattle walking previews, download the Seattle PBF from BBBike, instal
 
 ### Lightweight release profile
 
-The lightweight profile bundles the map engine, glyphs and notices. Install regional data separately. The offline disaster starter guide opens on first launch and remains available in Library. The default development project can still bundle the Seattle map and test routing packs.
+The lightweight profile bundles the map engine, glyphs and notices. Install regional data separately. The offline disaster starter guide opens on first launch and remains available in Library. For a searchable edition with worksheets, open **Content packs** and choose **Install bundled copy** in the standard build. In the lightweight build, receive the pack through Nearby or download it from Content packs. The default development project can still bundle the Seattle map and test routing packs.
 
 After preparing the device Rust reader and Apple routing engine, build and measure the lightweight profile locally.
 
