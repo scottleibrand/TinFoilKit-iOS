@@ -8,6 +8,8 @@ struct HouseholdPlace: Codable, Equatable, Identifiable, Sendable {
     var note = ""
     var latitude: Double
     var longitude: Double
+    var desktopPinID: String?
+    var desktopHomeZoom: Double?
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
