@@ -466,6 +466,7 @@ struct AskLibraryView: View {
                 self.answer = answer ?? ""
                 if answer == nil {
                     message = "The matching passages did not support an answer."
+                    quotedQuestion = request.question
                     fallbackQuestion = request.question
                 }
             } else if request.mode == .ask {
@@ -477,7 +478,10 @@ struct AskLibraryView: View {
         } catch {
             guard self.request?.id == request.id else { return }
             answer = ""
-            message = sources.isEmpty ? "The library search could not finish." :
+            if request.mode != .search, !evidence.isEmpty {
+                quotedQuestion = request.question
+            }
+            message = evidence.isEmpty ? "The library search could not finish." :
                 "The on-device answer could not finish. The matching passages are below."
             fallbackQuestion = request.question
         }

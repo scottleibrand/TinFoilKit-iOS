@@ -11,7 +11,7 @@ Status as of 2026-11-24. "Built" means the feature exists in the app. It is comp
 | Offline library | Built | Run the milestone 1 acceptance checks on a device with a publisher archive. Measure PDF extraction time and search-index storage on the larger packs. |
 | Content packs | Partly built | The bundled catalog has English and Spanish choices and dated editions. Wi-Fi downloads, disk space checks, checksum verification, repair and replacement after indexing are implemented. Expand coverage, add catalog refresh and exercise real interrupted transfers. |
 | Maps | Partly built | Imported basemaps, place indexes and Valhalla routing packs work offline. Resumable in-app downloads accept trusted manifests, and Map plans routes from separate endpoints. Publish a named regional edition and verify full navigation on an iPhone. |
-| Ask | Partly built | Search and cited answers use Apple's on-device model. Behavior on devices without Apple Intelligence and the decision on a downloadable model remain. |
+| Ask | Partly built | Ask searches installed articles and PDF pages, opens cited quotes without a model, and can hand local destinations to walking or driving directions from Home. Verify generated citations and the household-notes opt-in on an eligible iPhone. A downloadable model remains open. |
 | Household tools | Built | Run the airplane-mode restart and printing checks on a device. |
 | Household sharing | Partly built | A phone can share a selected household snapshot, verified templates, and optional directions with a guest browser. Guests can search, export the shared locations, and submit notes or pins for host review. Guests can ask for cited quotes from the selected verified public templates. Questions stay in the guest browser. Verify the workflow on a second device and extend shared queries to eligible installed references. Nearby can exchange two public templates and the verified MIT-licensed Offline Starter library pack. Extend exchange to more cleared editions and eligible saved web sources. |
 | Setup, help and readiness | Partly built | Readiness reports installed bundle status and coverage at saved Home. Its functional checks can open installed articles and PDFs, find citable passages and places, calculate both route modes, and try an on-device answer with a sample passage. Content Packs can verify and install catalog editions from a local folder. Portable setup for other content remains. |
@@ -51,7 +51,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 
 ### Ask
 
-- Apple's on-device model has safety guardrails that may refuse medical and emergency questions, and a refusal currently shows as a generic failure. Measure refusals on a question set drawn from the Essentials packs, and show the passages with a clear explanation when the model declines.
+- Ask shows matching quotes if the model fails or the retrieved passages do not support a generated answer. Measure on-device responses to a question set drawn from the Essentials packs, including medical and emergency references.
 - Retrieval uses 64-word search snippets. English and Spanish questions have offline keyword fallbacks. Verify that Apple Intelligence answers in the question’s language and cites the retrieved passages on an eligible iPhone.
 
 ### Household
