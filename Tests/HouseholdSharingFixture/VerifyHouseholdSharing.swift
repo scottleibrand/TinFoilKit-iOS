@@ -3,15 +3,16 @@ import Foundation
 @main
 enum VerifyHouseholdSharing {
     @MainActor static func main() async throws {
-        let home = HouseholdPlace(name: "Home <north>", latitude: 47.6, longitude: -122.3)
-        let page = HouseholdSharePage(snapshot: HouseholdSnapshot(notes: "Meet by A & B\n<gate>", home: home))
+        let home = HouseholdPlace(name: "Home <north>", note: "Private waypoint note", latitude: 47.6, longitude: -122.3)
+        let pin = HouseholdPlace(name: "Café & pier\u{1}", latitude: 0.0000001, longitude: 180)
+        let page = HouseholdSharePage(snapshot: HouseholdSnapshot(notes: "Meet by A & B\n<gate>", home: home, pins: [pin]))
         let publicReferences = try verifyPublicReferences()
         let publicPage = HouseholdSharePage(snapshot: HouseholdSnapshot(), publicReferences: publicReferences,
                                             acceptsNotes: true, acceptsPins: true)
         let loopback = HouseholdShareAddress(interface: "lo0", host: "127.0.0.1", address: 0x7f000001, mask: UInt32.max)
 
         let (events, emitter) = AsyncStream<HouseholdShareServer.Event>.makeStream()
-        let server = try HouseholdShareServer(address: loopback, page: page, lifetime: 4) { event in
+        let server = try HouseholdShareServer(address: loopback, page: page, lifetime: 6) { event in
             emitter.yield(event)
         }
         var iterator = events.makeAsyncIterator()
@@ -42,7 +43,7 @@ enum VerifyHouseholdSharing {
         precondition(http?.statusCode == 200)
         precondition(received.contains("Meet by A &amp; B\n&lt;gate&gt;"))
         precondition(received.contains("Home &lt;north&gt;"))
-        precondition(!received.contains("<h2>Pins</h2>"))
+        precondition(received.contains("Download shared locations (.gpx)"))
         precondition(!received.contains("Household check-in worksheet"))
         precondition(!received.contains("Neighborhood status log"))
         precondition(http?.value(forHTTPHeaderField: "Cache-Control") == "no-store")
@@ -52,10 +53,34 @@ enum VerifyHouseholdSharing {
         precondition(policy?.contains("script-src 'nonce-") == true)
         precondition(received.contains("Find in shared information"))
         precondition(received.contains("<script nonce="))
+        let waypoints = downloadURL(link)
+        let (gpx, gpxResponse) = try await browser.data(from: waypoints)
+        let gpxHTTP = gpxResponse as? HTTPURLResponse
+        precondition(gpxHTTP?.statusCode == 200)
+        precondition(gpxHTTP?.value(forHTTPHeaderField: "Content-Type") == "application/gpx+xml")
+        precondition(gpxHTTP?.value(forHTTPHeaderField: "Content-Disposition") == "attachment; filename=\"household-waypoints.gpx\"")
+        precondition(gpxHTTP?.value(forHTTPHeaderField: "Cache-Control") == "no-store")
+        let xml = String(decoding: gpx, as: UTF8.self)
+        precondition(xml.contains("<wpt lat=\"47.60000000\" lon=\"-122.30000000\"><name>Home &lt;north&gt;</name></wpt>"))
+        precondition(xml.contains("<wpt lat=\"0.00000010\" lon=\"-180.00000000\"><name>Café &amp; pier</name></wpt>"))
+        precondition(!xml.contains("Private waypoint note") && !xml.contains("Meet by") && !xml.contains("\u{1}"))
+        precondition(XMLParser(data: gpx).parse())
+        var headerRequest = URLRequest(url: waypoints)
+        headerRequest.httpMethod = "HEAD"
+        let (headBody, headResponse) = try await browser.data(for: headerRequest)
+        precondition(headBody.isEmpty && (headResponse as? HTTPURLResponse)?.statusCode == 200)
+        let (_, unauthorizedDownload) = try await browser.data(from: downloadURL(unshared))
+        precondition((unauthorizedDownload as? HTTPURLResponse)?.statusCode == 404)
+        server.replaceLink()
+        guard case let .listening(replacedLink) = await iterator.next() else { fatalError("Could not replace the GPX link") }
+        let (_, revokedDownload) = try await browser.data(from: waypoints)
+        precondition((revokedDownload as? HTTPURLResponse)?.statusCode == 404)
+        let (newGPX, newGPXResponse) = try await browser.data(from: downloadURL(replacedLink))
+        precondition((newGPXResponse as? HTTPURLResponse)?.statusCode == 200 && newGPX == gpx)
 
         guard case .expired = await iterator.next() else { fatalError("Unconfirmed expiry") }
         do {
-            _ = try await browser.data(from: link)
+            _ = try await browser.data(from: downloadURL(replacedLink))
             fatalError("An expired link still worked")
         } catch is URLError {}
 
@@ -76,6 +101,9 @@ enum VerifyHouseholdSharing {
         precondition(publicHTML.contains("Correction to earlier entry and correction time"))
         precondition(publicHTML.contains("Suggest a map pin"))
         precondition(!publicHTML.contains("<h2>Notes</h2>") && !publicHTML.contains("<h2>Home</h2>"))
+        precondition(!publicHTML.contains("Download shared locations (.gpx)"))
+        let (_, disabledDownload) = try await browser.data(from: downloadURL(newLink))
+        precondition((disabledDownload as? HTTPURLResponse)?.statusCode == 404)
 
         let unmarked = noteRequest("note=Unmarked", at: newLink, marked: false)
         let (_, unmarkedResponse) = try await browser.data(for: unmarked)
@@ -150,6 +178,10 @@ enum VerifyHouseholdSharing {
             }
         }
         fatalError("An explicitly stopped link still worked")
+    }
+
+    private static func downloadURL(_ link: URL) -> URL {
+        link.appending(queryItems: [URLQueryItem(name: "download", value: "waypoints")])
     }
 
     private static func verifyPublicReferences() throws -> [HouseholdSharePublicReference] {

@@ -22,12 +22,18 @@ struct HouseholdShareView: View {
 
     var body: some View {
         Form {
-            Section("Share a copy") {
+            Section {
                 if hasNotes { Toggle("Notes", isOn: $includeNotes).disabled(session.running) }
                 if snapshot.home != nil { Toggle("Home location", isOn: $includeHome).disabled(session.running) }
                 if !snapshot.pins.isEmpty { Toggle("Saved pins", isOn: $includePins).disabled(session.running) }
                 if !hasNotes && snapshot.home == nil && snapshot.pins.isEmpty && publicReferences.isEmpty {
                     Text("Add household information before sharing.").foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Share a copy")
+            } footer: {
+                if snapshot.home != nil || !snapshot.pins.isEmpty {
+                    Text("Guests can save the names and coordinates of shared locations as a GPX file.")
                 }
             }
             if !publicReferences.isEmpty {
