@@ -13,7 +13,7 @@ Status as of 2026-11-24. "Built" means the feature exists in the app. It is comp
 | Maps | Partly built | Imported basemaps, place indexes and Valhalla routing packs work offline. Resumable in-app downloads accept trusted manifests, and Map plans routes from separate endpoints. Publish a named regional edition and verify full navigation on an iPhone. |
 | Ask | Partly built | Search and cited answers use Apple's on-device model. Behavior on devices without Apple Intelligence and the decision on a downloadable model remain. |
 | Household tools | Built | Run the airplane-mode restart and printing checks on a device. |
-| Household sharing | Partly built | A Desktop kit screen and a phone-hosted read-only household session exist. Review the listener and test peer connectivity. Verified pack transfer and shared queries remain. |
+| Household sharing | Partly built | A Desktop kit screen and a phone-hosted read-only household session exist. Opt-in Nearby sync automatically exchanges two verified public templates. Verify transfers between physical devices and extend exchange to eligible library packs and saved web sources. Shared queries remain. |
 | Setup, help and readiness | Partly built | Offline readiness and help exist. Content Packs can verify and install catalog editions from a local folder. Portable setup for other content remains. |
 
 ## Gaps found in code review
