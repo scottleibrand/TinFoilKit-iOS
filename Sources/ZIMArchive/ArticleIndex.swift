@@ -205,22 +205,30 @@ public struct ArticleIndex: Sendable {
             if isReady {
                 return try searchIndex(at: file, expression: expression, passageWords: passageWords, hasLabels: true)
             }
-            let staged = includeIncomplete
-                ? try searchStagedIndex(at: staging, expression: expression, passageWords: passageWords, hasLabels: true)
-                : []
-            let previous = previousFiles[0]
-            let older: [Match]
-            if FileManager.default.fileExists(atPath: previous.path) {
-                older = try searchIndex(at: previous, expression: expression, passageWords: passageWords, hasLabels: false)
-            } else {
-                older = includeIncomplete
-                    ? try searchStagedIndex(at: previousFiles[1], expression: expression, passageWords: passageWords, hasLabels: false)
+            let staged = Result {
+                try includeIncomplete
+                    ? searchStagedIndex(at: staging, expression: expression, passageWords: passageWords, hasLabels: true)
                     : []
+            }
+            let previous = previousFiles[0]
+            let older = Result {
+                if FileManager.default.fileExists(atPath: previous.path) {
+                    return try searchIndex(at: previous, expression: expression, passageWords: passageWords, hasLabels: false)
+                }
+                return try includeIncomplete
+                    ? searchStagedIndex(at: previousFiles[1], expression: expression, passageWords: passageWords, hasLabels: false)
+                    : []
+            }
+            try Task.checkCancellation()
+            let groups = [staged, older].compactMap { try? $0.get() }
+            if groups.allSatisfy(\.isEmpty) {
+                _ = try staged.get()
+                _ = try older.get()
             }
             var paths: Set<String> = []
             // Preserve ranked results from both indexes without comparing their independent scores.
-            let combined = (0..<max(staged.count, older.count)).flatMap { position in
-                [staged, older].compactMap { $0.indices.contains(position) ? $0[position] : nil }
+            let combined = (0..<(groups.map(\.count).max() ?? 0)).flatMap { position in
+                groups.compactMap { $0.indices.contains(position) ? $0[position] : nil }
             }
             return Array(combined.filter { paths.insert($0.path).inserted }.prefix(30))
         }
