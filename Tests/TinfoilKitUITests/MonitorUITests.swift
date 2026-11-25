@@ -32,4 +32,26 @@ final class MonitorUITests: XCTestCase {
         XCTAssertTrue(weather.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Road closure settings"].exists)
     }
+
+    func testForecastPointRequiresExplicitSelection() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-nwsAlertArea", "", "-nwsForecastCoordinates", ""]
+        app.launch()
+        app.tabBars.buttons["Updates"].tap()
+        let point = app.textFields["Latitude, longitude"]
+        XCTAssertTrue(point.waitForExistence(timeout: 8))
+        let usePoint = app.buttons["Use these coordinates"]
+        XCTAssertFalse(usePoint.isEnabled)
+        XCTAssertFalse(app.buttons["Remove forecast location"].exists)
+        point.tap()
+        point.typeText("45.5231, -122.6765")
+        XCTAssertTrue(usePoint.isEnabled)
+        usePoint.tap()
+        XCTAssertEqual(point.value as? String, "45.52,-122.68")
+        let remove = app.buttons["Remove forecast location"]
+        for _ in 0..<3 where !remove.isHittable { app.swipeUp() }
+        XCTAssertTrue(remove.isHittable)
+        remove.tap()
+        XCTAssertFalse(remove.exists)
+    }
 }

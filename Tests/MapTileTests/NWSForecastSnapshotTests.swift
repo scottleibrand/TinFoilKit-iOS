@@ -10,12 +10,23 @@ final class NWSForecastSnapshotTests: XCTestCase {
     func testSeattlePointURLsAndCacheRoundTrip() throws {
         let point = try NWSForecastPoint.decode(pointDocument(daily: dailyURL, hourly: dailyURL + "/hourly"),
                                                 fetchedAt: checkedAt)
-        XCTAssertEqual(NWSForecastPoint.endpoint.absoluteString, "https://api.weather.gov/points/47.6062,-122.3321")
         XCTAssertEqual(point.url(for: .daily).absoluteString, dailyURL)
         XCTAssertEqual(point.url(for: .hourly).absoluteString, dailyURL + "/hourly")
         XCTAssertEqual(point.fetchedAt, checkedAt)
+        XCTAssertEqual(point.timeZoneIdentifier, "America/Los_Angeles")
         let cached = try JSONDecoder().decode(NWSForecastPoint.self, from: JSONEncoder().encode(point))
         XCTAssertEqual(cached, point)
+    }
+
+    func testExplicitLocationUsesCanonicalCoordinatesFromAnywhere() throws {
+        let portland = try XCTUnwrap(NWSForecastLocation(" 45.5231, -122.6765 "))
+        XCTAssertEqual(portland.coordinates, "45.52,-122.68")
+        XCTAssertEqual(portland.endpoint.absoluteString, "https://api.weather.gov/points/45.52,-122.68")
+        XCTAssertEqual(NWSForecastLocation(portland.coordinates), portland)
+        XCTAssertEqual(NWSForecastLocation("-0.001,0")?.coordinates, "0.00,0.00")
+        for invalid in ["", "91,0", "0,-181", "nan,0", "1,inf", "1,2,3", "45,-122/path"] {
+            XCTAssertNil(NWSForecastLocation(invalid), invalid)
+        }
     }
 
     func testRejectsUntrustedOrMismatchedGridURLs() throws {
@@ -129,7 +140,7 @@ final class NWSForecastSnapshotTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: [
             "type": "Feature",
             "geometry": NSNull(),
-            "properties": ["forecast": daily, "forecastHourly": hourly]
+            "properties": ["forecast": daily, "forecastHourly": hourly, "timeZone": "America/Los_Angeles"]
         ])
     }
 

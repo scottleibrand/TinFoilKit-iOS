@@ -16,13 +16,32 @@ enum NWSForecastError: LocalizedError, Equatable {
     }
 }
 
+struct NWSForecastLocation: Equatable, Sendable {
+    let coordinates: String
+
+    init?(_ text: String) {
+        guard text.utf8.count <= 96 else { return nil }
+        let fields = text.split(separator: ",", omittingEmptySubsequences: false)
+        guard fields.count == 2,
+              let latitude = Double(fields[0].trimmingCharacters(in: .whitespacesAndNewlines)),
+              let longitude = Double(fields[1].trimmingCharacters(in: .whitespacesAndNewlines)),
+              (-90...90).contains(latitude), (-180...180).contains(longitude) else { return nil }
+        let locale = Locale(identifier: "en_US_POSIX")
+        let lat = Double(Int((latitude * 100).rounded())) / 100
+        let lon = Double(Int((longitude * 100).rounded())) / 100
+        coordinates = String(format: "%.2f,%.2f", locale: locale, lat, lon)
+    }
+
+    var endpoint: URL { URL(string: "https://api.weather.gov/points/\(coordinates)")! }
+}
+
 struct NWSForecastPoint: Codable, Equatable, Sendable {
-    static let endpoint = URL(string: "https://api.weather.gov/points/47.6062,-122.3321")!
     static let maxResponseBytes = 65_536
 
     let fetchedAt: Date
     let dailyURL: URL
     let hourlyURL: URL
+    let timeZoneIdentifier: String?
 
     func url(for kind: NWSForecastKind) -> URL {
         switch kind {
@@ -36,17 +55,18 @@ struct NWSForecastPoint: Codable, Equatable, Sendable {
         guard let response = try? JSONDecoder().decode(PointResponse.self, from: data),
               response.type == "Feature" else { throw NWSForecastError.invalidResponse }
         return try Self(fetchedAt: fetchedAt, dailyURL: response.properties.forecast,
-                        hourlyURL: response.properties.forecastHourly)
+                        hourlyURL: response.properties.forecastHourly, timeZoneIdentifier: response.properties.timeZone)
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         try self.init(fetchedAt: values.decode(Date.self, forKey: .fetchedAt),
                       dailyURL: values.decode(URL.self, forKey: .dailyURL),
-                      hourlyURL: values.decode(URL.self, forKey: .hourlyURL))
+                      hourlyURL: values.decode(URL.self, forKey: .hourlyURL),
+                      timeZoneIdentifier: values.decodeIfPresent(String.self, forKey: .timeZoneIdentifier))
     }
 
-    private init(fetchedAt: Date, dailyURL: URL, hourlyURL: URL) throws {
+    private init(fetchedAt: Date, dailyURL: URL, hourlyURL: URL, timeZoneIdentifier: String?) throws {
         guard fetchedAt.timeIntervalSinceReferenceDate.isFinite,
               Self.isForecastGridURL(dailyURL),
               hourlyURL.absoluteString == dailyURL.absoluteString + "/hourly" else {
@@ -55,6 +75,7 @@ struct NWSForecastPoint: Codable, Equatable, Sendable {
         self.fetchedAt = fetchedAt
         self.dailyURL = dailyURL
         self.hourlyURL = hourlyURL
+        self.timeZoneIdentifier = timeZoneIdentifier.flatMap { TimeZone(identifier: $0)?.identifier }
     }
 
     private static func isForecastGridURL(_ url: URL) -> Bool {
@@ -77,6 +98,7 @@ struct NWSForecastPoint: Codable, Equatable, Sendable {
         struct Properties: Decodable {
             let forecast: URL
             let forecastHourly: URL
+            let timeZone: String?
         }
 
         let type: String

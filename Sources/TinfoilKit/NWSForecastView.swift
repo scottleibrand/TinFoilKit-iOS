@@ -3,25 +3,50 @@ import SwiftUI
 struct NWSForecastSection: View {
     @ObservedObject var store: NWSAlertStore
     let date: Date
+    @State private var coordinates = ""
+    @FocusState private var editingCoordinates: Bool
 
     var body: some View {
         Section {
-            forecastRow(.daily)
-            forecastRow(.hourly)
-            if let error = store.forecastErrorMessage {
-                Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.secondary)
+            TextField("Latitude, longitude", text: $coordinates)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($editingCoordinates)
+            let proposed = NWSForecastLocation(coordinates)
+            Button("Use these coordinates") {
+                if let proposed {
+                    coordinates = proposed.coordinates
+                    editingCoordinates = false
+                    store.setForecastLocation(proposed)
+                }
             }
-            if store.forecastIsRefreshing {
-                ProgressView("Checking Seattle forecasts")
-            } else {
-                Button("Check Seattle forecasts", systemImage: "arrow.clockwise") {
-                    Task { await store.refreshForecasts() }
+            .disabled(proposed == nil || proposed == store.forecastLocation)
+            if let location = store.forecastLocation {
+                LabeledContent("Forecast location", value: location.coordinates)
+                forecastRow(.daily)
+                forecastRow(.hourly)
+                if let error = store.forecastErrorMessage {
+                    Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.secondary)
+                }
+                if store.forecastIsRefreshing {
+                    ProgressView("Checking forecasts")
+                } else {
+                    Button("Check forecasts", systemImage: "arrow.clockwise") {
+                        Task { await store.refreshForecasts() }
+                    }
+                }
+                Button("Remove forecast location", role: .destructive) {
+                    coordinates = ""
+                    store.setForecastLocation(nil)
                 }
             }
         } header: {
-            Text("Seattle city center forecasts")
+            Text("Local forecast")
         } footer: {
-            Text("Forecasts use a fixed city-center location. Times are Pacific Time. Saved forecasts are available offline.")
+            Text("Enter decimal coordinates for a location covered by the National Weather Service. The app sends those coordinates rounded to two decimal places to weather.gov and saves the forecast for offline use.")
+        }
+        .onAppear {
+            if coordinates.isEmpty { coordinates = store.forecastLocation?.coordinates ?? "" }
         }
     }
 
@@ -34,7 +59,7 @@ struct NWSForecastSection: View {
             } label: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
-                    Text("Checked \(NWSForecastDisplay.timestamp(snapshot.checkedAt))")
+                    Text("Checked \(NWSForecastDisplay.timestamp(snapshot.checkedAt, in: store.forecastTimeZone))")
                         .font(.subheadline).foregroundStyle(.secondary)
                     if let status = NWSForecastDisplay.status(snapshot, at: date) {
                         Label(status, systemImage: "clock.badge.exclamationmark")
@@ -55,7 +80,7 @@ private struct NWSForecastDetailsView: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             List {
-                if store.area == "WA", let snapshot = store.forecasts[kind] {
+                if let snapshot = store.forecasts[kind] {
                     forecastStatus(snapshot, at: context.date)
                     periods(snapshot.periods, at: context.date)
                 } else {
@@ -70,10 +95,10 @@ private struct NWSForecastDetailsView: View {
 
     private func forecastStatus(_ snapshot: NWSForecastSnapshot, at date: Date) -> some View {
         Section {
-            LabeledContent("Last successful check", value: NWSForecastDisplay.timestamp(snapshot.checkedAt))
-            LabeledContent("Source updated", value: NWSForecastDisplay.timestamp(snapshot.sourceUpdatedAt))
+            LabeledContent("Last successful check", value: timestamp(snapshot.checkedAt))
+            LabeledContent("Source updated", value: timestamp(snapshot.sourceUpdatedAt))
             if let expires = snapshot.expiresAt {
-                LabeledContent("Publisher cache expires", value: NWSForecastDisplay.timestamp(expires))
+                LabeledContent("Publisher cache expires", value: timestamp(expires))
             }
             if let status = NWSForecastDisplay.status(snapshot, at: date) {
                 Label(status, systemImage: "clock.badge.exclamationmark").foregroundStyle(.secondary)
@@ -82,7 +107,7 @@ private struct NWSForecastDetailsView: View {
                 Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.secondary)
             }
         } header: {
-            Text("Seattle city center · Pacific Time")
+            Text(store.forecastTimeZone.identifier)
         }
     }
 
@@ -109,7 +134,7 @@ private struct NWSForecastDetailsView: View {
             if !period.name.isEmpty {
                 Text(period.name).font(.headline)
             }
-            Text("\(NWSForecastDisplay.timestamp(period.start)) – \(NWSForecastDisplay.timestamp(period.end))")
+            Text("\(timestamp(period.start)) – \(timestamp(period.end))")
                 .font(.subheadline).foregroundStyle(.secondary)
             Text("\(period.temperature.formatted())°\(period.temperatureUnit) · \(period.shortForecast)")
             if let detail = period.detailedForecast, !detail.isEmpty, detail != period.shortForecast {
@@ -118,12 +143,14 @@ private struct NWSForecastDetailsView: View {
         }
         .padding(.vertical, 2)
     }
+
+    private func timestamp(_ date: Date) -> String {
+        NWSForecastDisplay.timestamp(date, in: store.forecastTimeZone)
+    }
 }
 
 private enum NWSForecastDisplay {
     static let staleAfter: TimeInterval = 3 * 60 * 60
-    private static let seattleTime = TimeZone(identifier: "America/Los_Angeles")!
-    private static let dateStyle = Date.FormatStyle(date: .abbreviated, time: .shortened, timeZone: seattleTime)
 
     static func title(_ kind: NWSForecastKind) -> String {
         switch kind {
@@ -132,8 +159,8 @@ private enum NWSForecastDisplay {
         }
     }
 
-    static func timestamp(_ date: Date) -> String {
-        date.formatted(dateStyle)
+    static func timestamp(_ date: Date, in timeZone: TimeZone) -> String {
+        date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened, timeZone: timeZone))
     }
 
     static func status(_ snapshot: NWSForecastSnapshot, at date: Date) -> String? {

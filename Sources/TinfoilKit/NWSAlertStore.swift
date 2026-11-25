@@ -9,12 +9,13 @@ final class NWSAlertStore: ObservableObject {
     @Published private(set) var snapshot: NWSAlertSnapshot?
     @Published private(set) var isRefreshing = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var forecastLocation: NWSForecastLocation?
+    @Published private(set) var forecastTimeZone: TimeZone = .current
     @Published private(set) var forecasts: [NWSForecastKind: NWSForecastSnapshot] = [:]
     @Published private(set) var forecastIsRefreshing = false
     @Published private(set) var forecastErrorMessage: String?
 
     private let cache: NWSAlertCache
-    private let forecastCache: NWSForecastCache
     private let defaults: UserDefaults
     private let monitorQueue = DispatchQueue(label: "org.tinfoilkit.ios.nws-path")
     private var monitor: NWPathMonitor?
@@ -32,27 +33,37 @@ final class NWSAlertStore: ObservableObject {
          cache: NWSAlertCache = NWSAlertCache(directory: URL.applicationSupportDirectory.appendingPathComponent("NWSAlerts"))) {
         self.defaults = defaults
         self.cache = cache
-        forecastCache = NWSForecastCache(directory: cache.directory.appendingPathComponent("SeattleForecast"))
         let saved = defaults.string(forKey: "nwsAlertArea") ?? ""
         let area = NWSAlertSnapshot.endpoint(for: saved) == nil ? "" : saved
         self.area = area
         allowMetered = defaults.bool(forKey: "nwsAlertAllowMetered")
         snapshot = cache.read(area: area)
+        forecastLocation = defaults.string(forKey: "nwsForecastCoordinates").flatMap(NWSForecastLocation.init)
         loadForecasts()
     }
 
     func setArea(_ code: String) {
         guard code != area, code.isEmpty || NWSAlertSnapshot.endpoint(for: code) != nil else { return }
-        cancelRefresh()
+        cancelAlertRefresh()
         alertsThrottle = RegionalRefreshThrottle()
-        forecastThrottle = RegionalRefreshThrottle()
         area = code
         defaults.set(code, forKey: "nwsAlertArea")
         snapshot = cache.read(area: code)
         errorMessage = nil
-        forecastErrorMessage = nil
-        loadForecasts()
         Task { await refresh() }
+    }
+
+    func setForecastLocation(_ next: NWSForecastLocation?) {
+        guard next != forecastLocation else { return }
+        let previous = forecastCache
+        cancelForecastRefresh()
+        forecastThrottle = RegionalRefreshThrottle()
+        forecastLocation = next
+        defaults.set(next?.coordinates, forKey: "nwsForecastCoordinates")
+        forecastErrorMessage = nil
+        if let previous { try? FileManager.default.removeItem(at: previous.directory) }
+        loadForecasts()
+        if next != nil { Task { await refresh() } }
     }
 
     func setAllowMetered(_ allowed: Bool) {
@@ -154,16 +165,20 @@ final class NWSAlertStore: ObservableObject {
     }
 
     private func pauseForConnectionLoss() {
-        cancelRefresh()
+        cancelAlertRefresh()
+        cancelForecastRefresh()
         alertsThrottle.connectionInterrupted()
         forecastThrottle.connectionInterrupted()
     }
 
-    private func cancelRefresh() {
+    private func cancelAlertRefresh() {
         refreshID = UUID()
         activeRefresh?.cancel()
         activeRefresh = nil
         isRefreshing = false
+    }
+
+    private func cancelForecastRefresh() {
         forecastID = UUID()
         forecastTask?.cancel()
         forecastTask = nil
@@ -174,16 +189,27 @@ final class NWSAlertStore: ObservableObject {
         await updateForecasts(force: true)
     }
 
+    private var forecastCache: NWSForecastCache? {
+        forecastLocation.map { location in
+            NWSForecastCache(directory: cache.directory.appendingPathComponent("Forecast", isDirectory: true)
+                .appendingPathComponent(location.coordinates, isDirectory: true))
+        }
+    }
+
     private func loadForecasts() {
         forecasts = [:]
-        guard area == "WA" else { return }
+        forecastTimeZone = .current
+        guard let forecastCache else { return }
+        if let id = forecastCache.readPoint()?.timeZoneIdentifier, let timeZone = TimeZone(identifier: id) {
+            forecastTimeZone = timeZone
+        }
         for kind in NWSForecastKind.allCases {
             forecasts[kind] = forecastCache.read(kind)?.snapshot
         }
     }
 
     private func updateForecasts(force: Bool) async {
-        guard !Task.isCancelled, area == "WA", mayRefresh else { return }
+        guard !Task.isCancelled, mayRefresh, let location = forecastLocation, let forecastCache else { return }
         if let forecastTask {
             await forecastTask.value
             return
@@ -207,7 +233,11 @@ final class NWSAlertStore: ObservableObject {
                 }
             }
             do {
-                let point = try await Self.forecastPoint(cache: forecastCache, allowMetered: metered)
+                let point = try await Self.forecastPoint(location: location, cache: forecastCache, allowMetered: metered)
+                try Task.checkCancellation()
+                guard forecastID == id else { return }
+                if forecastCache.readPoint() != point { try forecastCache.writePoint(point) }
+                forecastTimeZone = point.timeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? .current
                 var errors: [String] = []
                 for kind in kinds {
                     try Task.checkCancellation()
@@ -242,18 +272,16 @@ final class NWSAlertStore: ObservableObject {
         await task.value
     }
 
-    nonisolated private static func forecastPoint(cache: NWSForecastCache, allowMetered: Bool) async throws -> NWSForecastPoint {
+    nonisolated private static func forecastPoint(location: NWSForecastLocation, cache: NWSForecastCache,
+                                                  allowMetered: Bool) async throws -> NWSForecastPoint {
         let saved = cache.readPoint()
         if let saved, Date.now.timeIntervalSince(saved.fetchedAt) < 7 * 24 * 60 * 60 { return saved }
         do {
             let response = try await NWSHTTPClient.fetch(
-                NWSForecastPoint.endpoint, maximumBytes: NWSForecastPoint.maxResponseBytes, allowMetered: allowMetered
+                location.endpoint, maximumBytes: NWSForecastPoint.maxResponseBytes, allowMetered: allowMetered
             )
             guard let data = response.body else { throw NWSHTTPClient.ResponseError.invalid }
-            let point = try NWSForecastPoint.decode(data, fetchedAt: response.checkedAt)
-            try Task.checkCancellation()
-            try cache.writePoint(point)
-            return point
+            return try NWSForecastPoint.decode(data, fetchedAt: response.checkedAt)
         } catch {
             try Task.checkCancellation()
             if let saved { return saved }

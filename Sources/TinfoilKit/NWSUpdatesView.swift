@@ -37,9 +37,7 @@ struct NWSUpdatesView: View {
                         regionalStatus(status)
                         RegionalMonitorTimeline(entries: status.entries, now: context.date)
                     }
-                    if store.area == "WA" {
-                        NWSForecastSection(store: store, date: context.date)
-                    }
+                    NWSForecastSection(store: store, date: context.date)
                     Section {
                         Link("National Weather Service · weather.gov", destination: Self.sourceURL)
                     } footer: {
@@ -115,8 +113,8 @@ struct NWSUpdatesView: View {
         defer { checking = false }
         let area = store.area
         await store.refreshAlerts()
-        guard !Task.isCancelled, area == "WA", store.area == area else { return }
-        await roads.refresh()
+        guard !Task.isCancelled, store.area == area else { return }
+        if area == "WA" { await roads.refresh() }
         if !Task.isCancelled, store.area == area {
             await store.refreshForecasts()
         }
