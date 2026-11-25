@@ -26,13 +26,19 @@ final class NearbyDiscovery: ObservableObject {
     @Published private(set) var state: State = .idle
     @Published private(set) var localID: String?
     @Published private(set) var peers: [Peer] = []
-    @Published private(set) var publicReferenceText: String?
+    struct PublicReference: Identifiable {
+        let id: String
+        let title: String
+        let text: String
+    }
+
+    @Published private(set) var publicReferences: [PublicReference] = []
     var isRunning: Bool { browser != nil }
     var hasActivePublicTransfer: Bool { publicTransfer?.hasActiveTransfers == true }
-    var hasActivePublicReceive: Bool { publicTransfer?.hasActiveReceive == true }
+    var activePublicReceiveID: String? { publicTransfer?.activeReceiveID }
     var activityDidChange: ((Bool) -> Void)?
 
-    private let publicReference: NearbyPublicReference
+    private let references: [NearbyPublicReference]
     private var publicSyncEnabled = false
     private var publicTransfer: NearbyPublicTransfer?
     private let queue = DispatchQueue(label: "org.tinfoilkit.nearby-discovery")
@@ -44,9 +50,12 @@ final class NearbyDiscovery: ObservableObject {
     private var waiting: [Phase: State] = [:]
     private var recentLocalIDs: [String] = []
 
-    init(publicReference: NearbyPublicReference = NearbyPublicReference()) {
-        self.publicReference = publicReference
-        publicReferenceText = publicReference.loadVerified().flatMap { String(data: $0, encoding: .utf8) }
+    init(publicReferences: [NearbyPublicReference] = NearbyPublicReference.catalogReferences) {
+        references = publicReferences
+        self.publicReferences = publicReferences.compactMap { reference in
+            guard let data = reference.loadVerified(), let text = String(data: data, encoding: .utf8) else { return nil }
+            return PublicReference(id: reference.entry.id, title: reference.entry.title, text: text)
+        }
     }
 
     deinit {
@@ -109,8 +118,11 @@ final class NearbyDiscovery: ObservableObject {
             if let publicTransfer {
                 publicTransfer.resume()
             } else {
-                let transfer = NearbyPublicTransfer(reference: publicReference) { [weak self] bytes in
-                    self?.publicReferenceText = String(data: bytes, encoding: .utf8)
+                let transfer = NearbyPublicTransfer(references: references) { [weak self] entry, bytes in
+                    guard let self, let text = String(data: bytes, encoding: .utf8),
+                          !publicReferences.contains(where: { $0.id == entry.id }) else { return }
+                    publicReferences.append(PublicReference(id: entry.id, title: entry.title, text: text))
+                    publicReferences.sort { $0.id < $1.id }
                 }
                 transfer.activityDidChange = { [weak self] active in self?.activityDidChange?(active) }
                 publicTransfer = transfer

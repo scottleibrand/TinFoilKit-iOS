@@ -37,11 +37,53 @@ final class DesktopHouseholdFilesTests: XCTestCase {
         XCTAssertEqual(first.pins.last?.id, native)
         XCTAssertEqual(first.pins.first?.note, "North door")
         XCTAssertEqual(first, try DesktopHouseholdFiles.applying(places: raw, to: HouseholdSnapshot(notes: "Keep")))
+        var edited = first
+        edited.pins[0].name = "Meet at the north door"
+        let backup = try HouseholdBackup.encode(edited)
+        let restored = try HouseholdBackup.importing(backup, as: .native, into: HouseholdSnapshot())
+        let desktopPlaces = try DesktopHouseholdFiles.encodePlaces(restored)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: desktopPlaces) as? [String: Any])
+        let home = try XCTUnwrap(json["home"] as? [String: Any])
+        let pins = try XCTUnwrap(json["pins"] as? [[String: Any]])
+        XCTAssertEqual(home["zoom"] as? Double, 15)
+        XCTAssertEqual(pins.compactMap { $0["id"] as? String }, ["msp6mzkabcd", native.uuidString])
+        XCTAssertEqual(pins.first?["name"] as? String, "Meet at the north door")
         let reopened = try DesktopHouseholdFiles.applying(
-            notes: DesktopHouseholdFiles.encodeNotes(first), places: DesktopHouseholdFiles.encodePlaces(first),
+            notes: DesktopHouseholdFiles.encodeNotes(restored), places: desktopPlaces,
             to: HouseholdSnapshot()
         )
-        XCTAssertEqual(reopened, first)
+        XCTAssertEqual(reopened, edited)
+    }
+
+    func testUpdatingDesktopHomeKeepsPhoneOnlyNoteAtTheSameLocation() throws {
+        let home = HouseholdPlace(name: "Original", note: "Side entrance", latitude: 47.5, longitude: -122.2,
+                                  desktopHomeZoom: 16)
+        let pin = HouseholdPlace(name: "Meeting point", latitude: 47.6, longitude: -122.3)
+        let snapshot = HouseholdSnapshot(notes: "Keep", home: home, pins: [pin])
+        let same = Data(#"{"home":{"lat":47.5,"lon":-122.2,"label":"Renamed"}}"#.utf8)
+        let refreshed = try DesktopHouseholdFiles.applying(places: same, to: snapshot)
+        XCTAssertEqual(refreshed.home?.name, "Renamed")
+        XCTAssertEqual(refreshed.home?.note, home.note)
+        XCTAssertEqual(refreshed.home?.desktopHomeZoom, 16)
+        XCTAssertEqual(refreshed.notes, snapshot.notes)
+        XCTAssertEqual(refreshed.pins, snapshot.pins)
+
+        let moved = Data(#"{"home":{"lat":47.6,"lon":-122.2,"label":"New Home","zoom":12}}"#.utf8)
+        let relocated = try DesktopHouseholdFiles.applying(places: moved, to: refreshed)
+        XCTAssertEqual(relocated.home?.note, "")
+        XCTAssertNil(relocated.home?.desktopHomeZoom)
+    }
+
+    func testExportIgnoresDesktopPinIDThatBelongsToAnotherPin() throws {
+        let original = Data(#"{"pins":[{"id":"desktop-pin","name":"Gate","lat":0,"lon":0}]}"#.utf8)
+        var snapshot = try DesktopHouseholdFiles.applying(places: original, to: HouseholdSnapshot())
+        let local = HouseholdPlace(name: "Local", latitude: 1, longitude: 1, desktopPinID: "desktop-pin")
+        snapshot.pins.append(local)
+        let encoded = try DesktopHouseholdFiles.encodePlaces(snapshot)
+        let reloaded = try DesktopHouseholdFiles.applying(places: encoded, to: HouseholdSnapshot())
+        XCTAssertEqual(reloaded.pins.map(\.id), snapshot.pins.map(\.id))
+        XCTAssertEqual(reloaded.pins.first?.desktopPinID, "desktop-pin")
+        XCTAssertNil(reloaded.pins.last?.desktopPinID)
     }
 
     func testInvalidDataFailsInsteadOfDroppingHouseholdRecords() throws {

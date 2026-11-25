@@ -10,11 +10,11 @@ Status as of 2026-11-24. "Built" means the feature exists in the app. It is comp
 | --- | --- | --- |
 | Offline library | Built | Run the milestone 1 acceptance checks on a device with a publisher archive. Measure PDF extraction time and search-index storage on the larger packs. |
 | Content packs | Partly built | The bundled catalog has English and Spanish choices and dated editions. Wi-Fi downloads, disk space checks, checksum verification, repair and replacement after indexing are implemented. Expand coverage, add catalog refresh and exercise real interrupted transfers. |
-| Maps | Partly built | Imported basemaps, place indexes and Valhalla routing packs work offline. Add in-app regional downloads and verify the full navigation workflow on an iPhone. |
+| Maps | Partly built | Imported basemaps, place indexes and Valhalla routing packs work offline. Resumable in-app downloads accept trusted manifests, and Map plans routes from separate endpoints. Publish a named regional edition and verify full navigation on an iPhone. |
 | Ask | Partly built | Search and cited answers use Apple's on-device model. Behavior on devices without Apple Intelligence and the decision on a downloadable model remain. |
 | Household tools | Built | Run the airplane-mode restart and printing checks on a device. |
-| Household sharing | Partly built | A Desktop kit screen and a phone-hosted read-only household session exist. Review the listener and test peer connectivity. Verified pack transfer and shared queries remain. |
-| Setup, help and readiness | Partly built | Offline readiness and help exist. Portable setup remains. |
+| Household sharing | Partly built | A phone can share a selected household snapshot, verified templates, and optional directions with a guest browser. Guests can search, export the shared locations, and submit notes or pins for host review. Verify the browser on a second device and expand shared queries. Nearby can exchange two verified public templates. Extend it to eligible library packs and saved web sources. |
+| Setup, help and readiness | Partly built | Offline readiness and help exist. Content Packs can verify and install catalog editions from a local folder. Portable setup for other content remains. |
 
 ## Gaps found in code review
 
@@ -24,8 +24,8 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 
 - Verify that interrupted Files imports, map imports, pack installs and repairs recover correctly on an iPhone. Imports check storage, report progress and can be cancelled. Unreadable archive folders are reported separately from healthy archives.
 - Measure PDF page indexing and search on the actual Essentials packs. Library merges hits by each archive's rank and supports partial-word searches.
-- Library search refreshes as each archive commits more of its index. Titles outside the indexed portion remain unavailable until their batch finishes.
-- The reader loads each resource fully into memory and refuses anything over 32 MiB, so large PDFs and videos fail. The scheme handler doesn't support byte ranges, so audio and video won't play. Stream large resources and answer range requests.
+- Library search refreshes as each archive commits more of its index. Embedded article titles are searchable during indexing. Full-text results become available as batches commit.
+- The reader loads each resource fully into memory and refuses anything over 32 MiB, so large PDFs and videos fail. The scheme handler answers byte-range requests within that limit. Stream larger resources and verify audio and video playback with real archives.
 - JavaScript is off for every archive, which breaks interactive content such as collapsible sections. Decide per pack, and keep the network block in place.
 - The PDF document list only appears for catalog packs marked as PDF collections. An imported PDF collection opens its main page instead. Listing the documents also scans every entry in the archive.
 - Library can verify the embedded ZIM checksum of imported files and the publisher SHA-256 checksum of catalog packs. Verify both on a device.
@@ -37,8 +37,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 - **Beta.** The bundled catalog has pinned publisher editions and requires an app release to update. Add a way to refresh it and expand language, size, and preset choices against the upstream kit.
 - **Beta.** Add device acceptance checks for an interrupted edition update and for recovery after failed indexing. The old archive stays in the library until the new index is ready.
 - **Beta.** Bulk pack downloads use Wi-Fi. Individual transfers can allow cellular data after size confirmation. Temporary connection failures retry on the original network policy, using resume data when iOS supplies it. Verify pause and resume on a physical phone and evaluate discretionary transfers for Download All.
-- Each pack has one source URL. Fall back to another official mirror when it fails.
-- A checksum failure deletes the whole download. Retry once before discarding it, and report which mirror served it.
+- Editions with a verified fallback mirror retry on that mirror after eligible origin failures. Checksum failures get one clean retry. Verify publisher recovery and installed-edition preservation on a device.
 
 ### Maps
 
@@ -57,7 +56,7 @@ Review of the working tree on 2026-11-24. **Beta** items block the first beta. T
 
 ### Household
 
-- Household notes, home and pins can move through an iPhone backup file or the desktop kit's notes and places files. Verify Files import, export and damaged-data recovery on a device.
+- Household notes, home and pins can move through an iPhone backup file or the desktop kit's notes and places files. Roundtrips preserve desktop pin IDs and saved Home zoom. Importing the same Home location also keeps its iPhone note. Verify Files import, export and damaged-data recovery on a device.
 - Printable references match verified catalog installations by the exact archive edition filename. Recheck paths and page ranges whenever a catalog edition changes. [Print reference definitions](Sources/TinfoilKit/HouseholdPrinting.swift)
 
 #### Print reference checks
