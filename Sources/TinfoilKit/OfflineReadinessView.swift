@@ -124,8 +124,8 @@ struct OfflineReadinessView: View {
                         Text(bundle.manifest.region).font(.headline)
                         Text("Edition \(bundle.manifest.dataVersion)").font(.subheadline)
                         if bundle.isUsable {
-                            Text(bundle.manifest.assets.basemap == nil ? "Places and routing ready" :
-                                    "Basemap, places and routing ready")
+                            Text(bundle.manifest.assets.basemap == nil ? "Places and routing files present" :
+                                    "Basemap, places and routing files present")
                         } else {
                             Text("Missing or damaged files. Reinstall this bundle from Map.")
                         }
