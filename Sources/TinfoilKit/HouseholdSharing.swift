@@ -79,6 +79,14 @@ struct HouseholdSharePublicReference: Identifiable, Sendable {
     }
 }
 
+struct HouseholdShareDirections: Sendable {
+    let pinID: UUID
+    let modeTitle: String
+    let region: String
+    let edition: String
+    let steps: [String]
+}
+
 struct HouseholdSharePage: Sendable {
     static let basePolicy = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
     static let waypointQuery = "download=waypoints"
@@ -89,6 +97,7 @@ struct HouseholdSharePage: Sendable {
     let acceptsPins: Bool
 
     init(snapshot: HouseholdSnapshot, publicReferences: [HouseholdSharePublicReference] = [],
+         directions: [HouseholdShareDirections] = [],
          acceptsNotes: Bool = false, acceptsPins: Bool = false) {
         self.acceptsNotes = acceptsNotes
         self.acceptsPins = acceptsPins
@@ -102,7 +111,10 @@ struct HouseholdSharePage: Sendable {
             content += "<section><h2>Home</h2>\(Self.place(home))</section>"
         }
         if !snapshot.pins.isEmpty {
-            content += "<section><h2>Pins</h2>" + snapshot.pins.map(Self.place).joined() + "</section>"
+            let byPin = Dictionary(grouping: snapshot.home == nil ? [] : directions, by: \.pinID)
+            content += "<section><h2>Pins</h2>"
+            content += snapshot.pins.map { Self.place($0, directions: byPin[$0.id] ?? []) }.joined()
+            content += "</section>"
         }
         for reference in publicReferences {
             content += "<section><h2>\(Self.escape(reference.title))</h2><p>\(Self.escape(reference.text))</p></section>"
@@ -271,10 +283,21 @@ struct HouseholdSharePage: Sendable {
         acceptProposal("#guest-pin", "X-Tinfoil-Guest-Pin");
         """#
 
-    private static func place(_ place: HouseholdPlace) -> String {
+    private static func place(_ place: HouseholdPlace, directions: [HouseholdShareDirections] = []) -> String {
         var fragment = "<article><h3>\(escape(place.name))</h3>"
         fragment += "<p class=\"coordinates\">\(escape(place.coordinateText))</p>"
         if !place.note.isEmpty { fragment += "<p>\(escape(place.note))</p>" }
+        for route in directions {
+            let steps = route.steps.map { "<li>\(escape($0))</li>" }.joined()
+            fragment += """
+                <details><summary>\(escape(route.modeTitle)) directions from Home</summary>
+                <ol>\(steps)</ol>
+                <p>\(escape(route.region)) · \(escape(route.edition))</p>
+                <p><a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors · ODbL 1.0</a></p>
+                <p>Road and access conditions may have changed since this data was published.</p>
+                </details>
+                """
+        }
         return fragment + "</article>"
     }
 

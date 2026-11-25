@@ -149,6 +149,11 @@ actor RegionalRouteStore {
     }
 
     func route(from origin: MapRoute.Point, to destination: MapRoute.Point, mode: MapTravelMode) throws -> MapRoute {
+        try routeWithSource(from: origin, to: destination, mode: mode).route
+    }
+
+    func routeWithSource(from origin: MapRoute.Point, to destination: MapRoute.Point,
+                         mode: MapTravelMode) throws -> (route: MapRoute, pack: RoutingPack) {
         try Task.checkCancellation()
         let candidates = try installedPacks().filter { covers($0, origin, destination) }.sorted { lhs, rhs in
             let a = lhs.pack.bounds.area
@@ -161,7 +166,7 @@ actor RegionalRouteStore {
         guard !candidates.isEmpty else { throw RouteError.outsideRegion }
         var failure: Error?
         for candidate in candidates {
-            do { return try calculate(using: candidate, from: origin, to: destination, mode: mode) }
+            do { return (try calculate(using: candidate, from: origin, to: destination, mode: mode), candidate.pack) }
             catch is CancellationError { throw CancellationError() }
             catch {
                 try Task.checkCancellation()

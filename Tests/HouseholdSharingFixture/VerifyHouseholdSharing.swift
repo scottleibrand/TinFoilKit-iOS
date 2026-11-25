@@ -5,7 +5,16 @@ enum VerifyHouseholdSharing {
     @MainActor static func main() async throws {
         let home = HouseholdPlace(name: "Home <north>", note: "Private waypoint note", latitude: 47.6, longitude: -122.3)
         let pin = HouseholdPlace(name: "Café & pier\u{1}", latitude: 0.0000001, longitude: 180)
-        let page = HouseholdSharePage(snapshot: HouseholdSnapshot(notes: "Meet by A & B\n<gate>", home: home, pins: [pin]))
+        let directions = [
+            HouseholdShareDirections(pinID: pin.id, modeTitle: "Walking", region: "Fixture <region>", edition: "2026-11",
+                                     steps: ["Turn onto A & B", "Arrive at the pier"]),
+            HouseholdShareDirections(pinID: UUID(), modeTitle: "Driving", region: "Unshared Region", edition: "2026-11",
+                                     steps: ["Unshared route"])
+        ]
+        let page = HouseholdSharePage(snapshot: HouseholdSnapshot(notes: "Meet by A & B\n<gate>", home: home, pins: [pin]),
+                                      directions: directions)
+        let withoutHome = HouseholdSharePage(snapshot: HouseholdSnapshot(pins: [pin]), directions: directions)
+        precondition(!String(decoding: withoutHome.body, as: UTF8.self).contains("Turn onto"))
         let publicReferences = try verifyPublicReferences()
         let publicPage = HouseholdSharePage(snapshot: HouseholdSnapshot(), publicReferences: publicReferences,
                                             acceptsNotes: true, acceptsPins: true)
@@ -44,6 +53,10 @@ enum VerifyHouseholdSharing {
         precondition(received.contains("Meet by A &amp; B\n&lt;gate&gt;"))
         precondition(received.contains("Home &lt;north&gt;"))
         precondition(received.contains("Download shared locations (.gpx)"))
+        precondition(received.contains("Walking directions from Home") && received.contains("Turn onto A &amp; B"))
+        precondition(received.contains("Fixture &lt;region&gt; · 2026-11"))
+        precondition(received.contains("© OpenStreetMap contributors · ODbL 1.0"))
+        precondition(!received.contains("Unshared route") && !received.contains("Driving directions from Home"))
         precondition(!received.contains("Household check-in worksheet"))
         precondition(!received.contains("Neighborhood status log"))
         precondition(http?.value(forHTTPHeaderField: "Cache-Control") == "no-store")
