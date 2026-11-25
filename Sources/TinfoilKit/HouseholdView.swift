@@ -65,9 +65,12 @@ struct HouseholdView: View {
                         Label("Print the essentials", systemImage: "printer")
                     }
                     NavigationLink {
-                        HouseholdShareView(snapshot: printableSnapshot, canAcceptGuestNotes: household.loadError == nil) { note in
+                        HouseholdShareView(snapshot: printableSnapshot, canAcceptGuestProposals: household.loadError == nil) { note in
                             try saveDraft()
                             try household.appendGuestNote(note)
+                        } saveGuestPin: { pin in
+                            try saveDraft()
+                            try household.savePin(pin)
                         }
                     } label: {
                         Label("Share on local network", systemImage: "person.2")

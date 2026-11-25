@@ -6,8 +6,9 @@ import SwiftUI
 
 struct HouseholdShareView: View {
     let snapshot: HouseholdSnapshot
-    let canAcceptGuestNotes: Bool
+    let canAcceptGuestProposals: Bool
     let appendGuestNote: (String) throws -> Void
+    let saveGuestPin: (HouseholdPlace) throws -> Void
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var session = HouseholdShareSession()
     @State private var includeNotes = false
@@ -15,7 +16,8 @@ struct HouseholdShareView: View {
     @State private var includePins = false
     @State private var selectedReferenceIDs: Set<String> = []
     @State private var acceptGuestNotes = false
-    @State private var noteError: String?
+    @State private var acceptGuestPins = false
+    @State private var proposalError: String?
     @State private var publicReferences: [HouseholdSharePublicReference] = []
 
     var body: some View {
@@ -47,19 +49,29 @@ struct HouseholdShareView: View {
             }
             Section {
                 Toggle("Allow guests to send notes", isOn: $acceptGuestNotes)
-                    .disabled(session.running || !canAcceptGuestNotes)
+                    .disabled(session.running || !canAcceptGuestProposals)
+                Toggle("Allow guests to suggest pins", isOn: $acceptGuestPins)
+                    .disabled(session.running || !canAcceptGuestProposals)
             } footer: {
-                Text("Review notes on this phone before adding them to Household.")
+                Text("Review each submission on this phone before adding it to Household.")
             }
-            if let note = session.proposedNote {
-                Section("Guest note") {
-                    Text(note).textSelection(.enabled)
-                    Button("Append to household notes") { append(note) }
-                    Button("Discard", role: .destructive) {
-                        noteError = nil
-                        session.finishNoteReview()
+            if let proposal = session.proposal {
+                Section("Guest submission") {
+                    switch proposal {
+                    case let .note(note):
+                        Text(note).textSelection(.enabled)
+                        Button("Append to household notes") { accept(proposal) }
+                    case let .pin(pin):
+                        Text(pin.name).font(.headline)
+                        Text(pin.coordinateText).textSelection(.enabled)
+                        if !pin.note.isEmpty { Text(pin.note).textSelection(.enabled) }
+                        Button("Add to saved pins") { accept(proposal) }
                     }
-                    if let noteError { Text(noteError).foregroundStyle(.secondary) }
+                    Button("Discard", role: .destructive) {
+                        proposalError = nil
+                        session.finishProposalReview()
+                    }
+                    if let proposalError { Text(proposalError).foregroundStyle(.secondary) }
                 }
             }
             Section {
@@ -108,13 +120,16 @@ struct HouseholdShareView: View {
         }
     }
 
-    private func append(_ note: String) {
+    private func accept(_ proposal: HouseholdGuestProposal) {
         do {
-            try appendGuestNote(note)
-            noteError = nil
-            session.finishNoteReview()
+            switch proposal {
+            case let .note(note): try appendGuestNote(note)
+            case let .pin(pin): try saveGuestPin(pin)
+            }
+            proposalError = nil
+            session.finishProposalReview()
         } catch {
-            noteError = error.localizedDescription
+            proposalError = error.localizedDescription
         }
     }
 
@@ -135,16 +150,18 @@ struct HouseholdShareView: View {
 
     private var startSharing: some View {
         Button("Start sharing", systemImage: "person.2") {
+            proposalError = nil
             session.start(HouseholdSnapshot(
                 notes: includeNotes ? snapshot.notes : "",
                 home: includeHome ? snapshot.home : nil,
                 pins: includePins ? snapshot.pins : []
             ), publicReferences: selectedReferences,
-               acceptsNotes: acceptGuestNotes && canAcceptGuestNotes)
+               acceptsNotes: acceptGuestNotes && canAcceptGuestProposals,
+               acceptsPins: acceptGuestPins && canAcceptGuestProposals)
         }
         .disabled(!((includeNotes && hasNotes) || (includeHome && snapshot.home != nil) ||
                     (includePins && !snapshot.pins.isEmpty) || !selectedReferences.isEmpty ||
-                    (acceptGuestNotes && canAcceptGuestNotes)))
+                    ((acceptGuestNotes || acceptGuestPins) && canAcceptGuestProposals)))
     }
 }
 
@@ -155,7 +172,7 @@ private final class HouseholdShareSession: ObservableObject {
     }
 
     @Published private(set) var state: State = .idle
-    @Published private(set) var proposedNote: String?
+    @Published private(set) var proposal: HouseholdGuestProposal?
     private var server: HouseholdShareServer?
     private var monitor: NWPathMonitor?
     private var startup: Task<Void, Never>?
@@ -169,10 +186,12 @@ private final class HouseholdShareSession: ObservableObject {
         }
     }
 
-    func start(_ snapshot: HouseholdSnapshot, publicReferences: [HouseholdSharePublicReference], acceptsNotes: Bool) {
+    func start(_ snapshot: HouseholdSnapshot, publicReferences: [HouseholdSharePublicReference], acceptsNotes: Bool,
+               acceptsPins: Bool) {
         guard attempt == nil else { return }
         let id = UUID()
-        let page = HouseholdSharePage(snapshot: snapshot, publicReferences: publicReferences, acceptsNotes: acceptsNotes)
+        let page = HouseholdSharePage(snapshot: snapshot, publicReferences: publicReferences,
+                                     acceptsNotes: acceptsNotes, acceptsPins: acceptsPins)
         attempt = id
         state = .starting
         // Bound the wait even if path discovery does not report an interface.
@@ -191,9 +210,9 @@ private final class HouseholdShareSession: ObservableObject {
         monitor.start(queue: DispatchQueue(label: "org.tinfoilkit.share-path"))
     }
 
-    func finishNoteReview() {
-        proposedNote = nil
-        server?.finishNoteReview()
+    func finishProposalReview() {
+        proposal = nil
+        server?.finishProposalReview()
     }
 
     func replaceLink() {
@@ -215,7 +234,7 @@ private final class HouseholdShareSession: ObservableObject {
         server?.stop()
         server = nil
         address = nil
-        proposedNote = nil
+        proposal = nil
         state = newState
     }
 
@@ -247,8 +266,8 @@ private final class HouseholdShareSession: ObservableObject {
             startup?.cancel()
             startup = nil
             state = .ready(url)
-        case let .noteProposed(note):
-            proposedNote = note
+        case let .proposal(incoming):
+            proposal = incoming
         case let .failed(error):
             end(.message(error))
         case .expired:

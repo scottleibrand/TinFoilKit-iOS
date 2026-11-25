@@ -84,9 +84,12 @@ struct HouseholdSharePage: Sendable {
     let body: Data
     let contentSecurityPolicy: String
     let acceptsNotes: Bool
+    let acceptsPins: Bool
 
-    init(snapshot: HouseholdSnapshot, publicReferences: [HouseholdSharePublicReference] = [], acceptsNotes: Bool = false) {
+    init(snapshot: HouseholdSnapshot, publicReferences: [HouseholdSharePublicReference] = [],
+         acceptsNotes: Bool = false, acceptsPins: Bool = false) {
         self.acceptsNotes = acceptsNotes
+        self.acceptsPins = acceptsPins
         var content = ""
         if !snapshot.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             content += "<section><h2>Notes</h2><p>\(Self.escape(snapshot.notes))</p></section>"
@@ -101,10 +104,9 @@ struct HouseholdSharePage: Sendable {
             content += "<section><h2>\(Self.escape(reference.title))</h2><p>\(Self.escape(reference.text))</p></section>"
         }
         let nonce = UUID().uuidString
-        let notePolicy = acceptsNotes ? "; connect-src 'self'" : ""
-        contentSecurityPolicy = "\(Self.basePolicy); script-src 'nonce-\(nonce)'; form-action 'none'\(notePolicy)"
-        let noteForm = acceptsNotes ? Self.noteForm : ""
-        let noteScript = acceptsNotes ? Self.noteScript : ""
+        let submissions = acceptsNotes || acceptsPins
+        let proposalPolicy = submissions ? "; connect-src 'self'" : ""
+        contentSecurityPolicy = "\(Self.basePolicy); script-src 'nonce-\(nonce)'; form-action 'none'\(proposalPolicy)"
         let html = """
         <!doctype html>
         <html lang="en">
@@ -124,10 +126,11 @@ struct HouseholdSharePage: Sendable {
         <p id="search-status" role="status"></p>
         </div>
         \(content)
-        \(noteForm)
+        \(acceptsNotes ? Self.noteForm : "")
+        \(acceptsPins ? Self.pinForm : "")
         </main>
         <script nonce="\(nonce)">\(Self.searchScript)
-        \(noteScript)</script>
+        \(submissions ? Self.proposalScript : "")</script>
         </html>
         """
         body = Data(html.utf8)
@@ -171,45 +174,65 @@ struct HouseholdSharePage: Sendable {
         <h2>Send a note to the host</h2>
         <form>
         <label for="note">Note for review</label>
-        <textarea id="note" maxlength="1000" rows="4" required></textarea>
+        <textarea id="note" name="note" maxlength="1000" rows="4" required></textarea>
         <button type="submit">Send for review</button>
         </form>
         <p role="status"></p>
         </div>
         """
 
-    private static let noteScript = #"""
-        const notePanel = document.querySelector("#guest-note");
-        const noteForm = notePanel.querySelector("form");
-        const note = noteForm.querySelector("textarea");
-        const submit = noteForm.querySelector("button");
-        const noteStatus = notePanel.querySelector("[role=status]");
-        notePanel.hidden = false;
-        noteForm.addEventListener("submit", async event => {
+    private static let pinForm = """
+        <div id="guest-pin" hidden>
+        <h2>Suggest a map pin</h2>
+        <form>
+        <label for="pin-name">Place name</label>
+        <input id="pin-name" name="name" maxlength="80" required>
+        <label for="pin-coordinates">Latitude, longitude</label>
+        <input id="pin-coordinates" name="coordinates" maxlength="120" placeholder="47.6062, -122.3321" required>
+        <label for="pin-note">Note (optional)</label>
+        <textarea id="pin-note" name="note" maxlength="500" rows="3"></textarea>
+        <button type="submit">Send pin for review</button>
+        </form>
+        <p role="status"></p>
+        </div>
+        """
+
+    private static let proposalScript = #"""
+        function acceptProposal(panelID, marker) {
+          const panel = document.querySelector(panelID);
+          if (!panel) return;
+          const form = panel.querySelector("form");
+          const submit = form.querySelector("button");
+          const feedback = panel.querySelector("[role=status]");
+          panel.hidden = false;
+          form.addEventListener("submit", async event => {
             event.preventDefault();
             if (submit.disabled) return;
             submit.disabled = true;
-            noteStatus.textContent = "Sending…";
+            feedback.textContent = "Sending…";
             try {
                 const reply = await fetch(location.href, {
                     method: "POST", mode: "same-origin", credentials: "omit", redirect: "error",
-                    headers: { "X-Tinfoil-Guest-Note": "1" },
-                    body: new URLSearchParams({ note: note.value })
+                    headers: { [marker]: "1" },
+                    body: new URLSearchParams(new FormData(form))
                 });
                 if (reply.status === 202) {
-                    note.value = "";
-                    noteStatus.textContent = "Sent to the host for review.";
+                    form.reset();
+                    feedback.textContent = "Sent to the host for review.";
                 } else if (reply.status === 409) {
-                    noteStatus.textContent = "The host already has a note to review. Try again later.";
+                    feedback.textContent = "The host already has a submission to review. Try again later.";
                 } else {
-                    noteStatus.textContent = "The note could not be sent. Check the message and sharing link.";
+                    feedback.textContent = "Could not send this submission. Check the entered information and sharing link.";
                 }
             } catch {
-                noteStatus.textContent = "The sharing session is unavailable.";
+                feedback.textContent = "The sharing session is unavailable.";
             } finally {
                 submit.disabled = false;
             }
-        });
+          });
+        }
+        acceptProposal("#guest-note", "X-Tinfoil-Guest-Note");
+        acceptProposal("#guest-pin", "X-Tinfoil-Guest-Pin");
         """#
 
     private static func place(_ place: HouseholdPlace) -> String {
@@ -234,7 +257,7 @@ final class HouseholdShareServer: @unchecked Sendable {
         case listening(URL)
         case failed(String)
         case expired
-        case noteProposed(String)
+        case proposal(HouseholdGuestProposal)
     }
 
     private static let maximumHeaderBytes = 8_192
@@ -251,7 +274,7 @@ final class HouseholdShareServer: @unchecked Sendable {
     private let deadline: ContinuousClock.Instant
     private var connections: [UUID: NWConnection] = [:]
     private var closed = false
-    private var reviewingNote = false
+    private var reviewingProposal = false
 
     init(address: HouseholdShareAddress, page: HouseholdSharePage, lifetime: TimeInterval = defaultLifetime,
          event: @escaping @Sendable (Event) -> Void) throws {
@@ -288,8 +311,8 @@ final class HouseholdShareServer: @unchecked Sendable {
         queue.asyncAfter(deadline: .now() + lifetime) { [weak self] in self?.finish(.expired) }
     }
 
-    func finishNoteReview() {
-        queue.async { [self] in reviewingNote = false }
+    func finishProposalReview() {
+        queue.async { [self] in reviewingProposal = false }
     }
 
     func replaceLink() {
@@ -385,36 +408,39 @@ final class HouseholdShareServer: @unchecked Sendable {
                 status: "200 OK", type: "text/html; charset=utf-8", body: page.body,
                 headOnly: request[0] == "HEAD", contentSecurityPolicy: page.contentSecurityPolicy
             ))
-        } else if request[0] == "POST", page.acceptsNotes, let length = HouseholdNoteProposal.bodyLength(headers: headers) {
-            receiveNote(connection, id: id, body: initialBody, length: length, complete: complete)
+        } else if request[0] == "POST", let kind = HouseholdGuestProposal.Kind.permitted(
+            headers: headers, acceptsNotes: page.acceptsNotes, acceptsPins: page.acceptsPins),
+                  let length = HouseholdNoteProposal.bodyLength(headers: headers, marker: kind.marker) {
+            receiveProposal(connection, id: id, kind: kind, body: initialBody, length: length, complete: complete)
         } else {
             send(connection, id: id, text: "Not found", status: "404 Not Found")
         }
     }
 
-    private func receiveNote(_ connection: NWConnection, id: UUID, body: Data, length: Int, complete: Bool) {
+    private func receiveProposal(_ connection: NWConnection, id: UUID, kind: HouseholdGuestProposal.Kind, body: Data,
+                                 length: Int, complete: Bool) {
         guard !closed, ContinuousClock.now < deadline else { close(id); return }
         if body.count == length {
-            guard let note = HouseholdNoteProposal.parse(body) else {
-                send(connection, id: id, text: "Invalid note", status: "400 Bad Request")
+            guard let proposal = kind.parse(body) else {
+                send(connection, id: id, text: "Invalid submission", status: "400 Bad Request")
                 return
             }
-            guard !reviewingNote else {
-                send(connection, id: id, text: "A note is awaiting review", status: "409 Conflict")
+            guard !reviewingProposal else {
+                send(connection, id: id, text: "A submission is awaiting review", status: "409 Conflict")
                 return
             }
-            reviewingNote = true
-            event(.noteProposed(note))
+            reviewingProposal = true
+            event(.proposal(proposal))
             send(connection, id: id, text: "Sent for review", status: "202 Accepted")
         } else if body.count < length, !complete {
             connection.receive(minimumIncompleteLength: 1, maximumLength: length - body.count) {
                 [weak self] data, _, complete, error in
                 guard let self, self.connections[id] != nil else { return }
-                self.receiveNote(connection, id: id, body: body + (data ?? Data()), length: length,
-                                 complete: complete || error != nil)
+                self.receiveProposal(connection, id: id, kind: kind, body: body + (data ?? Data()), length: length,
+                                     complete: complete || error != nil)
             }
         } else {
-            send(connection, id: id, text: "Incomplete note", status: "400 Bad Request")
+            send(connection, id: id, text: "Incomplete submission", status: "400 Bad Request")
         }
     }
 
