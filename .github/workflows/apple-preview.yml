@@ -29,16 +29,18 @@ jobs:
         run: |
           udid=$(xcrun simctl list devices available -j | python3 -c '
           import json
+          import re
           import sys
 
           devices = json.load(sys.stdin)["devices"]
-          ios_prefix = "com.apple.CoreSimulator.SimRuntime.iOS-"
-          runtimes = sorted(
-              (runtime for runtime in devices if runtime.startswith(ios_prefix)),
-              key=lambda runtime: tuple(map(int, runtime.removeprefix(ios_prefix).split("-"))),
-              reverse=True,
-          )
-          for runtime in runtimes:
+          ios_runtime = re.compile(r"^com\.apple\.CoreSimulator\.SimRuntime\.iOS-(\d+(?:-\d+)*)(?:-|$)")
+          runtimes = []
+          for runtime in devices:
+              match = ios_runtime.match(runtime)
+              if match:
+                  version = tuple(map(int, match[1].split("-")))
+                  runtimes.append((version, match.end() == len(runtime), runtime))
+          for _, _, runtime in sorted(runtimes, reverse=True):
               for device in devices[runtime]:
                   if device["isAvailable"] and device["name"].startswith("iPhone"):
                       print(device["udid"])
