@@ -33,7 +33,7 @@ This order reconciles the updated survey with the default-branch implementation 
 
 **Release priority.** Start with offline reading and pack installation, then offline navigation and cited Ask, then Nearby and browser sharing. The Mac verification order below governs which candidates move through `develop` and `main`.
 
-**Regional pilot.** Seattle is the first real-data test of the reusable regional pack format. Use local fixtures to verify installation, address and service search, and walking and driving while the Seattle edition awaits hosting. NWS state and territory alerts and the local forecast can be verified independently of the Puget Sound road source.
+**Regional pilot.** Seattle is the first real-data test of the reusable regional pack format because the app already has basemap and walking-route fixtures there. Use the pilot to verify installation, address and service search, and walking and driving while the Seattle edition awaits hosting. Keep the pack format and core offline workflows applicable to any region. Exercise the same pack workflow with a second, non-Washington region before claiming geographic portability. Verify nationwide NWS alerts and point forecasts independently of the Puget Sound road source, and keep library, household, and sharing releases independent of regional publication.
 
 The following work extends the parity candidates. The regional pilot can proceed alongside the release queue.
 
