@@ -55,4 +55,42 @@ final class HouseholdPrintingTests: XCTestCase {
         XCTAssertTrue(pdf.page(at: 0)?.string?.contains("North entrance") == true)
         XCTAssertTrue(pdf.page(at: pdf.pageCount - 1)?.string?.contains("Last line of notes") == true)
     }
+
+    func testPinnedWaterAndMedicineEditionsPrintExpectedPageCounts() throws {
+        let root = URL.documentsDirectory.appendingPathComponent("Print Editions")
+        let archives = ["zimgit-water_en_2024-08.zim", "zimgit-medicine_en_2024-08.zim"]
+        let installed = archives.map {
+            HouseholdPrinting.InstalledSource(archive: $0, file: root.appendingPathComponent($0),
+                                             attribution: "Publisher edition fixture")
+        }
+        try XCTSkipUnless(installed.allSatisfy { FileManager.default.fileExists(atPath: $0.file.path) },
+                          "Stage the pinned Water Treatment and Field Medicine archives in Documents/Print Editions.")
+        let references = try HouseholdPrinting.availableReferences(in: installed)
+        for (id, pages) in [("water", 2), ("first-aid", 6), ("injuries", 5), ("bleeding", 5)] {
+            let reference = try XCTUnwrap(references.first { $0.id == id }, id)
+            let pdf = try XCTUnwrap(PDFDocument(data: reference.printablePDF()), id)
+            XCTAssertEqual(pdf.pageCount, pages, id)
+            XCTAssertFalse(pdf.string?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true, id)
+        }
+    }
+
+    func testPrintReferenceVerifiesDocumentBytesBeforeSelectingPhysicalPages() throws {
+        let file = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "pdf-collection", withExtension: "zim"))
+        let title = "Water Guide"
+        let path = "files/Water Guide.pdf"
+        let source = HouseholdPrinting.Reference.Source(archive: "pdf-collection.zim", path: path,
+            sha256: "7aa96cf2897ff10e690a6eb9f8e1f8806c15abd69ee8fa81bad67aae5eecdef5")
+        let wrongDigest = HouseholdPrinting.Reference.Source(archive: source.archive, path: path,
+            sha256: "601a4ed27f67d65c3b418a4f278dd0c36eb33d6aaaa34d25c1364292dfdc77fd")
+        let reference = HouseholdPrinting.Reference(id: "water-fixture", title: title, document: title,
+                                                     pages: 2...2, sources: [source])
+
+        let requested = HouseholdPrinting.AvailableReference(reference: reference, file: file, source: source, attribution: "Fixture")
+        let pdf = try XCTUnwrap(PDFDocument(data: try requested.printablePDF()))
+        XCTAssertEqual(pdf.pageCount, 1)
+        XCTAssertTrue(pdf.page(at: 0)?.string?.contains("Ceramic filtration removes protozoa.") == true)
+
+        XCTAssertThrowsError(try HouseholdPrinting.AvailableReference.openPDF(file: file, source: wrongDigest, pages: 2...2))
+        XCTAssertThrowsError(try HouseholdPrinting.AvailableReference.openPDF(file: file, source: source, pages: 3...3))
+    }
 }
