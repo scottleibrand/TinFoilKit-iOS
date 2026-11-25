@@ -32,6 +32,21 @@ final class PackCatalogTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testHouseholdSharesOnlySelectedMITStarterChaptersWithLicense() async throws {
+        guard Bundle.main.object(forInfoDictionaryKey: "TFKLightweightProfile") as? Bool != true else {
+            throw XCTSkip("The standard profile bundles the starter edition.")
+        }
+        let chapters = await HouseholdShareView.starterReferences()
+        XCTAssertEqual(chapters.map(\.id), ["offline-starter-earthquake-safety", "offline-starter-prepare-offline"])
+        XCTAssertTrue(chapters.allSatisfy { $0.text.contains("MIT License") })
+        let selected = try XCTUnwrap(chapters.first)
+        let page = HouseholdSharePage(snapshot: HouseholdSnapshot(), publicReferences: [selected])
+        let html = String(decoding: page.body, as: UTF8.self)
+        XCTAssertTrue(html.contains(selected.title))
+        XCTAssertFalse(html.contains("offline-starter-prepare-offline"))
+    }
+
     func testReadyGovIsAnIndividualArchiveWithExactPublisherPin() throws {
         let catalog = try XCTUnwrap(Bundle.main.url(forResource: "PackCatalog", withExtension: "json"))
         let entries = try PackCatalog.load(from: catalog)
