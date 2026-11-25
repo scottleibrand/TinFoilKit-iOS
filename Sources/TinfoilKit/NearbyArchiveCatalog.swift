@@ -29,14 +29,17 @@ struct NearbyArchiveCatalog {
     var pins: [NearbyPublicManifest] { editions.map(\.pin) }
 
     func needs(_ pin: NearbyPublicManifest) async -> Bool {
-        guard let edition = edition(for: pin), let installed = try? await library.archives(),
+        guard let edition = edition(for: pin), PackCatalog.bundledCopy(for: edition.pack) == nil,
+              let installed = try? await library.archives(),
               !Task.isCancelled, downloads.canInstallLocalCopy(edition.pack) else { return false }
         // The library can already hold the same bytes under another catalog entry.
         return !installed.contains { $0.pack?.sha256 == pin.sha256 && $0.byteCount == edition.pack.sizeEstimate }
     }
 
     func source(_ pin: NearbyPublicManifest) async -> URL? {
-        guard let edition = edition(for: pin), let installed = try? await library.archives() else { return nil }
+        guard let edition = edition(for: pin) else { return nil }
+        if let bundled = PackCatalog.bundledCopy(for: edition.pack) { return bundled }
+        guard let installed = try? await library.archives() else { return nil }
         for archive in installed where archive.pack == edition.pack && archive.byteCount == edition.pack.sizeEstimate {
             let url = await library.fileURL(for: archive.id)
             guard !Task.isCancelled else { return nil }

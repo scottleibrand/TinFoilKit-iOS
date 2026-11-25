@@ -1,8 +1,37 @@
+import CryptoKit
 import Foundation
+import ZIMArchive
 import XCTest
 @testable import TinfoilKit
 
 final class PackCatalogTests: XCTestCase {
+    @MainActor
+    func testOnlyThePinnedMITStarterIsApprovedForNearbyAndStandardShipsItsExactBytes() async throws {
+        let entry = try XCTUnwrap(PackCatalog.entries.first { $0.allowsArchiveSharing })
+        XCTAssertEqual(PackCatalog.entries.filter(\.allowsArchiveSharing).map(\.pack.id), ["tinfoil-kit-offline-starter"])
+        XCTAssertFalse(entry.isBulkEligible)
+        let catalog = NearbyArchiveCatalog(downloads: .shared)
+        let pin = try XCTUnwrap(catalog.pins.first)
+        XCTAssertEqual(catalog.pins.count, 1)
+        XCTAssertEqual(pin.sha256, entry.pack.sha256)
+
+        if Bundle.main.object(forInfoDictionaryKey: "TFKLightweightProfile") as? Bool == true {
+            XCTAssertNil(PackCatalog.bundledCopy(for: entry.pack))
+        } else {
+            let file = try XCTUnwrap(PackCatalog.bundledCopy(for: entry.pack))
+            let offered = await catalog.source(pin)
+            XCTAssertEqual(offered, file)
+            let bytes = try Data(contentsOf: file)
+            XCTAssertEqual(Int64(bytes.count), entry.pack.sizeEstimate)
+            let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+            XCTAssertEqual(digest, entry.pack.sha256)
+            let archive = try ZIMArchive(fileURL: file)
+            XCTAssertEqual(archive.title, entry.pack.title)
+            XCTAssertTrue(String(decoding: try archive.resource(at: "license.html").data, as: UTF8.self)
+                .contains("MIT License"))
+        }
+    }
+
     func testReadyGovIsAnIndividualArchiveWithExactPublisherPin() throws {
         let catalog = try XCTUnwrap(Bundle.main.url(forResource: "PackCatalog", withExtension: "json"))
         let entries = try PackCatalog.load(from: catalog)

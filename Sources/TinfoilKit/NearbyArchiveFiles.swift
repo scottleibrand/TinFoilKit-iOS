@@ -5,6 +5,7 @@ import Foundation
 actor NearbyArchiveFiles {
     static let chunkBytes = 256 * 1024
     private static let storageMargin: Int64 = 64 * 1024 * 1024
+    private static let retention: TimeInterval = 30 * 24 * 60 * 60
 
     enum TransferError: Error, Equatable {
         case invalidEdition, invalidFile, invalidOffset, insufficientStorage, incomplete, checksumMismatch
@@ -14,6 +15,31 @@ actor NearbyArchiveFiles {
 
     init(directory: URL) {
         self.directory = directory
+    }
+
+    /// Releases disk space for retired editions and abandoned transfers when the coordinator starts.
+    func prune(keeping allowedDigests: Set<String>, now: Date = .now) throws {
+        let directory = URL(fileURLWithPath: directory.path)
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: directory.path) else { return }
+        let properties = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard properties.isDirectory == true, properties.isSymbolicLink == false else {
+            throw TransferError.invalidFile
+        }
+
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey]
+        let files = try manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: Array(keys))
+        for file in files {
+            try Task.checkCancellation()
+            let digest = file.deletingPathExtension().lastPathComponent
+            guard file.pathExtension == "zim", Self.isDigest(digest),
+                  let info = try? file.resourceValues(forKeys: keys),
+                  info.isRegularFile == true, info.isSymbolicLink == false else { continue }
+            let expired = info.contentModificationDate.map { now.timeIntervalSince($0) >= Self.retention } ?? false
+            if !allowedDigests.contains(digest) || expired {
+                try manager.removeItem(at: file)
+            }
+        }
     }
 
     /// A file's length determines its resume point. Each appended range is synchronized before returning.
@@ -108,11 +134,14 @@ actor NearbyArchiveFiles {
     }
 
     private func stagingFile(digest: String, byteCount: UInt64) throws -> URL {
-        guard byteCount > 0, byteCount <= UInt64(Int64.max), digest.utf8.count == 64,
-              digest.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
+        guard byteCount > 0, byteCount <= UInt64(Int64.max), Self.isDigest(digest) else {
             throw TransferError.invalidEdition
         }
         return directory.appendingPathComponent(digest).appendingPathExtension("zim")
+    }
+
+    private static func isDigest(_ digest: String) -> Bool {
+        digest.utf8.count == 64 && digest.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }
 
     fileprivate static func size(of file: URL) throws -> UInt64? {

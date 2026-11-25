@@ -91,7 +91,7 @@ struct PacksView: View {
             }
             Text("\(pack.version) · \(pack.sizeEstimate.formatted(.byteCount(style: .file)))")
                 .font(.footnote)
-            if entry.individualDownloadOnly == true {
+            if entry.individualDownloadOnly == true, PackCatalog.bundledCopy(for: pack) == nil {
                 Text("Individual download").font(.footnote).foregroundStyle(.secondary)
             }
             if !entry.isDefault {
@@ -111,9 +111,18 @@ struct PackDownloadControls: View {
     @ObservedObject var downloads: PackDownloads
     let pack: PublishedPack
     @State private var confirmingCellular = false
+    @State private var bundledInstallError: String?
 
     var body: some View {
         controls
+            .alert("Couldn’t install the bundled archive", isPresented: Binding(
+                get: { bundledInstallError != nil },
+                set: { if !$0 { bundledInstallError = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(bundledInstallError ?? "")
+            }
             .alert("Allow cellular data for this pack?", isPresented: $confirmingCellular) {
                 Button("Allow cellular data") { downloads.start(pack, network: .cellularAllowed) }
                 Button("Cancel", role: .cancel) {}
@@ -155,7 +164,23 @@ struct PackDownloadControls: View {
         }
     }
 
+    @ViewBuilder
     private func downloadControls(_ title: String, pack: PublishedPack) -> some View {
+        if PackCatalog.bundledCopy(for: pack) != nil {
+            Button("Install bundled copy") {
+                Task {
+                    do { try await downloads.installBundledCopy(pack) }
+                    catch { bundledInstallError = error.localizedDescription }
+                }
+            }
+            .buttonStyle(.borderless)
+            .disabled(!downloads.canInstallLocalCopy(pack))
+        } else {
+            networkControls(title, pack: pack)
+        }
+    }
+
+    private func networkControls(_ title: String, pack: PublishedPack) -> some View {
         let resumesOnCellular = downloads.resumesOnCellular(for: pack)
         return HStack {
             Button(resumesOnCellular ? "\(title) · cellular allowed" : title) { downloads.start(pack) }

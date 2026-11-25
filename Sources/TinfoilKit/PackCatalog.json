@@ -1,6 +1,26 @@
 [
   {
     "pack": {
+      "id": "tinfoil-kit-offline-starter",
+      "title": "Tinfoil Kit Offline Starter",
+      "version": "2026-11",
+      "source": "https://raw.githubusercontent.com/scottleibrand/TinFoilKit-iOS/main/Resources/NearbyPublic/tinfoil-kit-offline-starter_2026-11.zim",
+      "sha256": "cf0e333655d2f13bd64e6d54049329152913c40f196a4b9605b631520d08a845",
+      "sizeEstimate": 75954,
+      "attribution": "Tinfoil Kit original materials · MIT"
+    },
+    "section": "essentials",
+    "language": "en",
+    "isDefault": true,
+    "individualDownloadOnly": true,
+    "detail": "Searchable starter guide, household check-in worksheet, and neighborhood status log.",
+    "termsURL": "https://github.com/scottleibrand/TinFoilKit-iOS/blob/main/LICENSE",
+    "usesPDFDirectory": false,
+    "allowsArchiveSharing": true,
+    "bundledStandardCopy": true
+  },
+  {
+    "pack": {
       "id": "zimgit-water-en",
       "title": "Water Treatment Library",
       "version": "2024-08",

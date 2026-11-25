@@ -4,6 +4,43 @@ import XCTest
 @testable import TinfoilKit
 
 final class NearbyArchiveFilesTests: XCTestCase {
+    func testPruneKeepsRecentCatalogStagesAndDoesNotTouchUnrelatedFiles() async throws {
+        let manager = FileManager.default
+        let directory = temporaryDirectory()
+        defer { try? manager.removeItem(at: directory) }
+        let files = NearbyArchiveFiles(directory: directory)
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        try await files.prune(keeping: [], now: now)
+        XCTAssertFalse(manager.fileExists(atPath: directory.path))
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        func digest(_ character: Character) -> String { String(repeating: character, count: 64) }
+        func stage(_ digest: String) -> URL { directory.appendingPathComponent(digest + ".zim") }
+        let recent = stage(digest("a"))
+        let expired = stage(digest("b"))
+        let unlisted = stage(digest("c"))
+        let unrelated = directory.appendingPathComponent("user-copy.zim")
+        for file in [recent, expired, unlisted, unrelated] {
+            try Data([1]).write(to: file)
+            let date = now.addingTimeInterval(file == expired ? -31 * 24 * 60 * 60 : -24 * 60 * 60)
+            try manager.setAttributes([.modificationDate: date], ofItemAtPath: file.path)
+        }
+        let symlink = stage(digest("d"))
+        try manager.createSymbolicLink(at: symlink, withDestinationURL: unrelated)
+        let subdirectory = stage(digest("e"))
+        try manager.createDirectory(at: subdirectory, withIntermediateDirectories: false)
+
+        try await files.prune(keeping: [digest("a"), digest("b")], now: now)
+
+        XCTAssertFalse(manager.fileExists(atPath: expired.path))
+        XCTAssertFalse(manager.fileExists(atPath: unlisted.path))
+        XCTAssertEqual(try Data(contentsOf: unrelated), Data([1]))
+        XCTAssertTrue(try symlink.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true)
+        XCTAssertTrue(manager.fileExists(atPath: subdirectory.path))
+        let resumed = try await files.prepare(digest: digest("a"), byteCount: 2, availableBytes: Int64.max)
+        XCTAssertEqual(resumed, 1)
+    }
+
     func testInterruptedTransferResumesFromDiskAndVerifiesTheCompleteArchive() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

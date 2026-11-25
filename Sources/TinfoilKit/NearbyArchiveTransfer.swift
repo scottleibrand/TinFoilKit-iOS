@@ -49,6 +49,7 @@ final class NearbyArchiveTransfer {
     private var inbound: Link?
     private var receivingPin: NearbyPublicManifest?
     private var draining = false
+    private var cleanedStage = false
     private(set) var receivedIDs: Set<String> = []
     var activityDidChange: (() -> Void)?
 
@@ -132,6 +133,10 @@ final class NearbyArchiveTransfer {
     }
 
     private func fetchNext() async {
+        if !cleanedStage {
+            try? await files.prune(keeping: Set(catalog.pins.map(\.sha256)))
+            cleanedStage = true
+        }
         let interval: Duration = .seconds(30)
         var next: ContinuousClock.Instant?
         for pin in catalog.pins {
