@@ -74,6 +74,20 @@ public final class ZIMArchive {
         return try Self.read(resource)
     }
 
+    /// Follows redirects without loading resource bytes. Returns nil if the requested path is absent.
+    public func resolvedPath(at path: String) throws -> String? {
+        guard !path.utf8.contains(0) else {
+            throw ReadError(errorDescription: "An archive path cannot contain a null byte.")
+        }
+        var error: UnsafeMutablePointer<CChar>?
+        guard let resolved = tfk_archive_resolved_path(archive, path, &error) else {
+            if let error { throw Self.readError(error, fallback: "The archive entry could not be resolved.") }
+            return nil
+        }
+        defer { tfk_string_free(resolved) }
+        return String(cString: resolved)
+    }
+
     public func article(at index: UInt32) throws -> Resource? {
         try article(at: index, maximumBytes: nil)
     }

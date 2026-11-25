@@ -93,6 +93,27 @@ actor ArchiveReader {
         try open().resource(at: path)
     }
 
+    func resource(for request: URL) throws -> ZIMArchive.Resource {
+        let candidates = ArchiveWebAddress.candidates(in: request)
+        guard let first = candidates.first else { throw URLError(.unsupportedURL) }
+        if candidates.count == 1 { return try resource(at: first) }
+        return try resource(at: resolvedPath(in: candidates) ?? first)
+    }
+
+    func canonicalURL(for request: URL) throws -> URL? {
+        guard let path = try resolvedPath(in: ArchiveWebAddress.candidates(in: request)) else { return nil }
+        return ArchiveWebAddress.canonicalURL(for: path, relativeTo: request)
+    }
+
+    private func resolvedPath(in candidates: [String]) throws -> String? {
+        guard !candidates.isEmpty else { return nil }
+        let archive = try open()
+        for key in candidates {
+            if let path = try archive.resolvedPath(at: key) { return path }
+        }
+        return nil
+    }
+
     func pdfEntries() throws -> [ZIMArchive.PDFEntry] {
         try open().pdfEntries()
     }
@@ -241,6 +262,7 @@ private struct ArchiveWebView: UIViewRepresentable {
         private let reader: ArchiveReader
         private let controls: ArchiveWebControls
         private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+        private var navigationTask: Task<Void, Never>?
 
         init(reader: ArchiveReader, controls: ArchiveWebControls) {
             self.reader = reader
@@ -250,6 +272,8 @@ private struct ArchiveWebView: UIViewRepresentable {
         @MainActor
         func close(_ webView: WKWebView) {
             controls.detach(from: webView)
+            navigationTask?.cancel()
+            navigationTask = nil
             webView.stopLoading()
             for task in tasks.values { task.cancel() }
             tasks.removeAll()
@@ -281,7 +305,7 @@ private struct ArchiveWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
-            guard let url = urlSchemeTask.request.url, let path = ArchiveWebAddress.path(in: url) else {
+            guard let url = urlSchemeTask.request.url, ArchiveWebAddress.path(in: url) != nil else {
                 urlSchemeTask.didFailWithError(URLError(.unsupportedURL))
                 return
             }
@@ -293,7 +317,7 @@ private struct ArchiveWebView: UIViewRepresentable {
             tasks[id] = Task { @MainActor in
                 defer { tasks[id] = nil }
                 do {
-                    let resource = try await reader.resource(at: path)
+                    let resource = try await reader.resource(for: url)
                     guard !Task.isCancelled else { return }
                     let count = resource.data.count
                     let selection = ArchiveReadRange.parse(rangeHeader, count: count)
@@ -336,16 +360,42 @@ private struct ArchiveWebView: UIViewRepresentable {
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
         ) {
-            let url = navigationAction.request.url
-            decisionHandler(url.map(Self.isArchive) == true || url?.absoluteString == "about:blank" ? .allow : .cancel)
+            let request = navigationAction.request
+            guard let url = request.url, ArchiveWebAddress.path(in: url) != nil else {
+                decisionHandler(request.url?.absoluteString == "about:blank" ? .allow : .cancel)
+                return
+            }
+            guard navigationAction.targetFrame?.isMainFrame == true,
+                  request.httpMethod == nil || request.httpMethod == "GET" else {
+                decisionHandler(.allow)
+                return
+            }
+            navigationTask?.cancel()
+            // A navigation must have the final archive URL before WebKit resolves relative links.
+            navigationTask = Task { @MainActor [weak self, weak webView] in
+                guard let self else {
+                    decisionHandler(.cancel)
+                    return
+                }
+                let canonical = try? await reader.canonicalURL(for: url)
+                guard !Task.isCancelled, let webView else {
+                    decisionHandler(.cancel)
+                    return
+                }
+                navigationTask = nil
+                guard let canonical, canonical != url else {
+                    decisionHandler(.allow)
+                    return
+                }
+                decisionHandler(.cancel)
+                var redirected = request
+                redirected.url = canonical
+                webView.load(redirected)
+            }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             controls.didFinish(in: webView)
-        }
-
-        private static func isArchive(_ url: URL) -> Bool {
-            url.scheme == "zim" && url.host == "archive"
         }
     }
 }
